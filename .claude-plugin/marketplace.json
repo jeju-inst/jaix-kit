@@ -34,8 +34,8 @@
       "source": {
         "source": "github",
         "repo": "z0nam/hwp-agent",
-        "ref": "v0.2.0",
-        "sha": "1e9d60cb4ed30b179d1b93562da3302649f164c1"
+        "ref": "v0.2.1",
+        "sha": "1ebf91cf1ec9acb7899eeff84c28cf9d24b2f792"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
