@@ -21,18 +21,26 @@ def git_url(src):
     return url
 
 
-def resolve(url, ref):
-    """ref(태그면 peel한 커밋, 브랜치면 head)의 sha와 종류를 돌려준다."""
+def resolve(url, ref, kind=None):
+    """ref(태그면 peel한 커밋, 브랜치면 head)의 sha와 종류를 돌려준다.
+
+    kind를 주면 그 이름공간만 본다 — 태그가 지워지고 같은 이름 브랜치만 남은 경우를
+    브랜치로 잘못 받아들이지 않기 위해서다.
+    """
     out = subprocess.run(["git", "ls-remote", url, f"refs/tags/{ref}", f"refs/tags/{ref}^{{}}", f"refs/heads/{ref}"],
                          capture_output=True, text=True, check=True).stdout
     refs = dict(reversed(line.split("\t")) for line in out.splitlines() if line)
-    if f"refs/tags/{ref}^{{}}" in refs:
+    if kind != "branch" and f"refs/tags/{ref}^{{}}" in refs:
         return refs[f"refs/tags/{ref}^{{}}"], "tag"
-    if f"refs/tags/{ref}" in refs:
+    if kind != "branch" and f"refs/tags/{ref}" in refs:
         return refs[f"refs/tags/{ref}"], "tag"
-    if f"refs/heads/{ref}" in refs:
+    if kind != "tag" and f"refs/heads/{ref}" in refs:
         return refs[f"refs/heads/{ref}"], "branch"
-    sys.exit(f"{url}: ref '{ref}' 없음")
+    raise LookupError(f"{url}: {kind or 'ref'} '{ref}' 없음")
+
+
+def ref_kind(entry):
+    return entry.get("metadata", {}).get("jaix", {}).get("refKind")
 
 
 def load():
@@ -53,7 +61,10 @@ def check():
         if not SHA_RE.match(sha):
             print(f"✗ {name}: sha 고정 없음"); bad += 1; continue
         if ref:
-            remote_sha, kind = resolve(git_url(src), ref)
+            try:
+                remote_sha, kind = resolve(git_url(src), ref, ref_kind(p))
+            except LookupError as e:
+                print(f"✗ {name}: {e}"); bad += 1; continue
             if kind == "tag" and remote_sha != sha:
                 print(f"✗ {name}: 태그 {ref}={remote_sha[:12]} 인데 잠금은 {sha[:12]}"); bad += 1; continue
             if kind == "branch":
@@ -68,8 +79,12 @@ def bump(name, ref):
     for p in d["plugins"]:
         if p["name"] == name:
             src = p["source"]
-            sha, kind = resolve(git_url(src), ref)
+            try:
+                sha, kind = resolve(git_url(src), ref)
+            except LookupError as e:
+                sys.exit(str(e))
             src["ref"], src["sha"] = ref, sha
+            p.setdefault("metadata", {}).setdefault("jaix", {})["refKind"] = kind
             save(d)
             print(f"{name}: {ref} ({kind}) @ {sha[:12]}")
             return

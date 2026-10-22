@@ -19,7 +19,12 @@
         "ref": "main",
         "sha": "866f231d4298b831bd3cd52893c73e6b30c25303"
       },
-      "homepage": "https://github.com/jeju-inst/calendar-worklog"
+      "homepage": "https://github.com/jeju-inst/calendar-worklog",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
     }
   ]
 }
