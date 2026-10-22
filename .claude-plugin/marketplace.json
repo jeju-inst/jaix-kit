@@ -25,6 +25,42 @@
           "refKind": "branch"
         }
       }
+    },
+    {
+      "name": "hwp-agent",
+      "displayName": "HWP 편집 (hwp-agent)",
+      "description": "HWP/HWPX 문서를 원본 형식 그대로 변환·서식 채우기·작성·추출한다.",
+      "category": "productivity",
+      "source": {
+        "source": "github",
+        "repo": "z0nam/hwp-agent",
+        "ref": "v0.2.0",
+        "sha": "1e9d60cb4ed30b179d1b93562da3302649f164c1"
+      },
+      "homepage": "https://github.com/z0nam/hwp-agent",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      }
+    },
+    {
+      "name": "ji-report-writing",
+      "displayName": "보고서 작성 표준 (톤·서식·인용)",
+      "description": "정책연구 보고서·정책대응 참고자료의 톤·서식·인용 표준을 원문 그대로 적용·점검한다.",
+      "category": "productivity",
+      "source": {
+        "source": "github",
+        "repo": "jeju-inst/ji-writing-standards",
+        "ref": "main",
+        "sha": "2e18c02c905ee84597267570060a0bdbbe4d1d49"
+      },
+      "homepage": "https://github.com/jeju-inst/ji-writing-standards",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
     }
   ]
 }
