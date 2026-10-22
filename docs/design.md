@@ -107,6 +107,9 @@
 
 - 무거운 일은 모델이 읽게 하지 말고 **CLI/MCP가 결정론적으로** 처리한다(서식 채우기, 변환, 캘린더 등록).
 - SKILL.md는 짧게 두고 긴 참고자료는 `references/`로 빼서 필요할 때만 읽게 한다.
-- 관리자 콘솔 managed settings로 **기본 모델을 Sonnet**으로 두고, Opus는 사용자가 골라 쓴다.
+- **기본 모델 고정은 채널마다 다르다** (출처: support.claude.com/en/articles/15330088).
+  - 조직 기본 모델(chat·Cowork·Claude Code 공통)은 **Enterprise 전용**이다. Team에서는 쓸 수 없다.
+  - managed settings의 `model`은 **터미널·IDE의 Claude Code에만** 적용된다. Desktop Code 탭·Cowork·클라우드 세션에는 적용되지 않는다.
+  - 따라서 Team에서는 CLI만 managed settings로 Sonnet을 기본값으로 두고, **Desktop(Cowork·Code 탭)은 온보딩 안내에서 사용자가 Sonnet을 고르게** 한다(설치 마지막 화면 + ji-manual-portal). 인수 시험 7절은 Sonnet 선택 상태와 Opus 선택 상태를 따로 잰다.
 - 상시 실행 monitor·SessionStart 훅으로 모델을 부르지 않는다.
 - 인수 시험 7절(`docs/acceptance-tests.md`)에서 실제 % 소모를 잰다.
