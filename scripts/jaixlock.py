@@ -54,11 +54,15 @@ def ref_kind(entry):
     return entry.get("metadata", {}).get("jaix", {}).get("refKind")
 
 
+def calver_key(tag):
+    return tuple(map(int, CALVER_RE.match(tag).groups()))  # 문자열 비교면 .10 < .9
+
+
 def latest_calver(url):
     out = subprocess.run(["git", "ls-remote", "--tags", "--refs", url], capture_output=True, text=True, check=True).stdout
     tags = [line.split("\t")[1].removeprefix("refs/tags/") for line in out.splitlines() if line]
     tags = [t for t in tags if CALVER_RE.match(t)]
-    return max(tags, key=lambda t: tuple(map(int, CALVER_RE.match(t).groups())), default=None)
+    return max(tags, key=calver_key, default=None)
 
 
 def set_pin(entry, ref, sha, kind):
@@ -135,7 +139,7 @@ def update():
         # 아직 날짜 태그가 없는 도구는 고정한 브랜치의 head 를 따라간다
         new_ref = latest_calver(url)
         if new_ref:
-            if CALVER_RE.match(ref or "") and CALVER_RE.match(new_ref).groups() <= CALVER_RE.match(ref).groups():
+            if CALVER_RE.match(ref or "") and calver_key(new_ref) <= calver_key(ref):
                 continue
             sha, new_kind = resolve(url, new_ref, "tag")
         elif ref_kind(p) == "branch":
