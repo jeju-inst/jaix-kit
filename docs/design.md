@@ -44,7 +44,7 @@
 
 ## 설계 (추천안)
 ### 1. 배포 허브 = 기관 마켓플레이스 저장소 하나 (`jeju-inst/jaix-kit`, 신규)
-- `.claude-plugin/marketplace.json`이 각 도구 저장소를 `{"source":"github","repo":…,"ref":"vX.Y.Z"}`로 **태그 고정**해서 가리킴. 이 파일이 곧 "검증된 조합" 잠금 파일(lockfile) 역할을 함.
+- `.claude-plugin/marketplace.json`이 각 도구 저장소를 `{"source":"url","url":"https://github.com/….git","ref":"vX.Y.Z","sha":…}`(github 소스는 SSH로 클론돼 금지)로 **태그 고정**해서 가리킴. 이 파일이 곧 "검증된 조합" 잠금 파일(lockfile) 역할을 함.
 - 도구 저장소는 각자 개발함. 릴리스 = semver 태그를 붙이고 → jaix-kit에서 ref를 올리는 PR → CI(조합 테스트)를 통과하면 머지 → 전원에게 자동 반영.
 - 채널은 둘: `stable`(전원)과 `beta`(AI센터, ref=main). hwp-agent·gw처럼 수시로 버전이 오르는 도구는 beta에서 먼저 굴림.
 - 도구 사이 의존은 각 플러그인의 `requires` 메타(예: gw ≥ x 는 hwp-agent ≥ y)로 적고, jaix-kit CI가 조합을 검사함.
