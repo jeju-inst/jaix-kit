@@ -1,0 +1,17 @@
+name: bundle-tag
+
+# JAIX 묶음 버전: main(stable)에 잠금 변경이 머지될 때마다 이 저장소에 날짜 태그를 단다.
+# "지금 전원이 쓰는 묶음 = v2026.11.10.1" 처럼 한 번호로 부를 수 있게.
+
+on:
+  push:
+    branches: [main]
+    paths: [".claude-plugin/marketplace.json"]
+
+concurrency: calver-tag
+
+jobs:
+  tag:
+    uses: ./.github/workflows/calver-tag.yml
+    permissions:
+      contents: write
