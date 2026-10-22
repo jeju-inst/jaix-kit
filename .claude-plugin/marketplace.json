@@ -14,7 +14,7 @@
       "category": "productivity",
       "source": {
         "source": "git-subdir",
-        "url": "jeju-inst/calendar-worklog",
+        "url": "https://github.com/jeju-inst/calendar-worklog.git",
         "path": "plugin",
         "ref": "main",
         "sha": "866f231d4298b831bd3cd52893c73e6b30c25303"

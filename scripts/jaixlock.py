@@ -14,6 +14,11 @@ MARKET = Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplac
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
+# 한국어 Windows 콘솔(cp949)·CI(cp1252)에서도 한글·기호가 죽지 않게
+for stream in (sys.stdout, sys.stderr):
+    stream.reconfigure(encoding="utf-8")
+
+
 def git_url(src):
     url = src.get("url") or src.get("repo")
     if src["source"] == "github" or re.fullmatch(r"[\w.-]+/[\w.-]+", url or ""):
@@ -58,6 +63,9 @@ def check():
         if isinstance(src, str):
             continue
         name, sha, ref = p["name"], src.get("sha", ""), src.get("ref")
+        if src["source"] in ("git-subdir", "url") and not src.get("url", "").startswith("https://"):
+            # owner/repo 축약형·git@ 은 SSH로 클론돼 SSH 키 없는 연구원 PC에서 설치가 실패한다
+            print(f"✗ {name}: {src['source']} 소스는 https:// URL로 적어야 함"); bad += 1; continue
         if not SHA_RE.match(sha):
             print(f"✗ {name}: sha 고정 없음"); bad += 1; continue
         if ref:
