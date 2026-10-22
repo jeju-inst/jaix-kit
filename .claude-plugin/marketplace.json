@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "jaix",
+  "description": "제주연구원 JAIX 원내 AI 도구 묶음. 각 도구 저장소를 검증된 버전(태그+커밋)으로 고정해 둔 잠금 목록이다.",
+  "owner": {
+    "name": "제주연구원 AI센터",
+    "url": "https://github.com/jeju-inst/jaix-kit"
+  },
+  "plugins": [
+    {
+      "name": "calendar-worklog-ji",
+      "displayName": "업무일지 (worklog)",
+      "description": "Slack·monday·AI 활동을 모아 캘린더에 업무일지를 기록하고 근태·주간보고를 돕는다.",
+      "category": "productivity",
+      "source": {
+        "source": "git-subdir",
+        "url": "jeju-inst/calendar-worklog",
+        "path": "plugin",
+        "ref": "main",
+        "sha": "866f231d4298b831bd3cd52893c73e6b30c25303"
+      },
+      "homepage": "https://github.com/jeju-inst/calendar-worklog"
+    }
+  ]
+}

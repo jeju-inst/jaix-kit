@@ -1,0 +1,38 @@
+name: lock-check
+
+on:
+  pull_request:
+  push:
+    branches: [main, beta]
+  schedule:
+    - cron: "0 21 * * *"   # 매일 06:00 KST — 고정한 태그가 지워지거나 옮겨졌는지 감시
+
+jobs:
+  lock:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate marketplace
+        run: claude plugin validate .
+      - name: Check lock (sha pins, tags)
+        run: python scripts/jaixlock.py check
+      - name: Install every plugin from this checkout (fresh machine)
+        shell: bash
+        run: |
+          claude plugin marketplace add ./
+          for p in $(python -c "import json;print(' '.join(x['name'] for x in json.load(open('.claude-plugin/marketplace.json',encoding='utf-8'))['plugins']))"); do
+            claude plugin install "$p@jaix"
+          done
+          claude plugin list
