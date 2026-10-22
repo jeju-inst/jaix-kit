@@ -96,3 +96,20 @@
 - jaix-kit CI: Windows runner에서 플러그인 설치 → 각 MCP `initialize` 응답·CLI `--version`이 lockfile의 태그와 일치하는지 확인.
 - namun-ji 새 계정에서: `jaix-setup.exe` → Claude Desktop 로그인 → hwp 서식 채우기 1건·worklog 1건·(mail 1건) 실행.
 - 버전업 시험: hwp-agent에 태그를 하나 더 찍고 jaix-kit ref를 올림 → namun-ji에서 재시작만으로 새 버전이 실행되는지 확인.
+
+## 사용량 예산 (2026-10-22 사용자 지시: 대부분 Pro의 1.25배 좌석)
+연구원은 대부분 가장 작은 좌석이라 **한도에 걸리는 것도 실패로 본다.** 잠금에 넣는 플러그인은 아래 예산을 지킨다.
+
+| 항목 | 예산 | 현재 실측 (`claude plugin details`) |
+|---|---|---|
+| 항상 붙는 비용(스킬 설명 + MCP 도구 스키마) 잠금 전체 합계 | **3k 토큰 이하** | hwp-agent 스킬 ~160 (+ MCP 도구 7개 스키마 별도), calendar-worklog ~370 |
+| 스킬 1회 호출 비용 | 10k 이하 권장 | hwp-agent ~11.7k, calendar-worklog ~21k (**초과 — 줄일 것**) |
+
+- 무거운 일은 모델이 읽게 하지 말고 **CLI/MCP가 결정론적으로** 처리한다(서식 채우기, 변환, 캘린더 등록).
+- SKILL.md는 짧게 두고 긴 참고자료는 `references/`로 빼서 필요할 때만 읽게 한다.
+- **기본 모델 고정은 채널마다 다르다** (출처: support.claude.com/en/articles/15330088).
+  - 조직 기본 모델(chat·Cowork·Claude Code 공통)은 **Enterprise 전용**이다. Team에서는 쓸 수 없다.
+  - managed settings의 `model`은 **터미널·IDE의 Claude Code에만** 적용된다. Desktop Code 탭·Cowork·클라우드 세션에는 적용되지 않는다.
+  - 따라서 Team에서는 CLI만 managed settings로 Sonnet을 기본값으로 두고, **Desktop(Cowork·Code 탭)은 온보딩 안내에서 사용자가 Sonnet을 고르게** 한다(설치 마지막 화면 + ji-manual-portal). 인수 시험 7절은 Sonnet 선택 상태와 Opus 선택 상태를 따로 잰다.
+- 상시 실행 monitor·SessionStart 훅으로 모델을 부르지 않는다.
+- 인수 시험 7절(`docs/acceptance-tests.md`)에서 실제 % 소모를 잰다.
