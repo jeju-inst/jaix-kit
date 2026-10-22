@@ -10,6 +10,9 @@ name: calver-tag
 #       uses: jeju-inst/jaix-kit/.github/workflows/calver-tag.yml@main
 #       permissions: { contents: write }
 #
+# concurrency 는 호출 쪽에 둔다(같은 저장소 안 직렬화). 대기 실행이 버려져도 아래처럼 브랜치 끝을
+# 태그하므로 빠지는 머지는 없다 — 다만 "머지 하나 = 태그 하나" 는 아니다.
+#
 # GITHUB_TOKEN 으로 단 태그는 다른 워크플로의 `push: tags` 를 깨우지 않는다.
 # 태그로 빌드를 돌려야 하면 outputs.tag 를 받아 `gh workflow run` 으로 부른다.
 
@@ -28,8 +31,12 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
+      # 이벤트 커밋이 아니라 지금 브랜치 끝에 단다. 호출 쪽 concurrency 가 대기 중인 실행을
+      # 새 실행으로 갈아 끼워도(중간 머지의 실행이 버려져도) 그 변경은 다음 태그에 들어가고,
+      # 실행이 직렬이라 번호 순서 = 커밋 순서가 유지된다.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0
       - id: tag
         shell: bash
