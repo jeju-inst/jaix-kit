@@ -37,9 +37,10 @@
    concurrency: calver-tag
    jobs:
      tag:
-       uses: jeju-inst/jaix-kit/.github/workflows/calver-tag.yml@main
+       uses: jeju-inst/jaix-kit/.github/workflows/calver-tag.yml@<jaix-kit 커밋 40자 SHA>
        permissions: { contents: write }
    ```
+   - `@main` 이 아니라 **커밋 SHA로 고정**한다. 다른 저장소 코드가 그 저장소의 태그 권한을 쥐기 때문이다. 올릴 때는 PR로.
 2. 매일 06:30 KST 갱신 봇이 새 태그를 찾아 **beta 갱신 PR**(`bot/lock-update` → `beta`)을 열고 CI를 돌린다.
    → AI센터가 머지하면 파일럿 반영.
 3. beta 잠금이 main 과 다르면 봇이 **승격 PR**(`beta` → `main`)을 연다. 파일럿에서 문제없으면 머지

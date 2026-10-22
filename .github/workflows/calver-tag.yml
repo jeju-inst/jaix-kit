@@ -7,7 +7,7 @@ name: calver-tag
 #   concurrency: calver-tag
 #   jobs:
 #     tag:
-#       uses: jeju-inst/jaix-kit/.github/workflows/calver-tag.yml@main
+#       uses: jeju-inst/jaix-kit/.github/workflows/calver-tag.yml@<jaix-kit 커밋 40자 SHA>
 #       permissions: { contents: write }
 #
 # concurrency 는 호출 쪽에 둔다(같은 저장소 안 직렬화). 대기 실행이 버려져도 아래처럼 브랜치 끝을
