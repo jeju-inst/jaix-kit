@@ -32,8 +32,8 @@
       "description": "HWP/HWPX 문서를 원본 형식 그대로 변환·서식 채우기·작성·추출한다.",
       "category": "productivity",
       "source": {
-        "source": "github",
-        "repo": "z0nam/hwp-agent",
+        "source": "url",
+        "url": "https://github.com/z0nam/hwp-agent.git",
         "ref": "v0.2.1",
         "sha": "1ebf91cf1ec9acb7899eeff84c28cf9d24b2f792"
       },
@@ -50,8 +50,8 @@
       "description": "정책연구 보고서·정책대응 참고자료의 톤·서식·인용 표준을 원문 그대로 적용·점검한다.",
       "category": "productivity",
       "source": {
-        "source": "github",
-        "repo": "jeju-inst/ji-writing-standards",
+        "source": "url",
+        "url": "https://github.com/jeju-inst/ji-writing-standards.git",
         "ref": "main",
         "sha": "2e18c02c905ee84597267570060a0bdbbe4d1d49"
       },

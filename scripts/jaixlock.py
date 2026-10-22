@@ -63,9 +63,9 @@ def check():
         if isinstance(src, str):
             continue
         name, sha, ref = p["name"], src.get("sha", ""), src.get("ref")
-        if src["source"] in ("git-subdir", "url") and not src.get("url", "").startswith("https://"):
-            # owner/repo 축약형·git@ 은 SSH로 클론돼 SSH 키 없는 연구원 PC에서 설치가 실패한다
-            print(f"✗ {name}: {src['source']} 소스는 https:// URL로 적어야 함"); bad += 1; continue
+        # github 소스·owner/repo 축약형·git@ 은 SSH로 클론돼 SSH 키 없는 연구원 PC에서 설치가 실패한다
+        if src["source"] not in ("git-subdir", "url") or not src.get("url", "").startswith("https://"):
+            print(f"✗ {name}: {src['source']} 소스 대신 url/git-subdir + https:// URL로 적어야 함"); bad += 1; continue
         if not SHA_RE.match(sha):
             print(f"✗ {name}: sha 고정 없음"); bad += 1; continue
         if ref:
