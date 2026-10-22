@@ -22,6 +22,9 @@ on:
       tag:
         description: 단 태그(이미 날짜 태그가 있는 커밋이면 그 태그)
         value: ${{ jobs.tag.outputs.tag }}
+      created:
+        description: 이번 실행이 새로 단 태그면 "true" (빌드는 이때만 돌리면 된다)
+        value: ${{ jobs.tag.outputs.created }}
 
 jobs:
   tag:
@@ -30,6 +33,7 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      created: ${{ steps.tag.outputs.created }}
     steps:
       # 이벤트 커밋이 아니라 지금 브랜치 끝에 단다. 호출 쪽 concurrency 가 대기 중인 실행을
       # 새 실행으로 갈아 끼워도(중간 머지의 실행이 버려져도) 그 변경은 다음 태그에 들어가고,
@@ -44,7 +48,7 @@ jobs:
           re='^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$'
           have=$(git tag --points-at HEAD | grep -E "$re" | head -1 || true)
           if [ -n "$have" ]; then
-            echo "이미 태그됨: $have"; echo "tag=$have" >> "$GITHUB_OUTPUT"; exit 0
+            echo "이미 태그됨: $have"; echo "tag=$have" >> "$GITHUB_OUTPUT"; echo "created=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           d=$(TZ=Asia/Seoul date +%Y.%m.%d)
           for attempt in 1 2 3 4 5; do
@@ -53,7 +57,7 @@ jobs:
             tag="v$d.$(( ${n:-0} + 1 ))"
             git tag "$tag" HEAD
             if git push -q origin "refs/tags/$tag"; then
-              echo "태그: $tag"; echo "tag=$tag" >> "$GITHUB_OUTPUT"; exit 0
+              echo "태그: $tag"; echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "created=true" >> "$GITHUB_OUTPUT"; exit 0
             fi
             git tag -d "$tag"; sleep $(( attempt * 3 ))   # 같은 날 다른 머지와 번호가 부딪힘 → 다시
           done
