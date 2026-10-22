@@ -44,9 +44,9 @@
 
 ## 설계 (추천안)
 ### 1. 배포 허브 = 기관 마켓플레이스 저장소 하나 (`jeju-inst/jaix-kit`, 신규)
-- `.claude-plugin/marketplace.json`이 각 도구 저장소를 `{"source":"url","url":"https://github.com/….git","ref":"vX.Y.Z","sha":…}`(github 소스는 SSH로 클론돼 금지)로 **태그 고정**해서 가리킴. 이 파일이 곧 "검증된 조합" 잠금 파일(lockfile) 역할을 함.
-- 도구 저장소는 각자 개발함. 릴리스 = semver 태그를 붙이고 → jaix-kit에서 ref를 올리는 PR → CI(조합 테스트)를 통과하면 머지 → 전원에게 자동 반영.
-- 채널은 둘: `stable`(전원)과 `beta`(AI센터, ref=main). hwp-agent·gw처럼 수시로 버전이 오르는 도구는 beta에서 먼저 굴림.
+- `.claude-plugin/marketplace.json`이 각 도구 저장소를 `{"source":"url","url":"https://github.com/….git","ref":"vYYYY.MM.DD.N","sha":…}`(github 소스는 SSH로 클론돼 금지)로 **태그 고정**해서 가리킴. 이 파일이 곧 "검증된 조합" 잠금 파일(lockfile) 역할을 함.
+- 도구 저장소는 각자 개발함. main 머지 → 날짜 태그 자동 → 갱신 봇이 beta PR → 파일럿 → 승격 PR → 전원 자동 반영. **버전 체계는 2026-10-22 사용자 결정으로 semver 대신 전부 날짜 버전(`vYYYY.MM.DD.N`)+자동**이고 사람은 승인만 함(상세: README "버전" 절).
+- 채널은 둘: `stable`(main 브랜치, 전원)과 `beta`(beta 브랜치, AI센터 파일럿). hwp-agent·gw처럼 수시로 버전이 오르는 도구는 beta에서 먼저 굴림.
 - 도구 사이 의존은 각 플러그인의 `requires` 메타(예: gw ≥ x 는 hwp-agent ≥ y)로 적고, jaix-kit CI가 조합을 검사함.
 
 ### 2. 사용자에게 내려가는 경로
