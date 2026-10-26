@@ -2,6 +2,7 @@ name: lock-check
 
 on:
   pull_request:
+  workflow_dispatch:   # 갱신 봇이 연 PR 은 pull_request 로 안 깨어나서 봇이 직접 부른다
   push:
     branches: [main, beta]
   schedule:

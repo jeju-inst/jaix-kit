@@ -1,0 +1,70 @@
+name: lock-update
+
+# 갱신 봇. 매일 도구 저장소의 새 날짜 태그(브랜치 고정이면 새 커밋)를 찾아
+#   1) beta 로 잠금 갱신 PR (bot/lock-update)
+#   2) beta 가 main 보다 앞서 있으면 승격 PR (beta → main)
+# 을 열어 둔다. 사람은 두 PR 을 승인·머지만 한다.
+# GITHUB_TOKEN 으로 연 PR 은 pull_request CI 를 깨우지 않으므로 lock-check 를 직접 dispatch 한다
+# (결과는 같은 커밋이라 PR 화면에 붙는다).
+
+on:
+  schedule:
+    - cron: "30 21 * * *"   # 매일 06:30 KST (lock-check 감시 뒤)
+  workflow_dispatch:
+
+concurrency: lock-update
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: beta
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Find new versions
+        id: upd
+        shell: bash
+        run: |
+          git config user.name "jaix-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # main 에 직접 머지된 문서·CI 변경을 beta 쪽에도 실어 승격 PR 이 충돌하지 않게
+          git merge -q --no-edit origin/main
+          python scripts/jaixlock.py update | tee changes.txt
+          python scripts/jaixlock.py check
+          if git diff --quiet && git diff --quiet origin/beta HEAD; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Open or refresh the beta PR
+        if: steps.upd.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git switch -C bot/lock-update
+          git diff --quiet || git commit -q -am "잠금 갱신: $(paste -sd ',' changes.txt | sed 's/,/, /g')"
+          git push -q -f origin bot/lock-update
+          body=$(printf '새 버전을 찾아 잠금을 올림 (갱신 봇).\n\n```\n%s\n```\n\n머지하면 beta(AI센터 파일럿)에 반영된다. 파일럿에서 문제가 없으면 beta → main 승격 PR을 머지한다.\n\n작성: jaix-bot · github-actions/lock-update · %s' "$(cat changes.txt | grep . || echo '(잠금 변경 없음 — main 의 변경을 beta 로 맞춤)')" "$(TZ=Asia/Seoul date +%F)")
+          if gh pr view bot/lock-update --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit bot/lock-update --body "$body"
+          else
+            gh pr create --base beta --head bot/lock-update --title "잠금 갱신 (beta)" --body "$body"
+          fi
+          gh workflow run ci.yml --ref bot/lock-update
+      - name: Open the promotion PR (beta → main)
+        shell: bash
+        run: |
+          git fetch -q origin main beta
+          # 잠금이 실제로 다를 때만 (main 을 받아 온 병합 커밋만 앞선 경우는 제외)
+          if ! git diff --quiet origin/main origin/beta -- .claude-plugin/marketplace.json && \
+             ! gh pr list --base main --head beta --state open --json number --jq '.[].number' | grep -q .; then
+            gh pr create --base main --head beta --title "승격: beta → main (전원 배포)" \
+              --body "$(printf 'beta 에서 파일럿을 마친 잠금을 전원(stable)에게 배포한다.\n\n머지하면 bundle-tag 가 묶음 날짜 태그를 단다.\n\n작성: jaix-bot · github-actions/lock-update · %s' "$(TZ=Asia/Seoul date +%F)")"
+            gh workflow run ci.yml --ref beta
+          fi
