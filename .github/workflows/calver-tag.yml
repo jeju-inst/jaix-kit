@@ -53,7 +53,8 @@ jobs:
           d=$(TZ=Asia/Seoul date +%Y.%m.%d)
           for attempt in 1 2 3 4 5; do
             git fetch -q --tags --force
-            n=$(git tag -l "v$d.*" | sed "s/^v$d\.//" | grep -E '^[0-9]+$' | sort -n | tail -1)
+            # 그날 첫 태그면 grep 이 1을 내고 pipefail+-e 로 스크립트가 죽으므로 || true
+            n=$(git tag -l "v$d.*" | sed "s/^v$d\.//" | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
             tag="v$d.$(( ${n:-0} + 1 ))"
             git tag "$tag" HEAD
             if git push -q origin "refs/tags/$tag"; then
