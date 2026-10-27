@@ -8,7 +8,7 @@ import json
 import sys
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hermes, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
+from jaix import __version__, claude, codex, doctor, gw, hermes, hwpjar, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -35,15 +35,21 @@ def guide(channels, result):
     """채널별 "이렇게 쓰세요". 고른 채널만 보여 준다(ji-deploy-standards 3.1)."""
     out = []
     if "claude" in channels:
+        quit_app = ("알림 영역(화면 오른쪽 아래 ^)에서 Claude 아이콘을 오른쪽 클릭 → Exit. "
+                    "창의 X나 작업 표시줄에서 닫는 것만으로는 앱이 꺼지지 않습니다" if paths.IS_WIN
+                    else "메뉴 막대의 Claude → Quit Claude(⌘Q). 창을 닫는 것만으로는 앱이 꺼지지 않습니다")
         out += [
-            "■ Claude (데스크톱 앱 · Claude Code)",
-            "  1. Claude 앱을 완전히 종료했다가 다시 여세요(작업 표시줄 아이콘 → 종료).",
-            "     HWP 편집 · 업무일지 · 보고서 작성 표준 도구가 저절로 켜집니다.",
+            "■ Claude (데스크톱 앱의 Code 탭 · Claude Code)",
+            "  1. Claude 앱을 완전히 종료했다가 다시 여세요.",
+            f"     {quit_app}.",
+            "  2. Code 탭에서 HWP 편집 · 업무일지 · 보고서 작성 표준 도구를 쓸 수 있습니다.",
             "     새 버전도 앱을 다시 열 때 저절로 받습니다.",
-            "  2. 왼쪽 위 모델 선택에서 Sonnet을 고르세요. 사용량을 아낍니다.",
-            "  3. HWP 파일 작업은 Code 탭에서 하세요. Cowork에서 HWP 도구가 보이지 않으면",
-            "     같은 일을 Code 탭에서 하면 됩니다(Cowork의 로컬 도구 실행은 확인 중).",
+            "  3. 왼쪽 위 모델 선택에서 Sonnet을 고르세요. 사용량을 아낍니다.",
+            "  4. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려옵니다.",
         ]
+        if result.get("claude") and not result["claude"].get("cli") and not result["claude"].get("managed"):
+            out += ["  ※ 아직 Claude Code를 찾지 못해 도구를 깔지 못했습니다. Claude 앱에서 Code 탭을 한 번 연 뒤",
+                    "     시작 메뉴의 'JAIX 업데이트'를 실행하세요."]
         if result.get("claude", {}).get("managed"):
             out.append("  (도구 목록은 기관 관리자 설정으로 내려옵니다)")
     if "codex" in channels:
@@ -92,6 +98,7 @@ def cmd_setup(args, log):
         runtimes.ensure(rt, log, dry_run=args.dry_run)
     # Claude 앱(MSIX) 안에서 uvx가 Python을 처음 받으면 가상화로 깨진다(jaix-kit#14) → 앱 밖인 지금 깐다
     uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run)
+    hwpjar.ensure(lock, log, dry_run=args.dry_run, offline=args.offline)  # 첫 hwp 변환 때 에이전트가 우회하지 않게
     result = {}
     if args.gw_source and not args.dry_run:
         gw.save_source(args.gw_source)
@@ -164,6 +171,8 @@ def _update(args, log):
                 problems.append(f"{rt.label} 없음")
     if not uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run):  # 플러그인이 버전 고정을 바꿨으면 보충
         problems.append("uv 관리 Python 설치 실패")
+    if not hwpjar.ensure(lock, log, dry_run=args.dry_run, offline=args.offline):
+        problems.append("HWP 변환기(jar) 받기 실패")
     if gw.setup(log, dry_run=args.dry_run)["status"] == "failed":
         problems.append("gw 설치 실패")
     log("\n[2/3] Claude · Codex 플러그인")

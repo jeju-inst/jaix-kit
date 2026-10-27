@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from jaix import claude, cli, codex, doctor, gw, hermes, lock, runtimes, schedule, uvpython, winenv
+from jaix import paths
+from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, lock, runtimes, schedule, uvpython, winenv
 
+REAL_HWPJAR = {}
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
@@ -20,6 +22,11 @@ def isolated(tmp_path, monkeypatch):
     # uv python install 은 진짜로 돌리지 않는다(내려받기)
     monkeypatch.setattr(uvpython, "ensure", lambda versions, log, dry_run=False: True)
     monkeypatch.setattr(uvpython, "needed", lambda lock, offline=False: [uvpython.DEFAULT])
+    # hwp 변환기 jar 도 진짜로 받지 않는다. 받는 자리는 tmp
+    REAL_HWPJAR["ensure"] = REAL_HWPJAR.get("ensure", hwpjar.ensure)
+    monkeypatch.setattr(hwpjar, "ensure", lambda lock, log, dry_run=False, offline=False: True)
+    monkeypatch.setattr(hwpjar, "dest", lambda: tmp_path / "hwp-agent" / "hwp2hwpx.jar")
+    monkeypatch.setattr(paths, "desktop_installed", lambda: False)
     # 예약 작업은 진짜로 등록하지 않는다(맥이면 launchctl이 시험 중에 update를 돌린다)
     monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
     monkeypatch.setattr(schedule, "_run", lambda args: (True, ""))
@@ -354,3 +361,62 @@ def test_codex_setup_reports_failed_plugins(isolated, monkeypatch, the_lock):
     monkeypatch.setattr(codex, "_run", lambda cli, args, log: args[:2] != ["plugin", "add"])
     res = codex.setup(the_lock, print)
     assert res["failed"] == [p.name for p in the_lock.plugins]
+
+
+def test_hwpjar_spec_parsed_from_fetch_jar_source():
+    src = '''_RELEASE_TAG = "converter-jar"
+_ASSET = "hwp2hwpx.jar"
+JAR_URL = os.environ.get(
+    "HWP2HWPX_JAR_URL",
+    f"https://github.com/z0nam/hwp-agent/releases/download/{_RELEASE_TAG}/{_ASSET}",
+)
+JAR_SHA256 = "578a7f8397342dca1d52845330462d5038a4706967a9c43c0e04faf5f6f3d0ce"
+'''
+    assert hwpjar.parse_spec(src) == hwpjar.FALLBACK
+    assert hwpjar.parse_spec("nothing") is None
+
+
+def test_hwpjar_download_checks_sha256(isolated, monkeypatch, the_lock):
+    import hashlib
+    ensure = REAL_HWPJAR["ensure"]
+    src = isolated / "rel" / "hwp2hwpx.jar"
+    src.parent.mkdir()
+    src.write_bytes(b"PK jar")
+    good = {"url": src.as_uri(), "sha256": hashlib.sha256(b"PK jar").hexdigest()}
+    monkeypatch.setattr(hwpjar, "spec", lambda lock, offline=False: {**good, "sha256": "0" * 64})
+    assert ensure(the_lock, print) is False and not hwpjar.dest().exists()
+    assert doctor.check_hwp_jar(the_lock)[0].status == "fail"
+    monkeypatch.setattr(hwpjar, "spec", lambda lock, offline=False: good)
+    assert ensure(the_lock, print) is True and hwpjar.dest().read_bytes() == b"PK jar"
+    assert doctor.check_hwp_jar(the_lock)[0].status == "ok"
+
+
+def test_find_cli_in_desktop_msix_location(isolated, monkeypatch):
+    local = isolated / "local"
+    old = local / "Claude-Data" / "claude_pzs8" / "claude-code" / "2.1.9" / "abc"
+    new = local / "Claude-Data" / "claude_pzs8" / "claude-code" / "2.1.10" / "def"
+    for d in (old, new):
+        d.mkdir(parents=True)
+        (d / "claude.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(claude.shutil, "which", lambda name: None)
+    monkeypatch.setattr(claude, "IS_WIN", True)
+    monkeypatch.setattr(paths, "IS_WIN", True)
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setenv("APPDATA", str(isolated / "roaming"))
+    assert claude.find_cli() == str(new / "claude.exe")  # 2.1.10 > 2.1.9 (문자열 비교가 아님)
+
+
+def test_doctor_fails_when_plugins_missing(isolated, monkeypatch, the_lock):
+    monkeypatch.setattr(claude, "find_cli", lambda: None)
+    checks = {c.area: c for c in doctor.check_claude(the_lock)}
+    c = checks["Claude 플러그인"]
+    assert c.status == "fail" and f"{len(the_lock.plugins)}/{len(the_lock.plugins)}" in c.message
+    assert "Code 탭" in c.fix
+    monkeypatch.setattr(paths, "desktop_installed", lambda: True)
+    assert {c.area: c for c in doctor.check_claude(the_lock)}["Claude 데스크톱·Cowork"].status == "skip"
+
+
+def test_guide_says_how_to_really_quit(the_lock):
+    text = cli.guide(["claude"], {"claude": {"cli": False, "managed": None}})
+    assert ("Exit" if sys.platform == "win32" else "Quit") in text and "Code 탭을 한 번 연 뒤" in text
+    assert "작업 표시줄 아이콘 → 종료" not in text

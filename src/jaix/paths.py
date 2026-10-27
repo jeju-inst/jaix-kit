@@ -47,13 +47,33 @@ def winget_links():
     return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Microsoft" / "WinGet" / "Links"
 
 
-def desktop_claude_code_root():
-    """Claude Desktop이 Code 탭용으로 내려받는 Claude Code 바이너리 폴더(claude-code/<버전>/...)."""
+def desktop_claude_code_roots():
+    """Claude Desktop이 Code 탭용으로 내려받는 Claude Code 바이너리 폴더들(claude-code/<버전>/...).
+
+    Windows MSIX(2026-10 실측, jaix-kit#19): 실제 위치는 %LOCALAPPDATA%\\Claude-Data\\claude_<id>\\claude-code.
+    재시작 전엔 MSIX 가상화 위치(Packages\\Claude_<id>\\LocalCache\\Roaming\\Claude\\claude-code)에 있을 수 있다.
+    %APPDATA%\\Claude 는 예전(비 MSIX) 설치본.
+    """
     if IS_WIN:
-        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Claude" / "claude-code"
+        local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        roaming = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        return [*sorted(local.glob("Claude-Data/claude_*/claude-code")),
+                *sorted(local.glob("Packages/Claude_*/LocalCache/Roaming/Claude/claude-code")),
+                roaming / "Claude" / "claude-code"]
     if IS_MAC:
-        return Path.home() / "Library" / "Application Support" / "Claude" / "claude-code"
-    return Path.home() / ".config" / "Claude" / "claude-code"
+        return [Path.home() / "Library" / "Application Support" / "Claude" / "claude-code"]
+    return [Path.home() / ".config" / "Claude" / "claude-code"]
+
+
+def desktop_installed():
+    """Claude 데스크톱 앱이 이 사용자에게 있는가(Cowork·Code 탭)."""
+    if IS_WIN:
+        local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        return any(local.glob("Packages/Claude_*")) or any(local.glob("Claude-Data/claude_*")) \
+            or (local / "AnthropicClaude").is_dir()
+    if IS_MAC:
+        return Path("/Applications/Claude.app").is_dir() or (Path.home() / "Applications" / "Claude.app").is_dir()
+    return False
 
 
 def managed_settings_files():
