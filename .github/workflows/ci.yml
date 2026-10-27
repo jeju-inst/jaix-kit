@@ -29,6 +29,8 @@ jobs:
         run: claude plugin validate .
       - name: Check lock (sha pins, tags)
         run: python scripts/jaixlock.py check
+      - name: Lint plugins (standards check, advisory)
+        run: python scripts/plugin_lint.py
       - name: Install every plugin from this checkout (fresh machine)
         shell: bash
         run: |
