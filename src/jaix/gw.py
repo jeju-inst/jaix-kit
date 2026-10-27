@@ -1,24 +1,26 @@
-"""그룹웨어(gw) 런타임: 자리만 둔다.
+"""그룹웨어(gw) 공유 런타임: 원내 배포 위치의 latest.json → wheel → `uv tool install`.
 
 gw는 라이선스상 원외 재배포가 안 돼 공개 플러그인·이 저장소에 넣지 않는다. jaix setup이 **원내 위치**에서 받아
-설치한다(2026-10-27 결정, jeju-inst/ji-gw-ai#108 Q2 ②). 위치는 아직 정해지지 않았으므로 원본 URL을 설정값으로만 받는다:
-  jaix setup --gw-source <URL>   (jaix_home/config.json에 저장, 환경변수 JAIX_GW_SOURCE가 우선)
-URL에 닿지 않으면(원내망이 아님) gw만 건너뛰고 doctor가 안내한다. URL은 gw 실행파일(.exe) 또는 그것을 담은 .zip으로 본다
-— 형식이 정해지면 여기만 고친다.
+설치한다(jeju-inst/ji-gw-ai#108 Q2 ②, 배포 형식은 ji-gw-ai#122). 배포 위치는 IP 게이트가 걸린 정적 서버다:
+  <원본>/latest.json = {name, version, wheel, url, sha256, size, source_commit, published_at}
+jaix는 latest.json을 읽고 wheel을 받아 sha256을 확인한 뒤 `uv tool install <wheel>`로 깐다.
+설치된 버전이 latest.json과 다르면(새 버전·롤백 모두) 다시 깐다. 원본에 닿지 않으면(원내망이 아님) gw만 건너뛰고
+doctor가 안내한다. 원본은 기본 DEFAULT_SOURCE, `jaix setup --gw-source <URL>`(jaix_home/config.json에 저장)이나
+환경변수 JAIX_GW_SOURCE로 바꾼다. `none`이면 끈다.
 """
+import hashlib
 import json
 import os
-import shutil
-import tempfile
-import urllib.request
-import zipfile
+import re
+import subprocess
 from pathlib import Path
-from urllib.parse import urlparse
 
-from jaix import net, paths
+from jaix import net, paths, runtimes, winenv
 from jaix.paths import IS_WIN
 
 ENV = "JAIX_GW_SOURCE"
+DEFAULT_SOURCE = "https://jaix.namun.net/gw/latest.json"
+EXE = "gw"
 
 
 def _config_file():
@@ -32,69 +34,125 @@ def _config():
         return {}
 
 
-def source():
-    return os.environ.get(ENV) or _config().get("gw_source") or None
-
-
-def save_source(url):
-    data = _config()
-    data["gw_source"] = url
+def _save_config(**values):
+    data = {**_config(), **values}
     _config_file().parent.mkdir(parents=True, exist_ok=True)
     _config_file().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def reachable(url, timeout=5):
-    """원내 위치에 닿는가. 원외·VPN 끊김이면 False."""
+def source():
+    """latest.json 주소. None이면 끈 것."""
+    url = os.environ.get(ENV) or _config().get("gw_source") or DEFAULT_SOURCE
+    return None if url.lower() == "none" else url
+
+
+def save_source(url):
+    _save_config(gw_source=url)
+
+
+def latest(url=None, timeout=8):
+    """원내 위치의 latest.json. 닿지 않거나(원외·IP 게이트 거절) 형식이 틀리면 None."""
+    url = url or source()
+    if not url:
+        return None
     try:
-        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": net.UA})
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
+        data = net.get_json(url, timeout=timeout)
     except Exception:
-        return False
+        return None
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), str) and data[k]
+                                             for k in ("name", "version", "wheel", "url", "sha256")):
+        return None
+    return data
 
 
-def exe_path():
-    return paths.bin_dir() / ("gw.exe" if IS_WIN else "gw")
+def _uv():
+    return runtimes.find(runtimes.BY_KEY["uv"]).path
 
 
-def installed():
-    """jaix가 원내 위치에서 깐 것만 본다(AI센터 PC의 개발용 gw와 헷갈리지 않게)."""
-    return exe_path().is_file()
+def _run(args, timeout=60):
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
+    return r.returncode == 0, (r.stdout + r.stderr).strip()
+
+
+def tool_bin(uv=None):
+    """uv tool이 실행파일을 두는 곳(Windows %USERPROFILE%\\.local\\bin)."""
+    uv = uv or _uv()
+    ok, out = _run([uv, "tool", "dir", "--bin"]) if uv else (False, "")
+    return Path(out.splitlines()[-1]) if ok and out else None
+
+
+def installed_version(uv=None):
+    """jaix가 uv tool로 깐 gw의 버전. 개발용으로 따로 둔 gw(PATH의 다른 것)는 세지 않는다."""
+    name = _config().get("gw_package")
+    uv = uv or _uv()
+    if not name or not uv:
+        return None
+    ok, out = _run([uv, "tool", "list"])
+    norm = lambda n: re.sub(r"[-_.]+", "-", n).lower()  # noqa: E731  패키지 이름 정규화(PEP 503)
+    listed = dict(re.findall(r"^(\S+) v(\S+)", out, re.M)) if ok else {}
+    version = next((v for n, v in listed.items() if norm(n) == norm(name)), None)
+    if not version:
+        return None
+    # 실행파일이 실제로 도는지까지: gw --version이 버전을 말하면 그것을 믿는다
+    exe = (tool_bin(uv) or Path()) / (EXE + (".exe" if IS_WIN else ""))
+    ok, out = _run([str(exe), "--version"], timeout=30)
+    v = re.search(r"\d+(?:\.\d+)+", out) if ok else None
+    return v.group(0) if v else version
+
+
+def same(a, b):
+    key = lambda v: tuple(int(x) for x in re.findall(r"\d+", v or ""))  # noqa: E731  2026.10.27.1 == 2026.10.27.01
+    return key(a) == key(b)
 
 
 def setup(log, dry_run=False):
+    """setup·update 공통: latest.json과 버전이 다르면 깐다. 돌려준 status는 doctor·update 문제 기록용."""
     url = source()
     if not url:
-        log("  gw: 원본 위치가 아직 정해지지 않음 → 건너뜀")
-        return {"status": "unset"}
-    if not reachable(url):
-        log(f"  gw: 원내 위치({urlparse(url).netloc})에 닿지 않음 → 건너뜀. 원내망에서 `jaix setup` 다시 실행")
+        log("  gw: 끔 (--gw-source none)")
+        return {"status": "off"}
+    info = latest(url)
+    if not info:
+        log(f"  gw: 원내 위치({url})에 닿지 않음 → 건너뜀. 원내망(사무실·VPN)에서 `jaix setup` 다시 실행")
         return {"status": "offsite"}
+    uv = _uv()
+    if not uv:
+        log("  gw: uv가 없어 설치 못 함 (위 uv 항목 참고)")
+        return {"status": "failed"}
+    have = installed_version(uv)
+    if have and same(have, info["version"]):
+        log(f"  gw: {have} (최신)")
+        return {"status": "current", "version": have}
     if dry_run:
-        log(f"  gw: {url} 에서 설치 예정")
+        log(f"  gw: {have or '없음'} → {info['version']} 설치 예정")
         return {"status": "planned"}
     try:
-        _install(url)
+        _install(info, uv)
     except Exception as e:  # gw가 막혀도 나머지 설치는 계속한다. doctor가 남은 것을 알려 준다
         log(f"  gw: 설치 실패 — {e}")
         return {"status": "failed"}
-    log(f"  gw: 설치함 ({url})")
-    return {"status": "installed"}
+    log(f"  gw: {have or '없음'} → {info['version']} 설치함")
+    return {"status": "installed", "version": info["version"]}
 
 
-def _install(url):
-    name = Path(urlparse(url).path).name or "gw.exe"
-    with tempfile.TemporaryDirectory() as tmp:
-        file = net.download(url, Path(tmp) / name)
-        paths.bin_dir().mkdir(parents=True, exist_ok=True)
-        if name.lower().endswith(".zip"):
-            with zipfile.ZipFile(file) as z:  # 실행파일·DLL만 bin으로(런타임 포터블과 같은 방식)
-                for info in z.infolist():
-                    base = Path(info.filename).name
-                    if not info.is_dir() and base.lower().endswith((".exe", ".dll")):
-                        with z.open(info) as src, open(paths.bin_dir() / base, "wb") as out:
-                            shutil.copyfileobj(src, out)
-        else:
-            shutil.copyfile(file, exe_path())
-            if not IS_WIN:
-                exe_path().chmod(0o755)
+def _install(info, uv):
+    dest = paths.jaix_home() / "gw" / Path(info["wheel"]).name  # uv가 wheel 파일 이름에서 버전을 읽으므로 이름 그대로
+    net.download(info["url"], dest)
+    digest = hashlib.sha256(dest.read_bytes()).hexdigest()
+    if digest != info["sha256"].lower():
+        dest.unlink(missing_ok=True)
+        raise ValueError(f"sha256 불일치 (받은 것 {digest[:12]}… ≠ latest.json {info['sha256'][:12]}…) — 설치하지 않음")
+    ok, out = _run([uv, "tool", "install", str(dest)], timeout=900)
+    if not ok:
+        raise RuntimeError((out.splitlines() or [""])[-1][:200])
+    _save_config(gw_package=info["name"])
+    for old in dest.parent.glob("*.whl"):  # 지금 깐 것 하나만 남긴다
+        if old != dest:
+            old.unlink(missing_ok=True)
+    if IS_WIN:
+        b = tool_bin(uv)
+        if b:
+            winenv.add_to_path([b])  # uv tool의 실행파일 폴더가 사용자 PATH에 없을 수 있다

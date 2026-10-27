@@ -171,7 +171,7 @@ begin
   GuideFile := ExpandConstant('{app}\guide.txt');
   LogFile := ExpandConstant('{app}\setup.log');
   Params := 'setup --channels ' + Channels + ' --guide-out "' + GuideFile + '" --log "' + LogFile + '"';
-  { gw 런타임 원내 위치(정해지면 배포 스크립트가 /GWSOURCE= 로 넘김) }
+  { gw 런타임 latest.json 주소를 바꿀 때만 /GWSOURCE= (기본은 jaix 의 원내 주소, none 이면 끔) }
   if ExpandConstant('{param:GWSOURCE|}') <> '' then
     Params := Params + ' --gw-source "' + ExpandConstant('{param:GWSOURCE|}') + '"';
   Log('실행: ' + ExePath + ' ' + Params);
