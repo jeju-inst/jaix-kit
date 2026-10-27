@@ -178,6 +178,9 @@ def check_autoupdate():
         return [Check("skip", area, "이 OS는 지원 안 함 — 가끔 jaix update")]
     if not schedule.registered():
         return [Check("warn", area, "등록 안 됨 — Codex·Hermes 도구가 저절로 갱신되지 않음", "jaix setup")]
+    bad = schedule.run_mode()
+    if bad:
+        return [Check("warn", area, f"실행 모드 문제: {bad}", "jaix setup (다시 등록)")]
     last = schedule.last_status()
     if not last:
         return [Check("ok", area, "등록됨 (아직 돈 적 없음)")]

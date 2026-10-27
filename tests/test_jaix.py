@@ -23,6 +23,7 @@ def isolated(tmp_path, monkeypatch):
     # 예약 작업은 진짜로 등록하지 않는다(맥이면 launchctl이 시험 중에 update를 돌린다)
     monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
     monkeypatch.setattr(schedule, "_run", lambda args: (True, ""))
+    monkeypatch.setattr(schedule, "run_mode", lambda: None)
     return tmp_path
 
 
@@ -266,3 +267,13 @@ def test_doctor_warns_when_autoupdate_missing(monkeypatch):
     monkeypatch.setattr(schedule, "supported", lambda: True)
     monkeypatch.setattr(schedule, "registered", lambda: False)
     assert doctor.check_autoupdate()[0].status == "warn"
+
+
+def test_task_mode_must_be_interactive_least_privilege():
+    import xml.etree.ElementTree as ET
+    good = schedule.task_xml(["jaix.exe", "update", "--quiet"], "u").split("\n", 1)[1]
+    assert schedule.mode_problem(ET.fromstring(good)) is None
+    s4u = good.replace("InteractiveToken", "S4U")
+    assert "로그온할 때만" in schedule.mode_problem(ET.fromstring(s4u))
+    admin = good.replace("LeastPrivilege", "HighestAvailable")
+    assert "관리자" in schedule.mode_problem(ET.fromstring(admin))

@@ -146,6 +146,10 @@ jobs:
           $s = Get-Content $status -Raw | ConvertFrom-Json
           if (-not $s.ok) { throw "자동 갱신 실패: $($s.error) $($s.problems)" }
           jaix doctor
+          # 실행 모드('로그온할 때만 실행'·일반 권한)와 마지막 결과까지 doctor가 통과로 보는지
+          $c = (jaix doctor --json | Out-String | ConvertFrom-Json).checks | Where-Object area -eq '로그온 자동 갱신'
+          Write-Host "doctor: $($c.status) $($c.message)"
+          if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
 
       - name: Uninstall
         shell: pwsh

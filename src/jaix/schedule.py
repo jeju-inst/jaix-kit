@@ -8,11 +8,13 @@ Claude는 마켓플레이스 autoUpdate로 저절로 갱신되지만 Codex·Herm
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 from jaix import paths
@@ -132,6 +134,33 @@ def registered():
     if IS_MAC:
         return plist_path().exists()
     return False
+
+
+def run_mode():
+    """등록된 작업의 실행 모드 문제(없으면 None). 세션 0(무인)에서는 한컴 COM이 뜨지 않아(hwp-render 실측)
+    반드시 '사용자가 로그온할 때만 실행'(InteractiveToken)·일반 권한이어야 한다. Windows 외에는 늘 None."""
+    if not IS_WIN:
+        return None  # LaunchAgent는 gui/<uid> 도메인 = 로그온한 사용자 세션
+    try:
+        r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/XML"], capture_output=True, timeout=60)
+        raw = r.stdout
+        text = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", errors="replace")
+        # 선언의 encoding="UTF-16"이 이미 푼 문자열과 어긋나 파서가 거절하므로 뗀다
+        root = ET.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text.lstrip("\ufeff")))
+    except (OSError, subprocess.TimeoutExpired, ET.ParseError, UnicodeError) as e:
+        return f"작업 정의를 읽지 못함: {e}"
+    return mode_problem(root)
+
+
+def mode_problem(root):
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    logon = root.findtext("t:Principals/t:Principal/t:LogonType", default="", namespaces=ns)
+    level = root.findtext("t:Principals/t:Principal/t:RunLevel", default="LeastPrivilege", namespaces=ns)
+    if logon != "InteractiveToken":
+        return f"'로그온할 때만 실행'이 아님({logon or '미지정'}) — 무인 세션에선 한컴 등이 뜨지 않음"
+    if level != "LeastPrivilege":
+        return f"관리자 권한으로 실행({level})"
+    return None
 
 
 def register(log, dry_run=False):

@@ -84,6 +84,10 @@ jobs:
           $s = Get-Content $status -Raw | ConvertFrom-Json
           if (-not $s.ok) { throw "자동 갱신 실패: $($s.error) $($s.problems)" }
           jaix doctor
+          # 실행 모드('로그온할 때만 실행'·일반 권한)와 마지막 결과까지 doctor가 통과로 보는지
+          $c = (jaix doctor --json | Out-String | ConvertFrom-Json).checks | Where-Object area -eq '로그온 자동 갱신'
+          Write-Host "doctor: $($c.status) $($c.message)"
+          if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
       # 러너엔 Git·uv가 이미 있어 위 setup은 포터블 경로를 안 탈 수 있다. 깨끗한 PC(winget 거절)에서 쓰는
       # 포터블 설치를 따로 돌려 압축 구조가 맞는지 본다
       - name: Portable installs (what a clean PC falls back to)
