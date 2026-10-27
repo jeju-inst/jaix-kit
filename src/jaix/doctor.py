@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from jaix import claude, codex, gw, hermes, hwpjar, paths, runtimes, schedule, uvpython, winenv
-from jaix.lock import MARKETPLACE
+from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
 MARK = {"ok": "[통과]", "warn": "[주의]", "fail": "[실패]", "skip": "[생략]"}
@@ -103,6 +103,8 @@ def check_gw():
     if not info:
         if have:
             return [Check("ok", area, f"{have} 설치됨 (원내 위치에 닿지 않아 최신인지는 확인 못 함)")]
+        if gw.unpublished():
+            return [Check("skip", area, "아직 배포 전 — 배포가 시작되면 jaix update가 설치")]
         return [Check("warn", area, "원내 위치에 닿지 않아 설치 안 됨 (원내망 필요)", "원내망(사무실·VPN)에서 jaix setup")]
     if not have:
         return [Check("fail", area, f"원내 위치에 닿는데 설치 안 됨 (배포 {info['version']})", "jaix setup")]
@@ -155,7 +157,7 @@ def check_claude(lock):
         names = ", ".join(p.name for p in missing)
         out.append(Check("fail", "Claude 플러그인", f"{len(missing)}/{len(lock.plugins)}개 설치 안 됨: {names}",
                          "jaix setup" if cli else
-                         "Claude 앱에서 Code 탭을 한 번 연 뒤(Claude Code가 내려받아짐) jaix setup"))
+                         "Claude 앱에서 Code 탭을 열었다 닫고 한 번 더 열기(첫 번째에 등록, 두 번째에 설치)"))
     if paths.desktop_installed():
         out.append(Check("skip", "Claude 데스크톱·Cowork",
                          "관리자 배포 대상(조직 플러그인) — jaix는 Code 탭·Claude Code에만 등록함"))
@@ -174,10 +176,21 @@ def check_codex(lock):
     for p in lock.plugins:
         if p.id not in enabled:
             out.append(Check("fail", f"Codex {p.name}", "설치 안 됨", "jaix setup --channels codex"))
-        elif rec.get(p.id) == p.sha or (p.id not in rec and snap_sha.get(p.name) == p.sha):
+        elif same_commit(rec.get(p.id), p.sha) or (p.id not in rec and same_commit(snap_sha.get(p.name), p.sha)):
             out.append(Check("ok", f"Codex {p.name}", p.label))
         else:
             out.append(Check("fail", f"Codex {p.name}", f"잠금 {p.label}보다 옛 버전", "jaix update"))
+    # Codex는 플러그인 MCP의 ${CLAUDE_PLUGIN_ROOT}를 치환하지 않는다(#23) → jaix가 쓴 절대경로 항목이 있어야 뜬다
+    want = codex.mcp_servers(lock)
+    owned = codex.owned_mcp()
+    # 사용자가 같은 이름을 직접 정의한 것(jaix가 맡지 않은 것)은 그대로 둔다
+    stale = [n for n, spec in want.items()
+             if codex._current(n) != spec and (codex._current(n) is None or n in owned)]
+    if stale:
+        out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(stale)} (0 tools로 실패함)",
+                         "jaix update"))
+    elif want:
+        out.append(Check("ok", "Codex MCP", ", ".join(want)))
     return out
 
 

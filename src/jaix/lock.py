@@ -36,6 +36,16 @@ class Plugin:
         return self.version or f"{self.ref}@{self.sha[:7]}"
 
 
+def same_commit(a, b):
+    """두 커밋 표기가 같은 커밋인가. 짧은 쪽 길이로 접두 비교(최소 7자) — Claude Code는 branch 고정 플러그인의
+    버전을 12자리 해시로, 잠금은 40자로 적는다(jaix-kit v2026.10.27.8 실측: 문자열 비교로 거짓 실패)."""
+    a, b = (a or "").lower(), (b or "").lower()
+    n = min(len(a), len(b))
+    if n < 7 or not all(c in "0123456789abcdef" for c in a + b):
+        return False
+    return a[:n] == b[:n]
+
+
 @dataclass
 class Lock:
     data: dict
