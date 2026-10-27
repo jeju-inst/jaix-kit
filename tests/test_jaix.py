@@ -419,7 +419,7 @@ def test_doctor_fails_when_plugins_missing(isolated, monkeypatch, the_lock):
 
 def test_guide_says_how_to_really_quit(the_lock):
     text = cli.guide(["claude"], {"claude": {"cli": False, "managed": None}})
-    assert ("Exit" if sys.platform == "win32" else "Quit") in text and "Code 탭을 한 번 연 뒤" in text
+    assert ("Exit" if sys.platform == "win32" else "Quit") in text and "한 번 더 여세요" in text
     assert "작업 표시줄 아이콘 → 종료" not in text
 
 
@@ -561,3 +561,92 @@ def test_via_task_replays_setup_command(isolated, monkeypatch):
     replay = cli.build_parser().parse_args(cmd[i:])
     assert replay.cmd == "setup" and replay.channels == "claude" and not replay.via_task
     assert replay.status_out and replay.log == str(isolated / "s.log")
+
+
+def _codex_home_with_plugin(isolated, monkeypatch, the_lock):
+    """Codex가 hwp-agent 를 깐 상태를 흉내: 설치 폴더의 .mcp.json 은 ${CLAUDE_PLUGIN_ROOT} 를 쓴다."""
+    home = isolated / "codex_home"
+    root = home / "plugins" / "cache" / "jaix" / "hwp-agent" / "local"
+    root.mkdir(parents=True)
+    (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"hwp-agent": {
+        "command": "uvx", "args": ["--from", "${CLAUDE_PLUGIN_ROOT}", "hwp-agent", "mcp"]}}}), encoding="utf-8")
+    (home / "config.toml").write_text('[plugins."hwp-agent@jaix"]\nenabled = true\n', encoding="utf-8")
+    calls = []
+
+    def fake_run(cli, args, log):  # codex mcp add/remove 를 config.toml 에 흉내 내 쓴다
+        calls.append(args)
+        cfg = home / "config.toml"
+        if args[:2] == ["mcp", "add"]:
+            name, rest = args[2], args[args.index("--") + 1:]
+            body = f'\n[mcp_servers."{name}"]\ncommand = {json.dumps(rest[0])}\nargs = {json.dumps(rest[1:])}\n'
+            cfg.write_text(cfg.read_text(encoding="utf-8") + body, encoding="utf-8")
+        return True
+    monkeypatch.setattr(codex, "_run", fake_run)
+    return home, root, calls
+
+
+def test_codex_mcp_written_with_absolute_root(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    assert codex.mcp_servers(the_lock) == {"hwp-agent": {"command": "uvx", "args": ["--from", str(root), "hwp-agent", "mcp"],
+                                                       "env": {}}}
+    assert codex.write_mcp(the_lock, print, cli="codex")
+    assert calls[-1][:3] == ["mcp", "add", "hwp-agent"] and str(root) in calls[-1]
+    n = len(calls)
+    codex.write_mcp(the_lock, print, cli="codex")
+    assert len(calls) == n  # 이미 맞으면 다시 쓰지 않음
+
+
+def test_codex_mcp_keeps_user_definition(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    cfg = home / "config.toml"
+    cfg.write_text(cfg.read_text(encoding="utf-8") + '\n[mcp_servers."hwp-agent"]\ncommand = "my-hwp"\n', encoding="utf-8")
+    lines = []
+    codex.write_mcp(the_lock, lines.append, cli="codex")
+    assert not calls and "사용자 정의" in lines[0]
+
+
+def test_codex_sandbox_default_only_when_unset(isolated, monkeypatch):
+    monkeypatch.setattr(codex, "IS_WIN", True)
+    home = isolated / "codex_home"
+    home.mkdir()
+    cfg = home / "config.toml"
+    cfg.write_text('model = "x"\n', encoding="utf-8")
+    assert codex.ensure_sandbox(print) is True
+    import tomllib
+    assert tomllib.loads(cfg.read_text(encoding="utf-8"))["windows"]["sandbox"] == "unelevated"
+    cfg.write_text('[windows]\nsandbox = "elevated"\n', encoding="utf-8")
+    assert codex.ensure_sandbox(print) is False  # 있는 값은 건드리지 않음
+    cfg.write_text('[windows]\nother = 1\n', encoding="utf-8")
+    codex.ensure_sandbox(print)
+    assert tomllib.loads(cfg.read_text(encoding="utf-8"))["windows"] == {"sandbox": "unelevated", "other": 1}
+
+
+def test_gw_unpublished_when_dns_missing(monkeypatch):
+    monkeypatch.setenv(gw.ENV, "https://not-yet.invalid/gw/latest.json")
+    assert gw.unpublished()
+    assert gw.setup(print)["status"] == "unpublished"
+    assert doctor.check_gw()[0].status == "skip" and "배포 전" in doctor.check_gw()[0].message
+
+
+def test_enabled_plugins_refilled_after_uninstall_but_off_respected(the_lock):
+    """claude plugin uninstall 은 enabledPlugins 항목을 지운다 → setup/update 의 병합이 다시 채운다.
+    사용자가 끈 것(false)은 그대로 둔다."""
+    ids = [p.id for p in the_lock.plugins]
+    settings = {"enabledPlugins": {ids[0]: False}}  # ids[1:] 는 uninstall 로 지워진 상태
+    new, changes, warnings = claude.merge_settings(settings, the_lock.plugins)
+    assert new["enabledPlugins"][ids[0]] is False
+    assert all(new["enabledPlugins"][i] is True for i in ids[1:])
+
+
+def test_same_commit_prefix(the_lock):
+    from jaix.lock import same_commit
+    full = "07040e21d448" + "0" * 28
+    assert same_commit("07040e21d448", full) and same_commit(full, "07040e2")
+    assert not same_commit("07040e", full)  # 7자 미만은 판단 안 함
+    assert not same_commit("17040e21d448", full) and not same_commit(None, full)
+    branch = next(p for p in the_lock.plugins if not p.version)
+    # Claude Code 기록: branch 고정이면 version 칸에 12자리 해시
+    assert claude.matches(branch, {"version": branch.sha[:12]})
+    assert not claude.matches(branch, {"version": "0" * 12})
+    tagged = next(p for p in the_lock.plugins if p.version)
+    assert claude.matches(tagged, {"version": tagged.version}) and not claude.matches(tagged, {"version": tagged.sha[:12]})

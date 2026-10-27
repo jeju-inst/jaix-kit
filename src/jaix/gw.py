@@ -12,8 +12,10 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from jaix import net, paths, runtimes, winenv
 from jaix.paths import IS_WIN
@@ -50,8 +52,22 @@ def save_source(url):
     _save_config(gw_source=url)
 
 
+def unpublished(url=None):
+    """배포처 이름이 DNS에 없다 = 아직 배포 전(원내망 밖이라 막힌 것과 구분한다)."""
+    host = urlparse(url or source() or "").hostname
+    if not host:
+        return False
+    try:
+        socket.getaddrinfo(host, 443)
+        return False
+    except socket.gaierror:
+        return True
+    except OSError:
+        return False
+
+
 def latest(url=None, timeout=8):
-    """원내 위치의 latest.json. 닿지 않거나(원외·IP 게이트 거절) 형식이 틀리면 None."""
+    """원내 위치의 latest.json. 닿지 않거나(원외·IP 게이트 거절·배포 전) 형식이 틀리면 None."""
     url = url or source()
     if not url:
         return None
@@ -115,6 +131,9 @@ def setup(log, dry_run=False):
         log("  gw: 끔 (--gw-source none)")
         return {"status": "off"}
     info = latest(url)
+    if not info and unpublished(url):
+        log(f"  gw: 배포처({urlparse(url).hostname})가 아직 준비되지 않음(배포 전) → 건너뜀. 배포가 시작되면 `jaix update`가 설치")
+        return {"status": "unpublished"}
     if not info:
         log(f"  gw: 원내 위치({url})에 닿지 않음 → 건너뜀. 원내망(사무실·VPN)에서 `jaix setup` 다시 실행")
         return {"status": "offsite"}

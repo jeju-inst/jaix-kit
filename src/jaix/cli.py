@@ -74,8 +74,8 @@ def guide(channels, result):
             "  4. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려옵니다.",
         ]
         if result.get("claude") and not result["claude"].get("cli") and not result["claude"].get("managed"):
-            out += ["  ※ 아직 Claude Code를 찾지 못해 도구를 깔지 못했습니다. Claude 앱에서 Code 탭을 한 번 연 뒤",
-                    "     시작 메뉴의 'JAIX 업데이트'를 실행하세요."]
+            out += ["  ※ 아직 Claude Code를 찾지 못해 도구를 직접 깔지 못했습니다. Claude 앱에서 Code 탭을 열었다 닫고",
+                    "     한 번 더 여세요(첫 번째에 도구 목록을 받고, 두 번째에 설치합니다)."]
         if result.get("claude", {}).get("managed"):
             out.append("  (도구 목록은 기관 관리자 설정으로 내려옵니다)")
     if "codex" in channels:
@@ -90,7 +90,8 @@ def guide(channels, result):
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
     if "hermes" in channels:
         out += ["■ 슬랙으로도 쓰기 (Hermes)", f"  {hermes.NOT_YET}"]
-    out += ["", "문제가 있으면 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
+    out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
+            "문제가 있으면 새 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
     return "\n".join(out)
 
 
