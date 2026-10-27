@@ -87,15 +87,19 @@ def check_path():
 
 
 def check_gw():
-    url = gw.source()
-    if not url:
-        return [Check("skip", "gw(그룹웨어)", "원본 위치 미정 — 정해지면 jaix setup이 원내에서 설치")]
-    if gw.installed():
-        return [Check("ok", "gw(그룹웨어)", f"설치됨 ({gw.exe_path()})")]
-    if not gw.reachable(url):
-        return [Check("warn", "gw(그룹웨어)", "원내 위치에 닿지 않아 설치 안 됨 (원내망 필요)",
-                      "원내망(사무실·VPN)에서 jaix setup")]
-    return [Check("fail", "gw(그룹웨어)", "원내 위치에 닿는데 설치 안 됨", "jaix setup")]
+    area = "gw(그룹웨어)"
+    if not gw.source():
+        return [Check("skip", area, "끔 (--gw-source none)")]
+    have, info = gw.installed_version(), gw.latest()
+    if not info:
+        if have:
+            return [Check("ok", area, f"{have} 설치됨 (원내 위치에 닿지 않아 최신인지는 확인 못 함)")]
+        return [Check("warn", area, "원내 위치에 닿지 않아 설치 안 됨 (원내망 필요)", "원내망(사무실·VPN)에서 jaix setup")]
+    if not have:
+        return [Check("fail", area, f"원내 위치에 닿는데 설치 안 됨 (배포 {info['version']})", "jaix setup")]
+    if not gw.same(have, info["version"]):
+        return [Check("warn", area, f"{have} 설치됨 — 배포 버전은 {info['version']}", "jaix update")]
+    return [Check("ok", area, f"{have} (배포 버전과 같음)")]
 
 
 def check_claude(lock):

@@ -210,7 +210,8 @@ def build_parser():
     s.add_argument("--channels", default="claude,codex", help="claude,codex,hermes 중 쉼표로 (기본 claude,codex)")
     s.add_argument("--runtimes", help="설치할 런타임: 쉼표 목록 | all | none (기본: 필수만)")
     s.add_argument("--dry-run", action="store_true", help="바꾸지 않고 할 일만 보여 줌")
-    s.add_argument("--gw-source", help="그룹웨어(gw) 런타임 원내 원본 URL(저장해 두고 update도 씀). 원내망이 아니면 gw만 건너뜀")
+    s.add_argument("--gw-source", help=f"그룹웨어(gw) 런타임 원내 latest.json 주소(기본 {gw.DEFAULT_SOURCE}, 저장해 두고 "
+                                       "update도 씀, none이면 끔). 원내망이 아니면 gw만 건너뜀")
     s.add_argument("--no-autoupdate", action="store_true", help="로그온 자동 갱신(jaix update --quiet)을 등록하지 않음")
     s.add_argument("--guide-out", help="마지막 안내문을 이 파일에 씀(설치 프로그램용)")
     s.set_defaults(func=cmd_setup)

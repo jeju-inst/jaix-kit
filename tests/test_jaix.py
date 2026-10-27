@@ -24,6 +24,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
     monkeypatch.setattr(schedule, "_run", lambda args: (True, ""))
     monkeypatch.setattr(schedule, "run_mode", lambda: None)
+    monkeypatch.setenv(gw.ENV, "none")  # 기본 원내 주소로 나가지 않게(gw 시험이 저마다 바꾼다)
     return tmp_path
 
 
@@ -169,29 +170,81 @@ def test_user_path_add_and_remove(tmp_path):
         winenv.remove_from_path(tmp_path / "jaix-path-test")
 
 
-def test_gw_unset_is_skipped(monkeypatch):
-    monkeypatch.delenv(gw.ENV, raising=False)
-    assert gw.setup(print)["status"] == "unset"
+def test_gw_off_is_skipped(monkeypatch):
+    monkeypatch.setenv(gw.ENV, "none")
+    assert gw.setup(print)["status"] == "off"
     assert doctor.check_gw()[0].status == "skip"
 
 
+def test_gw_default_source(monkeypatch):
+    monkeypatch.delenv(gw.ENV, raising=False)
+    assert gw.source() == gw.DEFAULT_SOURCE
+
+
 def test_gw_offsite_is_skipped_with_hint(monkeypatch):
-    monkeypatch.setenv(gw.ENV, "http://127.0.0.1:9/gw.exe")  # 닿지 않는 곳 = 원외
+    monkeypatch.setenv(gw.ENV, "http://127.0.0.1:9/gw/latest.json")  # 닿지 않는 곳 = 원외
     assert gw.setup(print)["status"] == "offsite"
     c = doctor.check_gw()[0]
     assert c.status == "warn" and "원내망" in c.fix
 
 
-def test_gw_source_saved_and_installed(isolated, monkeypatch):
-    monkeypatch.delenv(gw.ENV, raising=False)
-    src = isolated / "share" / "gw.exe"
-    src.parent.mkdir()
-    src.write_bytes(b"MZ fake")
-    monkeypatch.setattr(claude, "find_cli", lambda: None)
-    url = src.as_uri()
-    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--gw-source", url]) == 0
-    assert gw.source() == url and gw.exe_path().read_bytes() == b"MZ fake"
+def _gw_share(isolated, monkeypatch, sha=None):
+    """file:// 로 흉내 낸 원내 배포 폴더(latest.json + wheel)와 가짜 uv."""
+    import hashlib
+    share = isolated / "share" / "gw"
+    (share / "2026.10.27.2").mkdir(parents=True)
+    wheel = share / "2026.10.27.2" / "ji_gw_ai-2026.10.27.2-py3-none-any.whl"
+    wheel.write_bytes(b"PK fake wheel")
+    info = {"name": "ji-gw-ai", "version": "2026.10.27.2", "wheel": wheel.name, "url": wheel.as_uri(),
+            "sha256": sha or hashlib.sha256(wheel.read_bytes()).hexdigest()}
+    (share / "latest.json").write_text(json.dumps(info), encoding="utf-8")
+    monkeypatch.setenv(gw.ENV, (share / "latest.json").as_uri())
+    calls, state = [], {"installed": None}
+
+    def run(args, timeout=60):
+        calls.append(args)
+        if args[1:3] == ["tool", "install"]:
+            state["installed"] = "2026.10.27.2"
+            return True, ""
+        if args[1:3] == ["tool", "list"]:
+            return True, f"ji_gw_ai v{state['installed']}\n- gw" if state["installed"] else "No tools installed"
+        if args[1:3] == ["tool", "dir"]:
+            return True, str(isolated / "uvbin")
+        return False, ""  # gw --version: 가짜라 못 돎 → uv tool list 버전을 씀
+    monkeypatch.setattr(gw, "_uv", lambda: "uv")
+    monkeypatch.setattr(gw, "_run", run)
+    return calls, state
+
+
+def test_gw_installs_wheel_after_sha256(isolated, monkeypatch):
+    calls, state = _gw_share(isolated, monkeypatch)
+    assert doctor.check_gw()[0].status == "fail"  # 닿는데 안 깔림
+    assert gw.setup(print)["status"] == "installed"
+    assert any(a[1:3] == ["tool", "install"] and a[3].endswith(".whl") for a in calls)
+    assert gw.installed_version() == "2026.10.27.2"
     assert doctor.check_gw()[0].status == "ok"
+    assert gw.setup(print)["status"] == "current"  # 다시 돌리면 그대로
+
+
+def test_gw_refuses_wrong_sha256(isolated, monkeypatch):
+    calls, state = _gw_share(isolated, monkeypatch, sha="0" * 64)
+    assert gw.setup(print)["status"] == "failed"
+    assert not any(a[1:3] == ["tool", "install"] for a in calls)
+    assert not list((isolated / "jaix_home" / "gw").glob("*.whl"))
+
+
+def test_gw_doctor_warns_on_older_install(isolated, monkeypatch):
+    _gw_share(isolated, monkeypatch)
+    monkeypatch.setattr(gw, "installed_version", lambda uv=None: "2026.10.27.1")
+    c = doctor.check_gw()[0]
+    assert c.status == "warn" and c.fix == "jaix update"
+
+
+def test_gw_source_saved(isolated, monkeypatch):
+    monkeypatch.delenv(gw.ENV, raising=False)
+    url = "https://example.invalid/gw/latest.json"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--gw-source", url]) == 0
+    assert gw.source() == url
 
 
 def test_uv_python_pins_from_mcp_json():
