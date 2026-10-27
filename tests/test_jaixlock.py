@@ -22,7 +22,7 @@ def _commit(repo, files, tag):
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(text, encoding="utf-8")
     _git(repo, "add", "-A")
-    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", tag)
+    _git(repo, "commit", "-q", "-m", tag)
     _git(repo, "tag", "-a", tag, "-m", tag)  # 주석 태그: resolve 가 peel 한 커밋을 써야 한다
     return _git(repo, "rev-parse", "HEAD")
 
@@ -33,6 +33,8 @@ def gen_repo(tmp_path):
     repo = tmp_path / "jaix-gw"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.name", "t")  # CI 러너엔 git 사용자 정보가 없다(주석 태그가 요구함)
+    _git(repo, "config", "user.email", "t@t")
     # 로컬 file:// 원격에서도 GitHub 처럼 sha 로 얕게·blob 없이 받을 수 있게
     _git(repo, "config", "uploadpack.allowAnySHA1InWant", "true")
     _git(repo, "config", "uploadpack.allowFilter", "true")
@@ -66,7 +68,7 @@ def test_update_uses_last_valid_tag(tmp_path, monkeypatch, gen_repo, capsys):
     good = _commit(repo, {".claude-plugin/plugin.json": "{}", "skills/gw/SKILL.md": "x"}, "v2026.10.27.2")
     _commit(repo, {"README.md": "plugin.json 을 지운 잘못된 생성"}, "v2026.10.27.3")
     _git(repo, "rm", "-q", ".claude-plugin/plugin.json")
-    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "broken")
+    _git(repo, "commit", "-q", "-m", "broken")
     _git(repo, "tag", "-a", "v2026.10.28.1", "-m", "broken")
     url = repo.as_uri()
     _lock(tmp_path, monkeypatch, url, "v2026.10.27.1", seed, "tag")
@@ -83,7 +85,7 @@ def test_update_keeps_current_when_newer_tags_invalid(tmp_path, monkeypatch, gen
     repo, seed = gen_repo
     good = _commit(repo, {".claude-plugin/plugin.json": "{}"}, "v2026.10.27.2")
     _git(repo, "rm", "-q", ".claude-plugin/plugin.json")
-    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "broken")
+    _git(repo, "commit", "-q", "-m", "broken")
     _git(repo, "tag", "-a", "v2026.10.27.3", "-m", "broken")
     _lock(tmp_path, monkeypatch, repo.as_uri(), "v2026.10.27.2", good, "tag")
     jaixlock.update()
