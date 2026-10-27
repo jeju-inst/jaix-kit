@@ -52,6 +52,10 @@ jobs:
           jaix doctor
           if ($LASTEXITCODE -ne 0) { throw "jaix doctor 실패" }
           jaix doctor --json > doctor.json
+          # jaix-kit#14: 플러그인 MCP용 uv 관리 Python이 앱 밖 실제 경로(%APPDATA%\uv\python)에 있어야 한다
+          $c = (Get-Content doctor.json -Raw | ConvertFrom-Json).checks | Where-Object area -eq 'uv 관리 Python'
+          if ($c.status -ne 'ok') { throw "uv 관리 Python: $($c.status) $($c.message)" }
+          Get-ChildItem "$env:APPDATA\uv\python"
       # 러너엔 Git·uv가 이미 있어 위 setup은 포터블 경로를 안 탈 수 있다. 깨끗한 PC(winget 거절)에서 쓰는
       # 포터블 설치를 따로 돌려 압축 구조가 맞는지 본다
       - name: Portable installs (what a clean PC falls back to)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jaix import claude, cli, codex, doctor, gw, hermes, lock, winenv
+from jaix import claude, cli, codex, doctor, gw, hermes, lock, runtimes, uvpython, winenv
 
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
@@ -17,6 +17,9 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
     monkeypatch.setattr(claude, "managed_declaration", lambda: None)
+    # uv python install 은 진짜로 돌리지 않는다(내려받기)
+    monkeypatch.setattr(uvpython, "ensure", lambda versions, log, dry_run=False: True)
+    monkeypatch.setattr(uvpython, "needed", lambda lock, offline=False: [uvpython.DEFAULT])
     return tmp_path
 
 
@@ -185,3 +188,32 @@ def test_gw_source_saved_and_installed(isolated, monkeypatch):
     assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--gw-source", url]) == 0
     assert gw.source() == url and gw.exe_path().read_bytes() == b"MZ fake"
     assert doctor.check_gw()[0].status == "ok"
+
+
+def test_uv_python_pins_from_mcp_json():
+    cfg = {"mcpServers": {
+        "a": {"command": "uvx", "args": ["--python", "3.13", "--from", "x", "a"]},
+        "b": {"command": "C:\\tools\\uv.exe", "args": ["run", "--python=3.11", "b"]},
+        "c": {"command": "node", "args": ["--python", "9"]},
+        "d": {"command": "uvx", "args": ["--from", "${CLAUDE_PLUGIN_ROOT}", "hwp-agent", "mcp"]},
+    }}
+    assert uvpython.pins(cfg) == {"3.13", "3.11"}
+
+
+def test_uv_python_raw_url(the_lock):
+    by = {p.name: p for p in the_lock.plugins}
+    url = uvpython._raw_url(by["hwp-agent"], ".mcp.json")
+    assert url == f"https://raw.githubusercontent.com/z0nam/hwp-agent/{by['hwp-agent'].sha}/.mcp.json"
+    sub = by["calendar-worklog-ji"]
+    assert uvpython._raw_url(sub, ".mcp.json").endswith(f"/{sub.sha}/plugin/.mcp.json")
+
+
+def test_doctor_uv_python(monkeypatch):
+    monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found("uv", "0.9"))
+    monkeypatch.setattr(uvpython, "find", lambda v, uv=None: None)
+    c = doctor.check_uv_python()[0]
+    assert c.status == ("fail" if sys.platform == "win32" else "warn") and "3.12" in c.message
+    monkeypatch.setattr(uvpython, "find", lambda v, uv=None: "/x/python")
+    assert doctor.check_uv_python()[0].status == "ok"
+    monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found(None, None))
+    assert doctor.check_uv_python()[0].status == "skip"
