@@ -5,6 +5,7 @@
 ;
 ; CI(jaix-setup.yml)가 installer\payload\jaix.exe 를 놓고  ISCC.exe installer\jaix-setup.iss  를 돌린다.
 ; 무인 설치:  jaix-setup.exe /VERYSILENT /CURRENTUSER /CHANNELS=claude,codex [/GWSOURCE=<원내 URL>]
+; jaix setup이 실패하면 설치기는 종료 코드 10으로 끝난다(설치 자체는 남아 jaix doctor로 볼 수 있다).
 
 #define AppName "JAIX 원내 AI 도구"
 ; AppVer 는 릴리스 빌드가 jaix-kit 묶음 태그 값으로 바꿔 찍는다
@@ -63,6 +64,7 @@ var
   GuidePage: TOutputMsgMemoWizardPage;
   ProgressPage: TOutputProgressWizardPage;
   SetupLines: Integer;
+  SetupFailed: Boolean;
 
 function NeedsAddPath(Param: string): boolean;
 var
@@ -190,5 +192,18 @@ begin
       '명령창에서 jaix doctor 를 실행해 결과를 AI센터에 보내 주세요.' + #13#10 +
       '기록: ' + LogFile + #13#10 + #13#10 + Guide;
   if ResultCode <> 0 then
+  begin
+    SetupFailed := True;
     Log('jaix setup 종료 코드 ' + IntToStr(ResultCode));
+  end;
+end;
+
+// 무인 설치(/VERYSILENT)를 부르는 배포 스크립트가 jaix setup 실패를 알아채게 종료 코드로 알린다.
+// 1-8은 Inno가 쓰므로 10.
+function GetCustomSetupExitCode: Integer;
+begin
+  if SetupFailed then
+    Result := 10
+  else
+    Result := 0;
 end;
