@@ -28,8 +28,15 @@ CALVER_TAG_SHA_RE = re.compile(r"^jeju-inst/jaix-kit/\.github/workflows/calver-t
 
 
 def check_calver_workflow(text):
-    """calver.yml 내용에서 주석을 제외한 실제 uses 호출이 calver-tag.yml을 40자 SHA로 호출하는지 검사한다."""
-    has_valid_call = False
+    """calver.yml 내용에서 주석을 제외한 실제 uses 호출을 검사한다.
+
+    반환값:
+      - None: 정상 (calver-tag.yml을 40자 SHA로 호출)
+      - "TS-VER-2": calver-tag.yml 호출 자체가 없음
+      - "TS-VER-3": calver-tag.yml을 호출하지만 40자 SHA가 아님 (@main 등)
+    """
+    has_call = False
+    has_sha_call = False
     for line in text.splitlines():
         code = line.split("#", 1)[0].strip()
         if not code:
@@ -38,11 +45,16 @@ def check_calver_workflow(text):
         if m_uses:
             target = m_uses.group(1).strip("'\"")
             if "jeju-inst/jaix-kit/.github/workflows/calver-tag.yml" in target:
+                has_call = True
                 if CALVER_TAG_SHA_RE.fullmatch(target):
-                    has_valid_call = True
+                    has_sha_call = True
                 else:
-                    return False
-    return has_valid_call
+                    return "TS-VER-3"
+    if not has_call:
+        return "TS-VER-2"
+    if not has_sha_call:
+        return "TS-VER-3"
+    return None
 
 
 def git_url(src):
@@ -123,7 +135,10 @@ def lint_plugin(plugin_entry, files, read_func):
     else:
         try:
             text, _ = read_func(calver_path)
-            if not check_calver_workflow(text):
+            err = check_calver_workflow(text)
+            if err == "TS-VER-2":
+                issues.append(f"TS-VER-2: {calver_path} 에서 jeju-inst/jaix-kit/.github/workflows/calver-tag.yml 을 호출하지 않음")
+            elif err == "TS-VER-3":
                 issues.append(f"TS-VER-3: {calver_path} 에서 jeju-inst/jaix-kit/.github/workflows/calver-tag.yml 을 40자 SHA 로 호출하지 않음")
         except Exception as e:
             issues.append(f"TS-VER-2: {calver_path} 읽기 실패: {e}")
