@@ -102,15 +102,23 @@ def check_gw():
     have, info = gw.installed_version(), gw.latest()
     if not info:
         if have:
-            return [Check("ok", area, f"{have} 설치됨 (원내 위치에 닿지 않아 최신인지는 확인 못 함)")]
+            return [Check("ok", area, f"{have} 설치됨 (원내 위치에 닿지 않아 최신인지는 확인 못 함)"), *_gw_base_url()]
         if gw.unpublished():
             return [Check("skip", area, "아직 배포 전 — 배포가 시작되면 jaix update가 설치")]
         return [Check("warn", area, "원내 위치에 닿지 않아 설치 안 됨 (원내망 필요)", "원내망(사무실·VPN)에서 jaix setup")]
     if not have:
         return [Check("fail", area, f"원내 위치에 닿는데 설치 안 됨 (배포 {info['version']})", "jaix setup")]
     if not gw.same(have, info["version"]):
-        return [Check("warn", area, f"{have} 설치됨 — 배포 버전은 {info['version']}", "jaix update")]
-    return [Check("ok", area, f"{have} (배포 버전과 같음)")]
+        return [Check("warn", area, f"{have} 설치됨 — 배포 버전은 {info['version']}", "jaix update"), *_gw_base_url()]
+    return [Check("ok", area, f"{have} (배포 버전과 같음)"), *_gw_base_url()]
+
+
+def _gw_base_url():
+    """설치된 gw 가 그룹웨어 주소를 아는가(share.toml [gw].base_url 또는 GW_BASE_URL)."""
+    if gw.base_url():
+        return [Check("ok", "gw 그룹웨어 주소", "설정됨")]
+    return [Check("warn", "gw 그룹웨어 주소", f"없음 — gw 가 그룹웨어에 접속하지 못함 ({gw.share_toml()})",
+                  "원내망(사무실·VPN)에서 jaix setup")]
 
 
 def check_claude(lock):
