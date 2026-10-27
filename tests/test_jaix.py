@@ -650,3 +650,27 @@ def test_same_commit_prefix(the_lock):
     assert not claude.matches(branch, {"version": "0" * 12})
     tagged = next(p for p in the_lock.plugins if p.version)
     assert claude.matches(tagged, {"version": tagged.version}) and not claude.matches(tagged, {"version": tagged.sha[:12]})
+
+
+def test_codex_mcp_user_edit_after_jaix_is_kept(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    codex.write_mcp(the_lock, print, cli="codex")
+    cfg = home / "config.toml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace('command = "uvx"', 'command = "my-uvx"'), encoding="utf-8")
+    n = len(calls)
+    codex.write_mcp(the_lock, print, cli="codex")
+    assert len(calls) == n and "hwp-agent" not in codex.owned_mcp()
+
+
+def test_codex_sandbox_header_variants(isolated, monkeypatch):
+    import tomllib
+    monkeypatch.setattr(codex, "IS_WIN", True)
+    home = isolated / "codex_home"
+    home.mkdir()
+    cfg = home / "config.toml"
+    for text in ('[windows] # 설정\nother = 1\n', '["windows"]\nother = 1\n'):
+        cfg.write_text(text, encoding="utf-8")
+        assert codex.ensure_sandbox(print) is True
+        assert tomllib.loads(cfg.read_text(encoding="utf-8"))["windows"] == {"sandbox": "unelevated", "other": 1}
+    cfg.write_text('windows = { other = 1 }\n', encoding="utf-8")
+    assert codex.ensure_sandbox(print) is False  # 인라인 표는 그대로

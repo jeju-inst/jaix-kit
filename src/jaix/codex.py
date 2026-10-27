@@ -189,6 +189,10 @@ def write_mcp(lock, log, cli=None, dry_run=False):
         if cur is not None and name not in owned:
             log(f"    MCP {name}: config.toml에 사용자 정의가 있어 그대로 둠")
             continue
+        if cur is not None and cur != owned[name]:  # jaix가 쓴 뒤 사용자가 고침 → 그 뒤로는 사용자 것
+            log(f"    MCP {name}: jaix가 쓴 뒤 바뀌어 있어 그대로 둠(이제 사용자 정의로 봄)")
+            owned.pop(name)
+            continue
         if dry_run:
             log(f"    MCP {name}: 절대경로로 쓸 예정")
             continue
@@ -224,12 +228,20 @@ def ensure_sandbox(log, dry_run=False):
             return False
     except (OSError, ValueError):
         return False
-    m = re.search(r"^\[windows\][ \t]*$", text, re.M)
+    has_table = "windows" in tomllib.loads(text) if text.strip() else False
+    # 머리는 [windows] · ["windows"] · 뒤 주석 등 여러 꼴이 될 수 있다
+    m = re.search(r"""^[ \t]*\[[ \t]*(?:windows|"windows"|'windows')[ \t]*\][^\n]*$""", text, re.M)
     if m:  # 표가 있으면 머리 바로 아래에 넣는다
         new = text[:m.end()] + '\nsandbox = "unelevated"' + text[m.end():]
+    elif has_table:  # 인라인 표 등 알아보기 어려운 꼴 — 손대지 않는다
+        log("    Codex 샌드박스: [windows] 표 꼴을 알아보지 못해 그대로 둠")
+        return False
     else:
         new = text.rstrip("\n") + ('\n\n' if text.strip() else "") + '[windows]\nsandbox = "unelevated"\n'
-    tomllib.loads(new)
+    try:
+        tomllib.loads(new)
+    except ValueError:
+        return False  # 깨진 파일을 쓰지 않는다
     if not dry_run:
         cfg.parent.mkdir(parents=True, exist_ok=True)
         cfg.write_text(new, encoding="utf-8")
