@@ -83,4 +83,7 @@ claude plugin marketplace add jeju-inst/jaix-kit
 claude plugin install calendar-worklog-ji@jaix
 ```
 
-설계 근거: `docs/design.md`, 상위 표준: `ji-deploy-standards`.
+## 새 도구를 넣을 때
+도구 편입 표준은 [`docs/tool-standard.md`](docs/tool-standard.md)다. 형식·버전·잠금·MCP·Windows·토큰 예산 같은 규칙에 ID(`TS-…`)가 붙어 있고, 잠금 CI가 같은 ID로 검사한다. 편입 PR 본문 끝에 이 문서의 체크리스트를 붙인다.
+
+설계 근거: `docs/design.md`. 상위 표준이던 `ji-deploy-standards`(v1)는 `docs/tool-standard.md`에 흡수했다.
