@@ -90,6 +90,10 @@ def guide(channels, result):
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
     if "hermes" in channels:
         out += ["■ 슬랙으로도 쓰기 (Hermes)", f"  {hermes.NOT_YET}"]
+    if (result.get("gw") or {}).get("status") in ("installed", "current"):
+        out += ["■ 그룹웨어 (gw)",
+                "  gw 를 처음 쓰기 전에 새 명령창에서 `gw login` 을 한 번 실행하세요.",
+                "  뜨는 창에 그룹웨어 아이디·비밀번호를 넣으면 이 PC에 안전하게 저장됩니다."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
             "문제가 있으면 새 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
     return "\n".join(out)
@@ -149,7 +153,9 @@ def cmd_setup(args, log):
     result = {}
     if args.gw_source and not args.dry_run:
         gw.save_source(args.gw_source)
-    steps.run("gw", gw.setup, log, dry_run=args.dry_run)
+    gw_res = steps.run("gw", gw.setup, log, dry_run=args.dry_run)
+    if gw_res is not None:
+        result["gw"] = gw_res
     log("\n[2/3] Claude")
     if "claude" in chosen:
         res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run)

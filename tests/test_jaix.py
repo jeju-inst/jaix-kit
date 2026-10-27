@@ -32,7 +32,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
     monkeypatch.setattr(schedule, "_run", lambda args: (True, ""))
     monkeypatch.setattr(schedule, "run_mode", lambda: None)
-    monkeypatch.setenv(gw.ENV, "none")  # 기본 원내 주소로 나가지 않게(gw 시험이 저마다 바꾼다)
+    monkeypatch.setenv(gw.ENV, "none")
+    monkeypatch.setenv("JI_GW_CONFIG_DIR", str(tmp_path / "gwconf"))
+    monkeypatch.delenv("GW_BASE_URL", raising=False)  # 기본 원내 주소로 나가지 않게(gw 시험이 저마다 바꾼다)
     return tmp_path
 
 
@@ -674,3 +676,46 @@ def test_codex_sandbox_header_variants(isolated, monkeypatch):
         assert tomllib.loads(cfg.read_text(encoding="utf-8"))["windows"] == {"sandbox": "unelevated", "other": 1}
     cfg.write_text('windows = { other = 1 }\n', encoding="utf-8")
     assert codex.ensure_sandbox(print) is False  # 인라인 표는 그대로
+
+
+def test_gw_base_url_written_preserving_other_keys(isolated):
+    import tomllib
+    f = gw.share_toml()
+    f.parent.mkdir(parents=True)
+    f.write_text('# 내 설정\n[gw]\nother = 1\n\n[ui]\ntheme = "dark"\n', encoding="utf-8")
+    assert gw.save_base_url("https://gw.example.internal/", print)
+    d = tomllib.loads(f.read_text(encoding="utf-8"))
+    assert d == {"gw": {"base_url": "https://gw.example.internal/", "other": 1}, "ui": {"theme": "dark"}}
+    assert "# 내 설정" in f.read_text(encoding="utf-8")
+    assert gw.save_base_url("https://gw2.example.internal/", print)  # 있으면 그 줄만 바꿈
+    assert tomllib.loads(f.read_text(encoding="utf-8"))["gw"]["base_url"] == "https://gw2.example.internal/"
+    assert gw.base_url() == "https://gw2.example.internal/"
+
+
+def test_gw_base_url_new_file_and_broken_file(isolated):
+    assert gw.base_url() is None
+    assert gw.save_base_url("https://gw.example.internal/", print)
+    assert gw.base_url() == "https://gw.example.internal/"
+    gw.share_toml().write_text("[gw\nbroken", encoding="utf-8")
+    lines = []
+    assert gw.save_base_url("https://x/", lines.append) is False and "건드리지 않음" in lines[0]
+
+
+def test_gw_setup_records_base_url_only_when_present(isolated, monkeypatch):
+    calls, state = _gw_share(isolated, monkeypatch)
+    gw.setup(print)
+    assert gw.base_url() is None  # 필드 없음(원외 응답) → 파일 안 만듦
+    latest = json.loads((isolated / "share" / "gw" / "latest.json").read_text(encoding="utf-8"))
+    latest["gw_base_url"] = "https://gw.example.internal/"
+    (isolated / "share" / "gw" / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+    gw.setup(print)
+    assert gw.base_url() == "https://gw.example.internal/"
+    assert {c.area: c for c in doctor.check_gw()}["gw 그룹웨어 주소"].status == "ok"
+
+
+def test_gw_base_url_unreadable_file_does_not_raise(isolated):
+    f = gw.share_toml()
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"[gw]\nother = \"\xff\xfe\"\n")  # UTF-8 아님
+    lines = []
+    assert gw.save_base_url("https://x/", lines.append) is False and "UnicodeDecodeError" in lines[0]
