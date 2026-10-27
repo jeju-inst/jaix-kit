@@ -170,7 +170,9 @@ begin
   ExePath := ExpandConstant('{app}\jaix.exe');
   GuideFile := ExpandConstant('{app}\guide.txt');
   LogFile := ExpandConstant('{app}\setup.log');
-  Params := 'setup --channels ' + Channels + ' --guide-out "' + GuideFile + '" --log "' + LogFile + '"';
+  // --via-task: jaix setup 본 실행을 작업 스케줄러로 돌린다. 설치본의 자식으로 돌면 Windows 11 프로세스 완화
+  // 정책(RedirectionGuard)을 물려받아 uv 정션 등에서 os error 448 로 죽는다(#27). 진행 줄은 그대로 이 화면에 흐른다
+  Params := 'setup --via-task --channels ' + Channels + ' --guide-out "' + GuideFile + '" --log "' + LogFile + '"';
   { gw 런타임 latest.json 주소를 바꿀 때만 /GWSOURCE= (기본은 jaix 의 원내 주소, none 이면 끔) }
   if ExpandConstant('{param:GWSOURCE|}') <> '' then
     Params := Params + ' --gw-source "' + ExpandConstant('{param:GWSOURCE|}') + '"';

@@ -470,3 +470,77 @@ def test_codex_found_in_npm_global_dir(isolated, monkeypatch):
     monkeypatch.setattr(paths, "npm_global_bin", lambda: npm)
     monkeypatch.setattr(paths.shutil, "which", lambda n, path=None: str(npm / name) if path == str(npm) else None)
     assert codex.find_cli() == str(npm / name)
+
+
+def test_steps_continue_and_log_traceback(isolated, monkeypatch):
+    """#27: 한 단계가 예외를 내도 traceback 을 남기고 다음 단계로 간다."""
+    logf = isolated / "setup.log"
+
+    def boom(*a, **kw):
+        raise OSError(448, "신뢰할 수 없는 탑재 지점")
+    monkeypatch.setattr(uvpython, "ensure", boom)
+    guide = isolated / "guide.txt"
+    rc = cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--log", str(logf), "--guide-out", str(guide)])
+    text = logf.read_text(encoding="utf-8")
+    assert rc == 1 and "Traceback" in text and "uv 관리 Python" in text
+    assert "[2/3] Claude" in text and guide.exists()  # 뒤 단계도 돌았다
+    assert "일부 단계가 실패했습니다: uv 관리 Python" in text
+
+
+def test_main_logs_unexpected_exception_and_status(isolated, monkeypatch):
+    logf, status = isolated / "setup.log", isolated / "status.json"
+
+    def boom(*a, **kw):
+        raise RuntimeError("뜻밖")
+    monkeypatch.setattr(cli.lockmod, "load", boom)
+    rc = cli.main(["setup", "--runtimes", "none", "--log", str(logf), "--status-out", str(status)])
+    assert rc == 1 and "RuntimeError: 뜻밖" in logf.read_text(encoding="utf-8")
+    assert json.loads(status.read_text(encoding="utf-8")) == {"code": 1}
+
+
+def test_run_via_task_streams_log_and_returns_code(isolated, monkeypatch):
+    import threading
+    logf, status = isolated / "setup.log", isolated / "st.json"
+    seen, calls = [], []
+
+    def fake_run(args):
+        calls.append(args)
+        if args[:2] == ["schtasks", "/Run"]:  # 작업이 돈 것처럼: 로그를 쓰고 종료 코드를 남긴다
+            def work():
+                logf.write_text("[1/3] 런타임\n  uv: 있음\n", encoding="utf-8")
+                status.write_text('{"code": 0}', encoding="utf-8")
+            threading.Timer(0.2, work).start()
+        return True, ""
+    monkeypatch.setattr(schedule, "_run", fake_run)
+    monkeypatch.setattr(schedule, "_user_id", lambda: "u")
+    assert schedule.run_via_task(["jaix.exe", "setup"], logf, status, seen.append) == 0
+    assert "  uv: 있음" in seen
+    assert any(a[:2] == ["schtasks", "/Delete"] for a in calls)  # 끝나면 지운다
+
+
+def test_run_via_task_falls_back_when_cannot_register(isolated, monkeypatch):
+    monkeypatch.setattr(schedule, "_run", lambda args: (False, "액세스 거부"))
+    monkeypatch.setattr(schedule, "_user_id", lambda: "u")
+    seen = []
+    assert schedule.run_via_task(["jaix.exe"], isolated / "l", isolated / "s", seen.append) is None
+    assert "직접 실행" in seen[0]
+
+
+def test_once_task_xml_has_no_trigger():
+    xml = schedule.task_xml(["C:\\jaix.exe", "setup", "--log", "C:\\a b\\setup.log"], "u", logon=False)
+    assert "<Triggers>" not in xml and "<LogonType>InteractiveToken</LogonType>" in xml
+    assert '"C:\\a b\\setup.log"' in xml
+
+
+def test_on_disk_survives_untrusted_mount(isolated, monkeypatch):
+    pydir = isolated / "uvpy"
+    (pydir / "cpython-3.12-windows-x86_64-none").mkdir(parents=True)
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", str(pydir))
+    real = Path.is_file
+
+    def guarded(self):
+        if "none" in str(self):
+            raise OSError(448, "untrusted mount point")
+        return real(self)
+    monkeypatch.setattr(Path, "is_file", guarded)
+    assert uvpython.on_disk("3.12") is None  # 예외 없이

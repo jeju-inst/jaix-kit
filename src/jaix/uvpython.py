@@ -107,9 +107,16 @@ def on_disk(version):
     """
     exe = "python.exe" if IS_WIN else "bin/python3"
     root = python_dir()
-    for d in sorted([*root.glob(f"cpython-{version}.*"), *root.glob(f"cpython-{version}-*")]):
-        if (d / exe).is_file():
-            return str(d / exe)
+    try:
+        candidates = sorted([*root.glob(f"cpython-{version}.*"), *root.glob(f"cpython-{version}-*")])
+    except OSError:
+        return None
+    for d in candidates:
+        try:  # 정션(cpython-3.12-…-none)은 상속된 RedirectionGuard 아래에서 WinError 448 을 낸다(#27)
+            if (d / exe).is_file():
+                return str(d / exe)
+        except OSError:
+            continue
     return None
 
 

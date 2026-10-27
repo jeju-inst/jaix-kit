@@ -101,6 +101,12 @@ jobs:
           $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
           if (-not (Test-Path "$app\jaix.exe")) { throw "jaix.exe 가 $app 에 없음" }
           Get-Content "$app\setup.log"
+          # #27: jaix setup 본 실행이 작업 스케줄러(--via-task)로 돌았는지 — 그 길만 setup-status.json 을 남긴다
+          if (-not (Test-Path "$app\setup-status.json")) { throw "jaix setup 이 작업 스케줄러로 돌지 않음(setup-status.json 없음)" }
+          Get-Content "$app\setup-status.json"
+          schtasks /Query /TN jaix-setup-once 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "한 번짜리 작업 jaix-setup-once 가 남음" }
+          $global:LASTEXITCODE = 0
           Get-Content "$app\guide.txt"
 
       - name: jaix doctor (from the user PATH the installer wrote)
