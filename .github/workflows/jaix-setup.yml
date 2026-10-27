@@ -1,0 +1,147 @@
+name: jaix-setup
+
+# jaix.exe(PyInstaller 단일 exe)와 설치 프로그램 jaix-setup.exe(Inno, 사용자 범위)를 만들고,
+# 새 Windows 러너에서 무인 설치 → jaix doctor → 제거까지 시험한다.
+# 묶음 태그(vYYYY.MM.DD.N)로 실행될 때만 버전을 찍고 그 태그의 릴리스로 올린다.
+# bundle-tag.yml 이 태그를 단 뒤 `gh workflow run jaix-setup.yml --ref <tag>` 로 부른다
+# (GITHUB_TOKEN 으로 단 태그는 push: tags 를 깨우지 않는다). PR·수동 실행은 빌드·시험만 하고 올리지 않는다.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["installer/**", "src/**", "pyproject.toml", ".github/workflows/jaix-setup.yml"]
+
+permissions:
+  contents: write
+
+# 태그 빌드는 한 줄로 세운다(릴리스 생성이 겹치지 않게). PR·브랜치 빌드는 따로라 태그 빌드를 밀어내지 않는다.
+concurrency:
+  group: jaix-setup-${{ startsWith(github.ref, 'refs/tags/v') && 'release' || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}   # 런타임 릴리스 조회가 익명 한도에 걸리지 않게
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 소스 버전은 0.0.0+dev 다. 태그로 빌드할 때만 태그 값(v 뗀 것, 예 2026.10.27.1 —
+      # PEP 440·Inno 4자리 모두 유효)을 찍어 jaix --version 과 설치본이 묶음 번호를 말하게 한다.
+      - name: Stamp version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".Substring(1)
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          function Stamp($path, $pattern, $repl, $bom = $false) {
+            $text = [IO.File]::ReadAllText($path)
+            $new = [regex]::Replace($text, $pattern, $repl, 'Multiline')
+            if ($new -eq $text) { throw "버전 자리를 못 찾음: $path" }
+            [IO.File]::WriteAllText($path, $new, (New-Object System.Text.UTF8Encoding($bom)))
+          }
+          Stamp pyproject.toml '^version = ".*"' "version = `"$v`""
+          Stamp src/jaix/__init__.py '^__version__ = ".*"' "__version__ = `"$v`""
+          Stamp installer/jaix-setup.iss '^#define AppVer ".*"' "#define AppVer `"$v`"" $true
+          Write-Host "version $v"
+
+      - name: Build jaix.exe
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller
+          # 잠금 사본을 묶어 네트워크가 막혀도 doctor가 돈다(평소엔 GitHub의 최신 잠금을 먼저 본다)
+          pyinstaller --onefile --name jaix --paths src `
+            --add-data ".claude-plugin/marketplace.json;." `
+            src/jaix/__main__.py
+          .\dist\jaix.exe --version
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer\payload | Out-Null
+          Copy-Item dist\jaix.exe installer\payload\jaix.exe
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\jaix-setup.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 실패 $LASTEXITCODE" }
+          Get-ChildItem installer\Output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jaix-windows
+          path: |
+            dist/jaix.exe
+            installer/Output/jaix-setup.exe
+
+      # --- 새 러너에서 설치 → 점검 → 제거 (인수 시험 0-1·0-3을 CI에서 흉내) ---
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code (so setup can install plugins right away)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Silent install (per-user, no admin)
+        shell: pwsh
+        run: |
+          $p = Start-Process installer\Output\jaix-setup.exe -Wait -PassThru -ArgumentList `
+            '/VERYSILENT','/CURRENTUSER','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log','/CHANNELS=claude,codex'
+          Get-Content install.log -Tail 60
+          if ($p.ExitCode -ne 0) { throw "설치 종료 코드 $($p.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          if (-not (Test-Path "$app\jaix.exe")) { throw "jaix.exe 가 $app 에 없음" }
+          Get-Content "$app\setup.log"
+          Get-Content "$app\guide.txt"
+
+      - name: jaix doctor (from the user PATH the installer wrote)
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          # 새 로그인처럼 사용자 PATH를 레지스트리에서 다시 읽는다
+          $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $env:Path = "$user;$machine"
+          (Get-Command jaix).Source
+          jaix --version
+          jaix doctor
+          if ($LASTEXITCODE -ne 0) { throw "jaix doctor 실패" }
+          (Get-Command hwp2pdf-cli).Source
+
+      - name: Uninstall
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          $p = Start-Process "$app\unins000.exe" -Wait -PassThru -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          # 제거기는 임시 사본으로 다시 떠서 끝나므로 폴더가 사라질 때까지 잠깐 기다린다
+          for ($i = 0; $i -lt 30 -and (Test-Path $app); $i++) { Start-Sleep 1 }
+          if (Test-Path $app) { Get-ChildItem -Recurse $app | Select-Object -First 20; throw "$app 가 남음" }
+          $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($user -like "*Programs\jaix*") { throw "사용자 PATH에 jaix가 남음: $user" }
+          Write-Host "제거 확인"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jaix-install-logs
+          path: install.log
+
+      # 태그 빌드만 올린다. PR·브랜치 빌드는 0.0.0+dev 라 위 아티팩트에서 멈춘다.
+      - name: Publish release for the bundle tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release delete $tag --yes 2>$null
+          gh release create $tag ".\installer\Output\jaix-setup.exe" ".\dist\jaix.exe" --latest `
+            --title "JAIX $tag" `
+            --notes "연구원 PC 설치: **jaix-setup.exe** 를 받아 실행하세요(관리자 권한 필요 없음).`n- jaix-setup.exe — 설치 프로그램. 런타임(uv·Git·Java·hwp2pdf)과 Claude·Codex 도구 등록까지 한 번에.`n- jaix.exe — 같은 CLI 단독 실행파일(jaix setup · doctor · update).`n고정 주소: https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe`nBuilt by .github/workflows/jaix-setup.yml."

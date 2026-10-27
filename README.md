@@ -12,7 +12,8 @@
 | `.github/workflows/ci.yml` | Windows·Linux 새 머신에서 전 플러그인 설치 시험 + 매일 태그 감시 |
 | `.github/workflows/calver-tag.yml` | 재사용 워크플로. 도구 저장소가 main 머지마다 불러 날짜 태그를 단다 |
 | `.github/workflows/lock-update.yml` | 갱신 봇. 매일 새 버전을 찾아 beta 갱신 PR과 beta → main 승격 PR을 연다 |
-| `.github/workflows/bundle-tag.yml` | main 잠금이 바뀔 때마다 묶음 날짜 태그 |
+| `.github/workflows/bundle-tag.yml` | main 잠금·설치본이 바뀔 때마다 묶음 날짜 태그 → `jaix-setup.yml` 빌드 호출 |
+| `.github/workflows/jaix-setup.yml` | `jaix.exe`·`jaix-setup.exe` 빌드, 무인 설치·doctor·제거 시험, 태그 릴리스 |
 
 ## 채널
 - `main` = **stable** (전원). 관리자 콘솔이 이 브랜치를 자동 업데이트로 배포한다.
@@ -50,7 +51,9 @@
 - 되돌리기: 승격 PR 을 revert 하면 이전 잠금으로 돌아간다(도구 태그는 지우지 않는다).
 
 ## `jaix` CLI — 설치·점검·갱신 (`src/jaix/`)
-연구원 PC에서는 설치 프로그램 `jaix-setup.exe` 가 이것을 부른다. 개발자는 `uv tool install git+https://github.com/jeju-inst/jaix-kit` 로 같은 명령을 쓴다.
+연구원 PC에서는 설치 프로그램 **`jaix-setup.exe`**(https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe, 관리자 권한 불필요)가 이것을 부른다.
+설치본은 채널 체크박스(Claude · Codex · 슬랙[다음 버전])만 받아 `jaix setup --channels …` 에 넘기는 껍데기다(`installer/jaix-setup.iss`).
+묶음 태그가 새로 달리면 `jaix-setup.yml` 이 Windows 러너에서 빌드 → 무인 설치 → `jaix doctor` → 제거까지 시험하고 그 태그의 릴리스로 올린다. 개발자는 `uv tool install git+https://github.com/jeju-inst/jaix-kit` 로 같은 명령을 쓴다.
 
 | 명령 | 하는 일 |
 |---|---|
