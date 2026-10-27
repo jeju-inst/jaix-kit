@@ -277,3 +277,27 @@ def test_task_mode_must_be_interactive_least_privilege():
     assert "로그온할 때만" in schedule.mode_problem(ET.fromstring(s4u))
     admin = good.replace("LeastPrivilege", "HighestAvailable")
     assert "관리자" in schedule.mode_problem(ET.fromstring(admin))
+
+
+def test_update_exit_code_is_int(monkeypatch):
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    assert cli.main(["update"]) == 0
+    monkeypatch.setattr(cli, "_update", lambda args, log: ["x"])
+    assert cli.main(["update"]) == 1
+
+
+def test_no_autoupdate_removes_existing(isolated, monkeypatch):
+    if not schedule.IS_MAC:
+        pytest.skip("LaunchAgent 파일로 확인")
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude"]) == 0
+    assert schedule.plist_path().exists()
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
+    assert not schedule.plist_path().exists()
+
+
+def test_codex_setup_reports_failed_plugins(isolated, monkeypatch, the_lock):
+    monkeypatch.setattr(codex, "find_cli", lambda: "codex")
+    monkeypatch.setattr(codex, "marketplace_configured", lambda: True)
+    monkeypatch.setattr(codex, "_run", lambda cli, args, log: args[:2] != ["plugin", "add"])
+    res = codex.setup(the_lock, print)
+    assert res["failed"] == [p.name for p in the_lock.plugins]

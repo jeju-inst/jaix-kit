@@ -108,6 +108,8 @@ def cmd_setup(args, log):
         log(f"  {hermes.NOT_YET}")
     if not args.no_autoupdate:
         result["autoupdate"] = schedule.register(log, dry_run=args.dry_run)
+    elif not args.dry_run and schedule.unregister():  # 끄라고 했으니 예전에 등록한 것도 지운다
+        log("  로그온 자동 갱신: 지움 (--no-autoupdate)")
     text = guide(chosen, result)
     log("\n" + text)
     if args.guide_out:
@@ -133,7 +135,7 @@ def cmd_doctor(args, log):
 
 def cmd_update(args, log):
     if not args.quiet:
-        return _update(args, log)
+        return 1 if _update(args, log) else 0
     # 로그온 예약 작업이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다. 실패는 doctor가 보여 준다
     log = Log(schedule.open_log(), quiet=True)
     log(f"\n== {datetime.now().isoformat(timespec='seconds')} 로그온 자동 갱신")
@@ -175,6 +177,8 @@ def _update(args, log):
         res = codex.setup(lock, log, dry_run=args.dry_run, update=True)
         if res.get("error"):
             problems.append(f"Codex {res['error']} 실패")
+        if res.get("failed"):
+            problems.append(f"Codex 플러그인 설치 실패: {', '.join(res['failed'])}")
     log("\n[3/3] Hermes 스킬")
     changed = hermes.sync(lock, log, dry_run=args.dry_run)
     log(f"  {len(changed)}개 맞춤" if changed else "  맞출 것 없음")
