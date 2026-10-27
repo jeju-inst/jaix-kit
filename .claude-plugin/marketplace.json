@@ -63,6 +63,42 @@
           "refKind": "branch"
         }
       }
+    },
+    {
+      "name": "ji-project-template",
+      "displayName": "연구과제 폴더·서식 (ji-project-template)",
+      "description": "JRI 정책연구 과제의 표준 폴더 구조 생성과 연구계획서·심의 서식 템플릿 배치를 지원한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jeju-inst/ji-project-template.git",
+        "ref": "main",
+        "sha": "07040e21d448df84b21a55649770e4f8cbdb9e8d"
+      },
+      "homepage": "https://github.com/jeju-inst/ji-project-template",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
+    },
+    {
+      "name": "korea-rio-mcp",
+      "displayName": "지역산업연관분석 (korea-rio-mcp)",
+      "description": "한국은행 지역산업연관표 기반으로 경제적 파급효과(생산·부가가치·취업·고용)를 분석·산출한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/z0nam/korea-rio-mcp.git",
+        "ref": "main",
+        "sha": "056d06aa58986ab6012acf8f623dc2d42004985f"
+      },
+      "homepage": "https://github.com/z0nam/korea-rio-mcp",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
     }
   ]
 }
