@@ -79,7 +79,8 @@ end;
 function IsCodexInstalled(): boolean;
 begin
   Result :=
-    DirExists(ExpandConstant('{userprofile}\.codex')) or
+    { {userprofile} 는 Inno 상수가 아니다(쓰면 런타임 오류) — 환경변수로 }
+    DirExists(GetEnv('USERPROFILE') + '\.codex') or
     FileExists(ExpandConstant('{userappdata}\npm\codex.cmd'));
 end;
 
