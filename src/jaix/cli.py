@@ -121,7 +121,7 @@ def _setup_via_task(args):
     log_path = args.log or str(paths.jaix_home() / "setup.log")
     if not args.log:
         raw += ["--log", log_path]
-    code = schedule.run_via_task([*base, *raw, "--status-out", str(status)], log_path, status, Log())
+    code = schedule.run_via_task([*base, "setup", *raw, "--status-out", str(status)], log_path, status, Log())
     if code is not None:
         return code
     args.via_task = False  # 작업으로 못 돌렸으면 직접(상속된 채로라도) 한다

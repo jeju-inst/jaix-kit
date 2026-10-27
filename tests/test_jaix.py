@@ -544,3 +544,20 @@ def test_on_disk_survives_untrusted_mount(isolated, monkeypatch):
         return real(self)
     monkeypatch.setattr(Path, "is_file", guarded)
     assert uvpython.on_disk("3.12") is None  # 예외 없이
+
+
+def test_via_task_replays_setup_command(isolated, monkeypatch):
+    """작업으로 넘기는 명령이 그대로 다시 파싱되는지(setup 하위 명령 포함, --via-task 제외)."""
+    seen = {}
+
+    def fake(cmd, log_path, status, echo):
+        seen["cmd"] = cmd
+        return 0
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    monkeypatch.setattr(schedule, "run_via_task", fake)
+    assert cli.main(["setup", "--via-task", "--channels", "claude", "--log", str(isolated / "s.log")]) == 0
+    cmd = seen["cmd"]
+    i = cmd.index("setup")
+    replay = cli.build_parser().parse_args(cmd[i:])
+    assert replay.cmd == "setup" and replay.channels == "claude" and not replay.via_task
+    assert replay.status_out and replay.log == str(isolated / "s.log")
