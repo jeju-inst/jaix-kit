@@ -15,6 +15,11 @@ from jaix import __version__, claude, codex, doctor, gw, hermes, hwpjar, lock as
 
 CHANNELS = ("claude", "codex", "hermes")
 
+# 창 없는 jaixw.exe(PyInstaller --noconsole)에는 표준 출력이 없다(None) → print·argparse 오류가 죽지 않게 버린다
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 # 한국어 Windows 콘솔(cp949)·CI(cp1252)로 파이프될 때도 한글이 죽지 않게
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
@@ -46,6 +51,8 @@ class Steps:
 
 class Log:
     def __init__(self, path=None, quiet=False):
+        if path:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.file = open(path, "a", encoding="utf-8") if path else None
         self.quiet = quiet
 
@@ -121,9 +128,9 @@ def _setup_via_task(args):
     """설치본(Inno)이 부르는 길: 같은 jaix setup 을 작업 스케줄러로 돌려 Inno 의 프로세스 완화 정책을 물려받지
     않게 한다(#27). 진행 줄은 setup.log 에서 읽어 이 프로세스의 표준 출력으로 흘려 설치 화면에 보인다."""
     raw = [a for a in args.raw_argv if a != "--via-task"]
-    status = paths.jaix_home() / "setup-status.json"
-    base = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "jaix"]
-    log_path = args.log or str(paths.jaix_home() / "setup.log")
+    status = paths.data_dir() / "setup-status.json"
+    base = paths.self_command(windowless=True)  # 작업이 도는 동안 콘솔 창이 뜨지 않게
+    log_path = args.log or str(paths.data_dir() / "setup.log")
     if not args.log:
         raw += ["--log", log_path]
     code = schedule.run_via_task([*base, "setup", *raw, "--status-out", str(status)], log_path, status, Log())
@@ -178,6 +185,7 @@ def cmd_setup(args, log):
     log("\n" + text)
     if args.guide_out:
         # Inno Setup LoadStringsFromFile가 UTF-8로 읽게 BOM을 붙인다
+        Path(args.guide_out).parent.mkdir(parents=True, exist_ok=True)
         with open(args.guide_out, "w", encoding="utf-8-sig") as f:
             f.write(text + "\n")
     return steps.summary()
@@ -305,6 +313,7 @@ def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(raw)
     args.raw_argv = raw[1:]  # 하위 명령 뒤의 인자(--via-task 가 그대로 다시 넘김)
+    paths.migrate_data()  # 예전 설치본이 프로그램 폴더에 둔 기록·상태를 데이터 폴더로
     # --via-task 는 진행 줄을 setup.log 에서 읽어 흘리므로 같은 파일에 또 쓰지 않는다
     log = Log(None if getattr(args, "via_task", False) and paths.IS_WIN else args.log)
     code = 1

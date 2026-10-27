@@ -27,7 +27,7 @@ EXE = "gw"
 
 
 def _config_file():
-    return paths.jaix_home() / "config.json"
+    return paths.data_dir() / "config.json"
 
 
 def _config():
@@ -88,7 +88,7 @@ def _uv():
 
 def _run(args, timeout=60):
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace")
+        r = subprocess.run(args, capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=timeout, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     return r.returncode == 0, (r.stdout + r.stderr).strip()
@@ -231,7 +231,7 @@ def _save_base_url(url, log):
 
 
 def _install(info, uv):
-    dest = paths.jaix_home() / "gw" / Path(info["wheel"]).name  # uv가 wheel 파일 이름에서 버전을 읽으므로 이름 그대로
+    dest = paths.data_dir() / "gw" / Path(info["wheel"]).name  # uv가 wheel 파일 이름에서 버전을 읽으므로 이름 그대로
     net.download(info["url"], dest)
     digest = hashlib.sha256(dest.read_bytes()).hexdigest()
     if digest != info["sha256"].lower():

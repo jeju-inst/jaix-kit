@@ -93,7 +93,7 @@ def find(rt):
     if not path:
         return Found(None, None)
     try:
-        out = subprocess.run([path, *rt.version_args], capture_output=True, text=True, timeout=30,
+        out = subprocess.run([path, *rt.version_args], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=30,
                              encoding="utf-8", errors="replace")
         raw = (out.stdout + out.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -162,7 +162,7 @@ def _winget(args, log):
     cmd = [exe, *args, "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements",
            "--disable-interactivity"]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace")
+        r = subprocess.run(cmd, capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=900, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"    winget 실패: {e}")
         return False

@@ -16,7 +16,7 @@ LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplac
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """실제 사용자 설정을 건드리지 않게 모든 경로를 tmp로."""
-    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "HERMES_HOME"):
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "JAIX_DATA", "HERMES_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
     monkeypatch.setattr(claude, "managed_declaration", lambda: None)
@@ -719,3 +719,41 @@ def test_gw_base_url_unreadable_file_does_not_raise(isolated):
     f.write_bytes(b"[gw]\nother = \"\xff\xfe\"\n")  # UTF-8 아님
     lines = []
     assert gw.save_base_url("https://x/", lines.append) is False and "UnicodeDecodeError" in lines[0]
+
+
+def test_migrate_data_moves_old_records_out_of_program_dir(isolated):
+    """jaix-win 실측: 기록·상태가 프로그램 폴더(제거하면 통째로 지워짐)에 있었다 → 데이터 폴더로 옮긴다."""
+    old, new = paths.jaix_home(), paths.data_dir()
+    (old / "gw").mkdir(parents=True)
+    (old / "update-status.json").write_text('{"ok": false}', encoding="utf-8")
+    (old / "codex-mcp.json").write_text("{}", encoding="utf-8")
+    (old / "gw" / "x.whl").write_text("w", encoding="utf-8")
+    new.mkdir(parents=True)
+    (new / "codex-mcp.json").write_text('{"keep": 1}', encoding="utf-8")  # 새 자리에 있으면 그쪽을 믿는다
+    (old / "bin").mkdir()  # 런타임은 프로그램 폴더에 그대로
+    assert sorted(paths.migrate_data()) == ["gw", "update-status.json"]
+    assert (new / "gw" / "x.whl").exists() and not (old / "update-status.json").exists()
+    assert json.loads((new / "codex-mcp.json").read_text(encoding="utf-8")) == {"keep": 1}
+    assert (old / "bin").is_dir()
+    assert schedule.status_file().parent == new
+
+
+def test_self_command_prefers_windowless_exe(tmp_path, monkeypatch):
+    exe = tmp_path / "jaix.exe"
+    exe.write_text("")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe))
+    monkeypatch.setattr(paths, "IS_WIN", True)
+    assert paths.self_command(windowless=True) == [str(exe)]  # jaixw.exe 가 없으면(옛 설치본) jaix.exe
+    (tmp_path / "jaixw.exe").write_text("")
+    assert paths.self_command(windowless=True) == [str(tmp_path / "jaixw.exe")]
+    assert paths.self_command() == [str(exe)]
+    assert schedule.command() == [str(tmp_path / "jaixw.exe"), "update", "--quiet"]
+
+
+def test_log_and_guide_create_data_dir(isolated):
+    logf = isolated / "fresh" / "setup.log"
+    guide = isolated / "fresh2" / "guide.txt"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--log", str(logf),
+                     "--guide-out", str(guide)]) == 0
+    assert logf.exists() and guide.exists()
