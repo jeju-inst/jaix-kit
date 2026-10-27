@@ -4,7 +4,7 @@
 ; 사용자 범위 설치(관리자 권한·재부팅 없음).
 ;
 ; CI(jaix-setup.yml)가 installer\payload\jaix.exe 를 놓고  ISCC.exe installer\jaix-setup.iss  를 돌린다.
-; 무인 설치:  jaix-setup.exe /VERYSILENT /CURRENTUSER /CHANNELS=claude,codex
+; 무인 설치:  jaix-setup.exe /VERYSILENT /CURRENTUSER /CHANNELS=claude,codex [/GWSOURCE=<원내 URL>]
 
 #define AppName "JAIX 원내 AI 도구"
 ; AppVer 는 릴리스 빌드가 jaix-kit 묶음 태그 값으로 바꿔 찍는다
@@ -168,6 +168,9 @@ begin
   GuideFile := ExpandConstant('{app}\guide.txt');
   LogFile := ExpandConstant('{app}\setup.log');
   Params := 'setup --channels ' + Channels + ' --guide-out "' + GuideFile + '" --log "' + LogFile + '"';
+  { gw 런타임 원내 위치(정해지면 배포 스크립트가 /GWSOURCE= 로 넘김) }
+  if ExpandConstant('{param:GWSOURCE|}') <> '' then
+    Params := Params + ' --gw-source "' + ExpandConstant('{param:GWSOURCE|}') + '"';
   Log('실행: ' + ExePath + ' ' + Params);
   SetupLines := 0;
   ProgressPage.Show;
