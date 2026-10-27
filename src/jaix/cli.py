@@ -5,7 +5,10 @@
 """
 import argparse
 import json
+import os
 import sys
+import traceback
+from pathlib import Path
 from datetime import datetime
 
 from jaix import __version__, claude, codex, doctor, gw, hermes, hwpjar, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
@@ -16,6 +19,29 @@ CHANNELS = ("claude", "codex", "hermes")
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
         stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+class Steps:
+    """단계마다 예외를 잡아 traceback 을 기록하고 다음 단계로 간다(#27: 설치본에서 조용히 죽음)."""
+
+    def __init__(self, log):
+        self.log, self.failed, self.code = log, [], 0
+
+    def run(self, name, fn, *a, **kw):
+        try:
+            return fn(*a, **kw)
+        except Exception as e:  # noqa: BLE001 — 한 단계가 막혀도 나머지를 한다. doctor 가 남은 것을 알려 준다
+            self.log(f"  ✗ {name}: {type(e).__name__}: {e}")
+            self.log(traceback.format_exc().rstrip())
+            self.failed.append(name)
+            self.code = max(self.code, 2 if isinstance(e, ValueError) else 1)  # 깨진 설정(덮어쓰지 않음)은 2
+            return None
+
+    def summary(self):
+        if self.failed:
+            self.log(f"\n일부 단계가 실패했습니다: {', '.join(self.failed)}")
+            self.log("새 명령창에서 `jaix doctor` 를 실행해 결과를 AI센터에 보내 주세요.")
+        return self.code
 
 
 class Log:
@@ -86,35 +112,59 @@ def _runtimes(value):
     return runtimes.select([k.strip() for k in value.split(",") if k.strip()])
 
 
+def _setup_via_task(args):
+    """설치본(Inno)이 부르는 길: 같은 jaix setup 을 작업 스케줄러로 돌려 Inno 의 프로세스 완화 정책을 물려받지
+    않게 한다(#27). 진행 줄은 setup.log 에서 읽어 이 프로세스의 표준 출력으로 흘려 설치 화면에 보인다."""
+    raw = [a for a in args.raw_argv if a != "--via-task"]
+    status = paths.jaix_home() / "setup-status.json"
+    base = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "jaix"]
+    log_path = args.log or str(paths.jaix_home() / "setup.log")
+    if not args.log:
+        raw += ["--log", log_path]
+    code = schedule.run_via_task([*base, "setup", *raw, "--status-out", str(status)], log_path, status, Log())
+    if code is not None:
+        return code
+    args.via_task = False  # 작업으로 못 돌렸으면 직접(상속된 채로라도) 한다
+    return cmd_setup(args, Log(args.log))
+
+
 def cmd_setup(args, log):
+    if args.via_task and paths.IS_WIN:
+        return _setup_via_task(args)
     lock = lockmod.load(args.lock, args.channel, args.offline)
     chosen = _channels(args.channels)
     log(f"jaix {__version__} · 잠금: {lock.source}")
+    steps = Steps(log)
     if not args.dry_run:
         paths.bin_dir().mkdir(parents=True, exist_ok=True)
-        winenv.add_to_path([paths.bin_dir()])
+        steps.run("PATH", winenv.add_to_path, [paths.bin_dir()])
     log("\n[1/3] 런타임")
     for rt in _runtimes(args.runtimes):
-        runtimes.ensure(rt, log, dry_run=args.dry_run)
+        steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
     # Claude 앱(MSIX) 안에서 uvx가 Python을 처음 받으면 가상화로 깨진다(jaix-kit#14) → 앱 밖인 지금 깐다
-    uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run)
-    hwpjar.ensure(lock, log, dry_run=args.dry_run, offline=args.offline)  # 첫 hwp 변환 때 에이전트가 우회하지 않게
+    steps.run("uv 관리 Python", lambda: uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run))
+    # 첫 hwp 변환 때 에이전트가 우회하지 않게
+    steps.run("HWP 변환기(jar)", hwpjar.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
     result = {}
     if args.gw_source and not args.dry_run:
         gw.save_source(args.gw_source)
-    gw.setup(log, dry_run=args.dry_run)
+    steps.run("gw", gw.setup, log, dry_run=args.dry_run)
     log("\n[2/3] Claude")
     if "claude" in chosen:
-        result["claude"] = claude.setup(lock, log, dry_run=args.dry_run)
+        res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run)
+        if res is not None:
+            result["claude"] = res
     else:
         log("  선택 안 함")
     log("\n[3/3] Codex · Hermes")
     if "codex" in chosen:
-        result["codex"] = codex.setup(lock, log, dry_run=args.dry_run)
+        res = steps.run("Codex", codex.setup, lock, log, dry_run=args.dry_run)
+        if res is not None:
+            result["codex"] = res
     if "hermes" in chosen:
         log(f"  {hermes.NOT_YET}")
     if not args.no_autoupdate:
-        result["autoupdate"] = schedule.register(log, dry_run=args.dry_run)
+        result["autoupdate"] = steps.run("로그온 자동 갱신", schedule.register, log, dry_run=args.dry_run)
     elif not args.dry_run and schedule.unregister():  # 끄라고 했으니 예전에 등록한 것도 지운다
         log("  로그온 자동 갱신: 지움 (--no-autoupdate)")
     text = guide(chosen, result)
@@ -123,7 +173,7 @@ def cmd_setup(args, log):
         # Inno Setup LoadStringsFromFile가 UTF-8로 읽게 BOM을 붙인다
         with open(args.guide_out, "w", encoding="utf-8-sig") as f:
             f.write(text + "\n")
-    return 0
+    return steps.summary()
 
 
 def cmd_doctor(args, log):
@@ -150,6 +200,7 @@ def cmd_update(args, log):
         problems = _update(args, log)
     except Exception as e:  # 잠금을 못 받음(오프라인)·깨진 설정 등 — 다음 로그온에 다시 한다
         log(f"멈춤: {e}")
+        log(traceback.format_exc().rstrip())
         schedule.write_status([], error=str(e))
         return 1
     schedule.write_status(problems)
@@ -223,6 +274,9 @@ def build_parser():
                                        "update도 씀, none이면 끔). 원내망이 아니면 gw만 건너뜀")
     s.add_argument("--no-autoupdate", action="store_true", help="로그온 자동 갱신(jaix update --quiet)을 등록하지 않음")
     s.add_argument("--guide-out", help="마지막 안내문을 이 파일에 씀(설치 프로그램용)")
+    s.add_argument("--via-task", action="store_true",
+                   help=argparse.SUPPRESS)  # 설치본용: 작업 스케줄러로 돌려 설치본의 프로세스 정책을 물려받지 않음(#27)
+    s.add_argument("--status-out", help=argparse.SUPPRESS)  # --via-task 가 기다리는 종료 코드 파일
     s.set_defaults(func=cmd_setup)
 
     d = sub.add_parser("doctor", parents=[common], help="런타임·등록·플러그인 버전이 잠금과 맞는지 점검")
@@ -241,15 +295,29 @@ def build_parser():
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
-    log = Log(args.log)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = build_parser().parse_args(raw)
+    args.raw_argv = raw[1:]  # 하위 명령 뒤의 인자(--via-task 가 그대로 다시 넘김)
+    # --via-task 는 진행 줄을 setup.log 에서 읽어 흘리므로 같은 파일에 또 쓰지 않는다
+    log = Log(None if getattr(args, "via_task", False) and paths.IS_WIN else args.log)
+    code = 1
     try:
-        return args.func(args, log)
+        code = args.func(args, log)
     except FileNotFoundError as e:  # 잠금을 못 받았고 묶은 사본도 없음
         log(f"멈춤: {e}")
-        return 2
+        code = 2
     except ValueError as e:  # 깨진 settings.json 등 — 덮어쓰지 않고 멈춘다
         log(f"멈춤: {e}")
-        return 2
+        code = 2
     except KeyboardInterrupt:
-        return 130
+        code = 130
+    except Exception as e:  # noqa: BLE001 — 설치본 경로에서도 원인을 남긴다(#27)
+        log(f"멈춤: {type(e).__name__}: {e}")
+        log(traceback.format_exc().rstrip())
+        code = 1
+    finally:
+        out = getattr(args, "status_out", None)
+        if out:
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            Path(out).write_text(json.dumps({"code": code}), encoding="utf-8")
+    return code
