@@ -3,6 +3,8 @@
 
   jaixlock.py check          모든 외부 소스가 40자 sha로 고정돼 있고, ref가 태그면 그 태그가 sha를 가리키는지 확인
   jaixlock.py bump NAME REF  NAME 플러그인의 ref를 REF(태그·브랜치)로 바꾸고 sha를 원격에서 다시 받아 고정
+  jaixlock.py add NAME URL REF 표시이름 설명   새 플러그인을 url 소스(https)로 REF에 고정해 추가.
+                             그 커밋에 .claude-plugin/plugin.json 이 없으면 거절
   jaixlock.py update         모든 플러그인을 최신으로: 태그 고정이면 가장 새 날짜 태그(vYYYY.MM.DD.N),
                              브랜치 고정이면 그 브랜치 head. 바뀐 것을 한 줄씩 출력(갱신 봇 PR 본문용)
 
@@ -150,6 +152,27 @@ def bump(name, ref):
     sys.exit(f"플러그인 '{name}' 없음")
 
 
+def add(name, url, ref, display, description):
+    d = load()
+    if any(p["name"] == name for p in d["plugins"]):
+        sys.exit(f"플러그인 '{name}' 이미 있음 — bump 를 쓸 것")
+    if not url.startswith("https://"):
+        sys.exit("https:// URL 이어야 함 (SSH 키 없는 연구원 PC에서도 받게)")
+    try:
+        sha, kind = resolve(url, ref)
+    except LookupError as e:
+        sys.exit(str(e))
+    src = {"source": "url", "url": url}
+    if not has_plugin(url, sha, plugin_manifest(src)):
+        sys.exit(f"{ref} @ {sha[:12]} 에 .claude-plugin/plugin.json 없음 — 플러그인이 아닌 커밋(seed 등)")
+    entry = {"name": name, "displayName": display, "description": description, "category": "productivity",
+             "source": src, "homepage": url.removesuffix(".git")}
+    set_pin(entry, ref, sha, kind)
+    d["plugins"].append(entry)
+    save(d)
+    print(f"{name}: 추가 {ref} ({kind}) @ {sha[:12]}")
+
+
 def update():
     d = load()
     changed = []
@@ -190,6 +213,8 @@ if __name__ == "__main__":
         check()
     elif args[:1] == ["bump"] and len(args) == 3:
         bump(args[1], args[2])
+    elif args[:1] == ["add"] and len(args) == 6:
+        add(*args[1:])
     elif args[:1] == ["update"]:
         update()
     else:
