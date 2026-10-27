@@ -67,8 +67,11 @@ jobs:
           $task = ([xml]$raw).Task
           $exec = $task.Actions.Exec
           Write-Host "명령: $($exec.Command) $($exec.Arguments)"
-          Write-Host "로그온 트리거 사용자: $($task.Triggers.LogonTrigger.UserId) · 권한: $($task.Principals.Principal.RunLevel)"
-          if ($task.Principals.Principal.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨" }
+          $pr = $task.Principals.Principal
+          Write-Host "로그온 트리거 사용자: $($task.Triggers.LogonTrigger.UserId) · 실행: $($pr.LogonType) · 권한: $($pr.RunLevel)"
+          # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
+          if ($pr.RunLevel -and $pr.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨: $($pr.RunLevel)" }
+          if ($pr.LogonType -ne 'InteractiveToken') { throw "'로그온할 때만 실행'이 아님: $($pr.LogonType)" }
           $jaix = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
           $status = "$jaix\update-status.json"
           Remove-Item $status -ErrorAction SilentlyContinue
