@@ -37,21 +37,23 @@ ID 형식은 `TS-<분야>-<번호>`이다. 번호는 지우지 않고, 폐기한
 
 ### FORMAT — 플러그인 형식
 
+**플러그인 루트**는 잠금 entry가 가리키는 폴더다. `url` 소스면 저장소 루트이고, `git-subdir` 소스면 그 `path`다(예: calendar-worklog는 `plugin/`). 아래 FORMAT 규칙의 경로는 모두 플러그인 루트 기준이다. 저장소 단위 파일(`calver.yml` 등 `.github/` 아래)은 플러그인 루트와 상관없이 **저장소 루트**에 둔다(TS-VER-2).
+
 | ID | 규칙 | 검사 |
 |---|---|---|
-| TS-FORMAT-1 | 저장소 루트에 `.claude-plugin/plugin.json`을 둔다. `name`(잠금 entry 이름과 같게), `displayName`(한국어), `description`(한 문장), `author`, `homepage`, `repository`, `license`, `keywords`를 넣는다 | △ (설치되는지는 ○ 새 머신 설치, 필드는 아직 검사 안 함) |
+| TS-FORMAT-1 | **플러그인 루트**에 `.claude-plugin/plugin.json`을 둔다. `name`(잠금 entry 이름과 같게), `displayName`(한국어), `description`(한 문장), `author`, `homepage`, `repository`, `license`, `keywords`를 넣는다 | △ (설치되는지는 ○ 새 머신 설치, 필드는 아직 검사 안 함) |
 | TS-FORMAT-2 | `plugin.json`에 **`version`을 넣지 않는다.** Claude는 plugin.json의 version을 먼저 보므로, 고정값이 남아 있으면 새 버전을 못 알아챈다. 버전 표기는 잠금 entry의 `version` 하나뿐이다 | △ |
-| TS-FORMAT-3 | 스킬은 `skills/<name>/SKILL.md`에 둔다. frontmatter는 `name`·`description`만 쓴다 | △ |
-| TS-FORMAT-4 | MCP 서버는 루트의 `.mcp.json`에 둔다(형식은 MCP 절) | △ |
+| TS-FORMAT-3 | 스킬은 플러그인 루트의 `skills/<name>/SKILL.md`에 둔다. frontmatter는 `name`·`description`만 쓴다 | △ |
+| TS-FORMAT-4 | MCP 서버는 플러그인 루트의 `.mcp.json`에 둔다(형식은 MCP 절) | △ |
 
-근거: README "버전", `docs/handoff/jaix-intake.md`(참고 구현 `z0nam/hwp-agent`).
+근거: README "버전", `docs/handoff/jaix-intake.md`(참고 구현 `z0nam/hwp-agent`). 하위 폴더 예: jeju-inst/calendar-worklog(`plugin/.claude-plugin/plugin.json`, `plugin/skills/calendar-worklog/SKILL.md`, 저장소 루트 `.github/workflows/calver.yml`).
 
 ### VER — 버전
 
 | ID | 규칙 | 검사 |
 |---|---|---|
 | TS-VER-1 | 버전은 날짜 태그 `vYYYY.MM.DD.N`(KST, 같은 날 N번째) 하나뿐이다. 사람은 번호를 매기지 않는다. 소스 안의 버전은 `0.0.0+dev` 같은 고정값으로 두고, 배포 빌드가 태그 값을 찍는다 | △ |
-| TS-VER-2 | 도구 저장소에 `.github/workflows/calver.yml`을 두고, main에 머지될 때마다 jaix-kit의 재사용 워크플로 `calver-tag.yml`을 부른다 | △ |
+| TS-VER-2 | 도구 **저장소 루트**에 `.github/workflows/calver.yml`을 두고(플러그인 루트가 하위 폴더여도 저장소 루트), main에 머지될 때마다 jaix-kit의 재사용 워크플로 `calver-tag.yml`을 부른다 | △ |
 | TS-VER-3 | `calver-tag.yml`은 `@main`이 아니라 **jaix-kit 커밋 40자 SHA**로 고정한다. 다른 저장소의 코드가 이 저장소의 태그 권한을 쥐기 때문이다. SHA를 올릴 때는 PR로 한다 | △ |
 | TS-VER-4 | 태그로 고정한 잠금 entry의 `version`은 태그에서 `v`를 뺀 값과 같아야 한다. 아직 태그가 없는 도구는 브랜치 head 커밋으로 고정하고 `version`을 비운다 | ○ `jaixlock.py check` (태그 entry만. 브랜치 entry는 △ 경고) |
 
@@ -197,8 +199,8 @@ jobs:
 
 ```markdown
 ### JAIX 편입 체크리스트 (docs/tool-standard.md)
-- [ ] TS-FORMAT-1-4 plugin.json(version 없음) · skills/<name>/SKILL.md · .mcp.json
-- [ ] TS-VER-2·3 calver.yml, calver-tag.yml @<40자 SHA>
+- [ ] TS-FORMAT-1-4 플러그인 루트(`/` 또는 `<subdir>/`): plugin.json(version 없음) · skills/<name>/SKILL.md · .mcp.json
+- [ ] TS-VER-2·3 저장소 루트 calver.yml, calver-tag.yml @<40자 SHA>
 - [ ] TS-LOCK-1·2 잠금 entry: https url + 40자 sha (jaixlock.py check 통과)
 - [ ] TS-MCP-1 uvx --python 3.12 고정 / — (MCP 없음)
 - [ ] TS-MCP-4 실제 .mcp.json 명령으로 initialize·tools/list 응답 (맥: _ / Windows: _)
