@@ -55,6 +55,7 @@ def _bundled_candidates():
     base = getattr(sys, "_MEIPASS", None)  # PyInstaller 단일 exe가 풀린 곳
     if base:
         yield Path(base) / "marketplace.json"
+    yield Path(__file__).resolve().parent / "marketplace.json"  # 휠(uv tool install)에 묶은 사본
     yield Path(__file__).resolve().parents[2] / ".claude-plugin" / "marketplace.json"
 
 

@@ -81,16 +81,21 @@ def setup(lock, log, dry_run=False, update=False):
         if not _run(cli, ["plugin", "marketplace", "add", GIT_URL], log):
             return {"cli": True, "error": "marketplace add"}
         log(f"    마켓플레이스 {MARKETPLACE} 등록")
-    elif update:
-        _run(cli, ["plugin", "marketplace", "upgrade", MARKETPLACE], log)
+    elif not _run(cli, ["plugin", "marketplace", "upgrade", MARKETPLACE], log):
+        # 옛 사본에서 깔면 잠금과 다른 것이 깔린다. 기록을 앞으로 당기지 않고 doctor가 잡게 둔다
+        log("    마켓플레이스를 새로 받지 못함 → 플러그인은 건드리지 않음")
+        return {"cli": True, "error": "marketplace upgrade"}
+    # 기록은 바라는 잠금이 아니라 실제로 받아 둔 사본의 커밋으로 남긴다
+    snap = {e["name"]: e["source"].get("sha") for e in (snapshot_lock() or {}).get("plugins", [])}
     have, rec = enabled_plugins(), recorded()
     for p in lock.plugins:
         stale = rec.get(p.id) != p.sha
         if p.id in have and not (update and stale):
             continue
         if _run(cli, ["plugin", "add", p.id], log):
-            rec[p.id] = p.sha
-            log(f"    {'갱신' if p.id in have else '설치'}: {p.id} {p.label}")
+            rec[p.id] = snap.get(p.name)
+            note = "" if snap.get(p.name) == p.sha else f" (받은 사본 {str(snap.get(p.name))[:7]} ≠ 잠금 — jaix update)"
+            log(f"    {'갱신' if p.id in have else '설치'}: {p.id} {p.label}{note}")
     _record_file().parent.mkdir(parents=True, exist_ok=True)
     _record_file().write_text(json.dumps(rec, indent=2), encoding="utf-8")
     return {"cli": True}

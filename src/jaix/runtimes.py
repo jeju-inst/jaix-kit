@@ -181,6 +181,8 @@ def ensure(rt, log, dry_run=False, upgrade=False):
         if upgrade and IS_WIN and rt.winget and not dry_run:
             _winget(["upgrade", "--id", rt.winget, "--scope", "user"], log)  # winget으로 안 깐 것이면 아무 일 없음
             found = find(rt)
+        if found.managed:  # 파일은 있는데 사용자 PATH에서 빠졌을 수 있다(doctor가 setup 재실행을 권하는 경우)
+            winenv.add_to_path([rt.path_dir()], dry_run=dry_run)
         log(f"  {rt.label}: {found.version or '있음'} ({found.path})")
         return found
     if not IS_WIN:

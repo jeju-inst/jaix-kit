@@ -185,6 +185,9 @@ def main(argv=None):
     log = Log(args.log)
     try:
         return args.func(args, log)
+    except FileNotFoundError as e:  # 잠금을 못 받았고 묶은 사본도 없음
+        log(f"멈춤: {e}")
+        return 2
     except ValueError as e:  # 깨진 settings.json 등 — 덮어쓰지 않고 멈춘다
         log(f"멈춤: {e}")
         return 2
