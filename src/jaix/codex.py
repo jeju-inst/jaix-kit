@@ -6,7 +6,6 @@ Codex에는 autoUpdate가 없다. `codex plugin marketplace upgrade jaix` 뒤 `p
 `jaix update`가 그 일을 한다. Codex는 설치본의 버전을 "local"로만 기록해서, jaix가 깐 커밋을 따로 적어 둔다.
 """
 import json
-import shutil
 import subprocess
 import tomllib
 
@@ -15,7 +14,7 @@ from jaix.lock import GIT_URL, MARKETPLACE
 
 
 def find_cli():
-    return shutil.which("codex")
+    return paths.which("codex")  # npm 전역(%APPDATA%\\npm\\codex.cmd)이 PATH에 없어도
 
 
 def _config():

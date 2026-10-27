@@ -83,8 +83,34 @@ def find(version, uv=None):
                             version],
                            capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired):
-        return None
-    return r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else None
+        return on_disk(version)
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip().splitlines()[-1]
+    return on_disk(version)
+
+
+def python_dir():
+    """uv가 관리 Python을 푸는 곳(UV_PYTHON_INSTALL_DIR가 있으면 그것)."""
+    env = os.environ.get("UV_PYTHON_INSTALL_DIR")
+    if env:
+        return Path(env)
+    if IS_WIN:
+        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "uv" / "python"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "uv" / "python"
+
+
+def on_disk(version):
+    """결과물 기준 판정: cpython-<version>.*/-* 폴더에 실행되는 python이 있는가.
+
+    설치본(Inno) 자식 프로세스에서는 uv가 'os error 448'(신뢰할 수 없는 탑재 지점 — RedirectionGuard 상속 추정)을
+    보고하지만 실제로는 Python과 정션이 만들어진다(jaix-kit#21). 종료 코드만 믿으면 성공을 실패로 적는다.
+    """
+    exe = "python.exe" if IS_WIN else "bin/python3"
+    root = python_dir()
+    for d in sorted([*root.glob(f"cpython-{version}.*"), *root.glob(f"cpython-{version}-*")]):
+        if (d / exe).is_file():
+            return str(d / exe)
+    return None
 
 
 def ensure(versions, log, dry_run=False):
@@ -104,12 +130,19 @@ def ensure(versions, log, dry_run=False):
         try:
             r = subprocess.run([uv, "python", "install", v], capture_output=True, text=True, timeout=900,
                                encoding="utf-8", errors="replace")
-            ok = r.returncode == 0
+            code = r.returncode
             msg = ([ln for ln in (r.stdout + r.stderr).splitlines() if ln.strip()][-1:] or [""])[0][:200]
         except (OSError, subprocess.TimeoutExpired) as e:
-            ok, msg = False, str(e)
-        good &= ok
-        log(f"  uv 관리 Python {v}: {'설치함' if ok else '설치 실패 — ' + msg}")
+            code, msg = None, str(e)
+        have = find(v, uv)  # 종료 코드가 아니라 결과물로 판정한다(#21: 448 을 보고해도 실제로는 깔림)
+        good &= bool(have)
+        if have and code == 0:
+            log(f"  uv 관리 Python {v}: 설치함 ({have})")
+        elif have:
+            log(f"  uv 관리 Python {v}: 설치함 ({have}) — uv가 오류를 보고했지만 결과물 확인: {msg}")
+        else:
+            # 설치본 안에서만 막히는 경우가 있어, 상속 없는 로그온 자동 갱신(jaix update --quiet)이 다시 한다
+            log(f"  uv 관리 Python {v}: 설치 실패 — {msg} (다음 로그온 자동 갱신 또는 `jaix update` 가 다시 시도)")
     if not dry_run:
         _record().parent.mkdir(parents=True, exist_ok=True)
         _record().write_text(json.dumps({"versions": list(versions)}), encoding="utf-8")

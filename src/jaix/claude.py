@@ -110,8 +110,8 @@ def write_settings(data):
 
 
 def find_cli():
-    """claude 실행파일: PATH → Claude Desktop이 내려받은 Claude Code(가장 새 버전)."""
-    exe = shutil.which("claude")
+    """claude 실행파일: PATH(+npm 전역) → Claude Desktop이 내려받은 Claude Code(가장 새 버전)."""
+    exe = paths.which("claude")
     if exe:
         return exe
     name = "claude.exe" if IS_WIN else "claude"

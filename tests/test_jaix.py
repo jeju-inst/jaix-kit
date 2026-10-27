@@ -8,6 +8,7 @@ from jaix import paths
 from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, lock, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
+REAL_UV_ENSURE = uvpython.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
@@ -398,7 +399,7 @@ def test_find_cli_in_desktop_msix_location(isolated, monkeypatch):
     for d in (old, new):
         d.mkdir(parents=True)
         (d / "claude.exe").write_bytes(b"MZ")
-    monkeypatch.setattr(claude.shutil, "which", lambda name: None)
+    monkeypatch.setattr(paths, "which", lambda name: None)
     monkeypatch.setattr(claude, "IS_WIN", True)
     monkeypatch.setattr(paths, "IS_WIN", True)
     monkeypatch.setenv("LOCALAPPDATA", str(local))
@@ -420,3 +421,52 @@ def test_guide_says_how_to_really_quit(the_lock):
     text = cli.guide(["claude"], {"claude": {"cli": False, "managed": None}})
     assert ("Exit" if sys.platform == "win32" else "Quit") in text and "Code 탭을 한 번 연 뒤" in text
     assert "작업 표시줄 아이콘 → 종료" not in text
+
+
+def test_uv_python_judged_by_result_not_exit_code(isolated, monkeypatch):
+    """#21: 설치본 안에서 uv 가 os error 448 을 보고해도 결과물이 있으면 성공."""
+    pydir = isolated / "uvpy"
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", str(pydir))
+    monkeypatch.setattr(uvpython, "_uv", lambda: "uv")
+    exe = "python.exe" if sys.platform == "win32" else "bin/python3"
+
+    class R:
+        returncode, stdout, stderr = 2, "", "error: 신뢰할 수 없는 탑재 지점 (os error 448)"
+
+    def fake_run(args, **kw):
+        if args[1:3] == ["python", "install"]:
+            target = pydir / f"cpython-{args[3]}.16-windows-x86_64-none" / exe
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"")
+        r = R()
+        r.returncode = 2 if args[1:3] == ["python", "install"] else 1  # find 도 실패(가드 상속)
+        return r
+    monkeypatch.setattr(uvpython.subprocess, "run", fake_run)
+    lines = []
+    assert REAL_UV_ENSURE(["3.12"], lines.append) is True
+    assert "결과물 확인" in lines[-1]
+    assert uvpython.on_disk("3.12")
+    assert uvpython.on_disk("3.1") is None  # 3.1 이 3.12 를 잡지 않음
+
+
+def test_uv_python_missing_result_is_failure(isolated, monkeypatch):
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", str(isolated / "uvpy"))
+    monkeypatch.setattr(uvpython, "_uv", lambda: "uv")
+
+    class R:
+        returncode, stdout, stderr = 2, "", "os error 448"
+    monkeypatch.setattr(uvpython.subprocess, "run", lambda args, **kw: R())
+    lines = []
+    assert REAL_UV_ENSURE(["3.12"], lines.append) is False
+    assert "다시 시도" in lines[-1]
+
+
+def test_codex_found_in_npm_global_dir(isolated, monkeypatch):
+    npm = isolated / "npm"
+    npm.mkdir()
+    name = "codex.cmd" if sys.platform == "win32" else "codex"
+    (npm / name).write_text("@echo off\n")
+    (npm / name).chmod(0o755)
+    monkeypatch.setattr(paths, "npm_global_bin", lambda: npm)
+    monkeypatch.setattr(paths.shutil, "which", lambda n, path=None: str(npm / name) if path == str(npm) else None)
+    assert codex.find_cli() == str(npm / name)

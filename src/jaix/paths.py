@@ -1,5 +1,6 @@
 """플랫폼별 경로. 환경변수로 바꿀 수 있게 해 시험에서 실제 사용자 설정을 건드리지 않는다."""
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -40,6 +41,21 @@ def bin_dir():
 def launch_agents_dir():
     """macOS 로그온 자동 갱신(LaunchAgent) 파일을 두는 곳."""
     return _env_path("JAIX_LAUNCH_AGENTS", Path.home() / "Library" / "LaunchAgents")
+
+
+def npm_global_bin():
+    """npm 전역 설치(npm i -g)가 실행파일 바로가기(.cmd)를 두는 곳. Node를 PC 전체로 깔면 이 폴더가
+    사용자 PATH에 없을 수 있다(jaix-kit#21). Windows 외에는 None(PATH로 찾는다)."""
+    if IS_WIN:
+        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "npm"
+    return None
+
+
+def which(name):
+    """PATH → npm 전역 폴더(Windows) 순. Windows는 PATHEXT로 name.cmd·name.exe 를 찾는다."""
+    exe = shutil.which(name)
+    npm = npm_global_bin()
+    return exe or (shutil.which(name, path=str(npm)) if npm and npm.is_dir() else None)
 
 
 def winget_links():
