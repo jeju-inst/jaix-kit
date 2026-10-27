@@ -213,6 +213,18 @@ def test_lint_plugin_subdir_and_unit_checks():
     issues, _ = plugin_lint.lint_plugin(entry, files, dummy_read_bad_calver)
     assert any("40자 SHA" in i for i in issues)
 
+    # 2-1. calver.yml 주석에 40자 SHA가 적혀 있어도 실제 호출이 @main 이면 위반
+    def dummy_read_commented_sha(p):
+        if p == ".github/workflows/calver.yml":
+            return (
+                "# example: uses: jeju-inst/jaix-kit/.github/workflows/calver-tag.yml@1111222233334444555566667777888899990000\n"
+                "uses: jeju-inst/jaix-kit/.github/workflows/calver-tag.yml@main\n"
+            ), b""
+        return dummy_read(p)
+
+    issues, _ = plugin_lint.lint_plugin(entry, files, dummy_read_commented_sha)
+    assert any("40자 SHA" in i for i in issues)
+
     # 3. skills/*/SKILL.md 가 아예 없는 경우
     files_no_skill = {f for f in files if "SKILL.md" not in f}
     issues, _ = plugin_lint.lint_plugin(entry, files_no_skill, dummy_read)

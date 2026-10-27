@@ -24,7 +24,25 @@ for stream in (sys.stdout, sys.stderr):
     stream.reconfigure(encoding="utf-8")
 
 MARKET = Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json"
-CALVER_TAG_RE = re.compile(r"jeju-inst/jaix-kit/\.github/workflows/calver-tag\.yml@([0-9a-fA-F]{40})")
+CALVER_TAG_SHA_RE = re.compile(r"^jeju-inst/jaix-kit/\.github/workflows/calver-tag\.yml@[0-9a-fA-F]{40}$")
+
+
+def check_calver_workflow(text):
+    """calver.yml 내용에서 주석을 제외한 실제 uses 호출이 calver-tag.yml을 40자 SHA로 호출하는지 검사한다."""
+    has_valid_call = False
+    for line in text.splitlines():
+        code = line.split("#", 1)[0].strip()
+        if not code:
+            continue
+        m_uses = re.search(r"uses:\s*(\S+)", code)
+        if m_uses:
+            target = m_uses.group(1).strip("'\"")
+            if "jeju-inst/jaix-kit/.github/workflows/calver-tag.yml" in target:
+                if CALVER_TAG_SHA_RE.fullmatch(target):
+                    has_valid_call = True
+                else:
+                    return False
+    return has_valid_call
 
 
 def git_url(src):
@@ -105,7 +123,7 @@ def lint_plugin(plugin_entry, files, read_func):
     else:
         try:
             text, _ = read_func(calver_path)
-            if not CALVER_TAG_RE.search(text):
+            if not check_calver_workflow(text):
                 issues.append(f"{calver_path} 에서 jeju-inst/jaix-kit/.github/workflows/calver-tag.yml 을 40자 SHA 로 호출하지 않음")
         except Exception as e:
             issues.append(f"{calver_path} 읽기 실패: {e}")
