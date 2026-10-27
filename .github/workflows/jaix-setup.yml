@@ -62,6 +62,12 @@ jobs:
             --hide-console hide-early `
             src/jaix/__main__.py
           .\dist\jaix.exe --version
+          # 창 없는 빌드: 예약 작업이 부른다. hide-early 는 콘솔이 생긴 뒤 숨겨 깜빡임이 남는다(jaix-win v.8 실측)
+          pyinstaller --onefile --noconsole --name jaixw --paths src `
+            --add-data ".claude-plugin/marketplace.json;." `
+            src/jaix/__main__.py
+          $p = Start-Process dist\jaixw.exe -ArgumentList '--version' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "jaixw.exe --version 종료 코드 $($p.ExitCode)" }
 
       - name: Install Inno Setup
         shell: pwsh
@@ -72,6 +78,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force installer\payload | Out-Null
           Copy-Item dist\jaix.exe installer\payload\jaix.exe
+          Copy-Item dist\jaixw.exe installer\payload\jaixw.exe
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\jaix-setup.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC 실패 $LASTEXITCODE" }
           Get-ChildItem installer\Output
@@ -81,6 +88,7 @@ jobs:
           name: jaix-windows
           path: |
             dist/jaix.exe
+            dist/jaixw.exe
             installer/Output/jaix-setup.exe
 
       # --- 새 러너에서 설치 → 점검 → 제거 (인수 시험 0-1·0-3을 CI에서 흉내) ---
@@ -102,14 +110,19 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "설치 종료 코드 $($p.ExitCode)" }
           $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
           if (-not (Test-Path "$app\jaix.exe")) { throw "jaix.exe 가 $app 에 없음" }
-          Get-Content "$app\setup.log"
+          if (-not (Test-Path "$app\jaixw.exe")) { throw "jaixw.exe 가 $app 에 없음" }
+          $data = Join-Path $env:LOCALAPPDATA 'jaix'   # 기록·상태는 데이터 폴더(프로그램 폴더와 나눔)
+          Get-Content "$data\setup.log"
           # #27: jaix setup 본 실행이 작업 스케줄러(--via-task)로 돌았는지 — 그 길만 setup-status.json 을 남긴다
-          if (-not (Test-Path "$app\setup-status.json")) { throw "jaix setup 이 작업 스케줄러로 돌지 않음(setup-status.json 없음)" }
-          Get-Content "$app\setup-status.json"
+          if (-not (Test-Path "$data\setup-status.json")) { throw "jaix setup 이 작업 스케줄러로 돌지 않음(setup-status.json 없음)" }
+          Get-Content "$data\setup-status.json"
+          foreach ($f in 'setup.log','setup-status.json','guide.txt') {
+            if (Test-Path "$app\$f") { throw "기록 $f 이 프로그램 폴더에 생김" }
+          }
           schtasks /Query /TN jaix-setup-once 2>$null
           if ($LASTEXITCODE -eq 0) { throw "한 번짜리 작업 jaix-setup-once 가 남음" }
           $global:LASTEXITCODE = 0
-          Get-Content "$app\guide.txt"
+          Get-Content "$data\guide.txt"
 
       - name: jaix doctor (from the user PATH the installer wrote)
         shell: pwsh
@@ -137,12 +150,13 @@ jobs:
           $task = ([xml]$raw).Task
           $exec = $task.Actions.Exec
           Write-Host "명령: $($exec.Command) $($exec.Arguments)"
+          if ($exec.Command -notlike '*jaixw.exe*') { throw "작업이 창 없는 jaixw.exe 를 부르지 않음: $($exec.Command)" }
           $pr = $task.Principals.Principal
           Write-Host "로그온 트리거 사용자: $($task.Triggers.LogonTrigger.UserId) · 실행: $($pr.LogonType) · 권한: $($pr.RunLevel)"
           # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
           if ($pr.RunLevel -and $pr.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨: $($pr.RunLevel)" }
           if ($pr.LogonType -ne 'InteractiveToken') { throw "'로그온할 때만 실행'이 아님: $($pr.LogonType)" }
-          $jaix = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          $jaix = Join-Path $env:LOCALAPPDATA 'jaix'
           $status = "$jaix\update-status.json"
           Remove-Item $status -ErrorAction SilentlyContinue
           schtasks /Run /TN jaix-update

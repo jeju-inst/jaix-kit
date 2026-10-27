@@ -40,6 +40,8 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Files]
 Source: "payload\jaix.exe"; DestDir: "{app}"; Flags: ignoreversion
+; 창 없는 빌드(--noconsole): 예약 작업(로그온 갱신·설치 중 setup)이 이것을 불러 콘솔 창이 뜨지 않는다
+Source: "payload\jaixw.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\JAIX 점검 (jaix doctor)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix.exe"" doctor"; Comment: "도구 설치 상태 점검"
@@ -55,7 +57,8 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
 Filename: "{app}\jaix.exe"; Parameters: "cleanup"; Flags: runhidden; RunOnceId: "JaixCleanup"
 
 [UninstallDelete]
-; jaix setup이 받은 포터블 런타임(bin·git·jre)과 기록 파일
+; jaix setup이 받은 포터블 런타임(bin·git·jre). 기록·상태는 %LOCALAPPDATA%\jaix 에 있어 남긴다
+; (Claude·Codex 설정에 넣은 항목도 남기므로, 재설치 때 jaix가 쓴 항목을 알아보게 소유 기록을 같이 둔다)
 Type: filesandordirs; Name: "{app}"
 
 [Code]
@@ -168,8 +171,8 @@ begin
     exit;
   end;
   ExePath := ExpandConstant('{app}\jaix.exe');
-  GuideFile := ExpandConstant('{app}\guide.txt');
-  LogFile := ExpandConstant('{app}\setup.log');
+  GuideFile := ExpandConstant('{localappdata}\jaix\guide.txt');
+  LogFile := ExpandConstant('{localappdata}\jaix\setup.log');
   // --via-task: jaix setup 본 실행을 작업 스케줄러로 돌린다. 설치본의 자식으로 돌면 Windows 11 프로세스 완화
   // 정책(RedirectionGuard)을 물려받아 uv 정션 등에서 os error 448 로 죽는다(#27). 진행 줄은 그대로 이 화면에 흐른다
   Params := 'setup --via-task --channels ' + Channels + ' --guide-out "' + GuideFile + '" --log "' + LogFile + '"';

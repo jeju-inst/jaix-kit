@@ -46,7 +46,7 @@ def snapshot_lock():
 
 
 def _record_file():
-    return paths.jaix_home() / "codex-installed.json"
+    return paths.data_dir() / "codex-installed.json"
 
 
 def recorded():
@@ -59,7 +59,7 @@ def recorded():
 
 def _run(cli, args, log):
     try:
-        r = subprocess.run([cli, *args], capture_output=True, text=True, timeout=600,
+        r = subprocess.run([cli, *args], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=600,
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"    codex {' '.join(args)} 실패: {e}")
@@ -153,7 +153,7 @@ def mcp_servers(lock):
 
 
 def _mcp_record():
-    return paths.jaix_home() / "codex-mcp.json"
+    return paths.data_dir() / "codex-mcp.json"
 
 
 def owned_mcp():

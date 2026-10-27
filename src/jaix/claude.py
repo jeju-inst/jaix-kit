@@ -158,7 +158,7 @@ def matches(plugin, record):
 
 def _run(cli, args, log):
     try:
-        r = subprocess.run([cli, *args], capture_output=True, text=True, timeout=600,
+        r = subprocess.run([cli, *args], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=600,
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"    claude {' '.join(args)} 실패: {e}")

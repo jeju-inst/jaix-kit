@@ -73,7 +73,7 @@ jobs:
           # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
           if ($pr.RunLevel -and $pr.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨: $($pr.RunLevel)" }
           if ($pr.LogonType -ne 'InteractiveToken') { throw "'로그온할 때만 실행'이 아님: $($pr.LogonType)" }
-          $jaix = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          $jaix = Join-Path $env:LOCALAPPDATA 'jaix'   # 기록·상태는 데이터 폴더(프로그램 폴더와 나눔)
           $status = "$jaix\update-status.json"
           Remove-Item $status -ErrorAction SilentlyContinue
           schtasks /Run /TN jaix-update

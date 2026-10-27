@@ -4,13 +4,12 @@ Claude는 마켓플레이스 autoUpdate로 저절로 갱신되지만 Codex·Herm
 - Windows: 작업 스케줄러 루트에 `jaix-update`. 로그온 트리거를 **이 사용자로** 못박은 XML로 등록한다
   (`schtasks /SC ONLOGON`은 모든 사용자 대상이라 관리자 권한을 요구한다). 하위 폴더를 만들려면 권한이 필요해서 루트에 둔다.
 - macOS: ~/Library/LaunchAgents의 LaunchAgent(RunAtLoad). launchd의 PATH는 비어 있다시피 해서 등록할 때 PATH를 적어 둔다.
-결과는 jaix_home의 update-status.json·update.log에 남고 doctor가 보여 준다.
+결과는 data_dir(Windows %LOCALAPPDATA%\\jaix)의 update-status.json·update.log에 남고 doctor가 보여 준다.
 """
 import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -30,17 +29,16 @@ def supported():
 
 
 def command():
-    """예약 작업이 부를 명령. 설치본(PyInstaller)이면 jaix.exe 자신, 개발 설치면 같은 파이썬의 -m jaix."""
-    base = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "jaix"]
-    return [*base, "update", "--quiet"]
+    """예약 작업이 부를 명령. 설치본이면 옆의 창 없는 jaixw.exe(없으면 jaix.exe), 개발 설치면 같은 파이썬의 -m jaix."""
+    return [*paths.self_command(windowless=True), "update", "--quiet"]
 
 
 def status_file():
-    return paths.jaix_home() / "update-status.json"
+    return paths.data_dir() / "update-status.json"
 
 
 def log_file():
-    return paths.jaix_home() / "update.log"
+    return paths.data_dir() / "update.log"
 
 
 def plist_path():
@@ -125,7 +123,7 @@ def plist_text(cmd, path_env):
 
 def _run(args):
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+        r = subprocess.run(args, capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=60, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     tail = [ln for ln in (r.stdout + r.stderr).strip().splitlines() if ln.strip()][-1:] or [""]
@@ -146,7 +144,7 @@ def run_mode():
     if not IS_WIN:
         return None  # LaunchAgent는 gui/<uid> 도메인 = 로그온한 사용자 세션
     try:
-        r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/XML"], capture_output=True, timeout=60)
+        r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/XML"], capture_output=True, creationflags=paths.NO_WINDOW, timeout=60)
         raw = r.stdout
         text = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", errors="replace")
         # 선언의 encoding="UTF-16"이 이미 푼 문자열과 어긋나 파서가 거절하므로 뗀다
