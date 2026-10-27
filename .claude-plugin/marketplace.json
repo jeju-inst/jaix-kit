@@ -16,15 +16,16 @@
         "source": "git-subdir",
         "url": "https://github.com/jeju-inst/calendar-worklog.git",
         "path": "plugin",
-        "ref": "main",
-        "sha": "866f231d4298b831bd3cd52893c73e6b30c25303"
+        "ref": "v2026.10.26.3",
+        "sha": "8eb8d8b2cb20e8ad3ad0c7f0953d40009a1e986c"
       },
       "homepage": "https://github.com/jeju-inst/calendar-worklog",
       "metadata": {
         "jaix": {
-          "refKind": "branch"
+          "refKind": "tag"
         }
-      }
+      },
+      "version": "2026.10.26.3"
     },
     {
       "name": "hwp-agent",
@@ -34,15 +35,16 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v0.2.1",
-        "sha": "1ebf91cf1ec9acb7899eeff84c28cf9d24b2f792"
+        "ref": "v2026.10.26.4",
+        "sha": "f8dba282b3a428e1353f982e6df3fc0c05c4f54d"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
         "jaix": {
           "refKind": "tag"
         }
-      }
+      },
+      "version": "2026.10.26.4"
     },
     {
       "name": "ji-report-writing",
@@ -53,7 +55,7 @@
         "source": "url",
         "url": "https://github.com/jeju-inst/ji-writing-standards.git",
         "ref": "main",
-        "sha": "2e18c02c905ee84597267570060a0bdbbe4d1d49"
+        "sha": "34195f3223f61e183109bff0deb747146846c1fc"
       },
       "homepage": "https://github.com/jeju-inst/ji-writing-standards",
       "metadata": {
