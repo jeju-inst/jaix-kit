@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jaix import claude, cli, codex, doctor, hermes, lock, winenv
+from jaix import claude, cli, codex, doctor, gw, hermes, lock, winenv
 
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
@@ -160,3 +160,28 @@ def test_user_path_add_and_remove(tmp_path):
         assert winenv.user_path_entries() == before
     finally:
         winenv.remove_from_path(tmp_path / "jaix-path-test")
+
+
+def test_gw_unset_is_skipped(monkeypatch):
+    monkeypatch.delenv(gw.ENV, raising=False)
+    assert gw.setup(print)["status"] == "unset"
+    assert doctor.check_gw()[0].status == "skip"
+
+
+def test_gw_offsite_is_skipped_with_hint(monkeypatch):
+    monkeypatch.setenv(gw.ENV, "http://127.0.0.1:9/gw.exe")  # 닿지 않는 곳 = 원외
+    assert gw.setup(print)["status"] == "offsite"
+    c = doctor.check_gw()[0]
+    assert c.status == "warn" and "원내망" in c.fix
+
+
+def test_gw_source_saved_and_installed(isolated, monkeypatch):
+    monkeypatch.delenv(gw.ENV, raising=False)
+    src = isolated / "share" / "gw.exe"
+    src.parent.mkdir()
+    src.write_bytes(b"MZ fake")
+    monkeypatch.setattr(claude, "find_cli", lambda: None)
+    url = src.as_uri()
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--gw-source", url]) == 0
+    assert gw.source() == url and gw.exe_path().read_bytes() == b"MZ fake"
+    assert doctor.check_gw()[0].status == "ok"

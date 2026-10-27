@@ -58,6 +58,7 @@ jobs:
         shell: pwsh
         run: |
           $env:JAIX_HOME = "$env:RUNNER_TEMP\jaix-portable"
+          $env:PYTHONIOENCODING = "utf-8"
           python -c "from jaix import runtimes as r; [r.install_portable(r.BY_KEY[k], print) for k in ('uv', 'git', 'age')]"
           & "$env:JAIX_HOME\bin\uv.exe" --version
           & "$env:JAIX_HOME\bin\uvx.exe" --version

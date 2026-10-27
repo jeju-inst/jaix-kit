@@ -7,7 +7,7 @@ import argparse
 import json
 import sys
 
-from jaix import __version__, claude, codex, doctor, hermes, lock as lockmod, paths, runtimes, winenv
+from jaix import __version__, claude, codex, doctor, gw, hermes, lock as lockmod, paths, runtimes, winenv
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -87,6 +87,9 @@ def cmd_setup(args, log):
     for rt in _runtimes(args.runtimes):
         runtimes.ensure(rt, log, dry_run=args.dry_run)
     result = {}
+    if args.gw_source and not args.dry_run:
+        gw.save_source(args.gw_source)
+    gw.setup(log, dry_run=args.dry_run)
     log("\n[2/3] Claude")
     if "claude" in chosen:
         result["claude"] = claude.setup(lock, log, dry_run=args.dry_run)
@@ -127,6 +130,7 @@ def cmd_update(args, log):
     for rt in runtimes.RUNTIMES:
         if rt.applies and (rt.required or runtimes.find(rt).path):
             runtimes.ensure(rt, log, dry_run=args.dry_run, upgrade=True)
+    gw.setup(log, dry_run=args.dry_run)
     log("\n[2/3] Claude · Codex 플러그인")
     claude.setup(lock, log, dry_run=args.dry_run, update=True)
     if codex.find_cli():
@@ -159,6 +163,7 @@ def build_parser():
     s.add_argument("--channels", default="claude,codex", help="claude,codex,hermes 중 쉼표로 (기본 claude,codex)")
     s.add_argument("--runtimes", help="설치할 런타임: 쉼표 목록 | all | none (기본: 필수만)")
     s.add_argument("--dry-run", action="store_true", help="바꾸지 않고 할 일만 보여 줌")
+    s.add_argument("--gw-source", help="그룹웨어(gw) 런타임 원내 원본 URL(저장해 두고 update도 씀). 원내망이 아니면 gw만 건너뜀")
     s.add_argument("--guide-out", help="마지막 안내문을 이 파일에 씀(설치 프로그램용)")
     s.set_defaults(func=cmd_setup)
 

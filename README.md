@@ -59,6 +59,7 @@
 | `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
 
 - 잠금은 GitHub `main`(stable) 또는 `--channel beta` 에서 읽고, 못 받으면 실행파일에 묶은 사본을 쓴다. jaix 는 잠금을 고치지 않는다.
+- **gw(그룹웨어)** 는 라이선스상 공개 저장소에 넣지 않고 원내 위치에서 받는다(ji-gw-ai#108 Q2). 위치가 정해지기 전이라 `jaix setup --gw-source <URL>` 자리만 있다 — 원내망이 아니면 gw만 건너뛰고 doctor가 안내한다.
 - 관리자 콘솔(managed settings)이 jaix 마켓플레이스를 이미 내려주면 사용자 설정 등록은 건너뛴다.
 - 관리자 권한·시스템 PATH·재부팅을 쓰지 않는다. 시험은 `CLAUDE_CONFIG_DIR`·`CODEX_HOME`·`JAIX_HOME`·`HERMES_HOME` 으로 격리한다.
 

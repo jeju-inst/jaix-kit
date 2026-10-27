@@ -5,7 +5,7 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, hermes, paths, runtimes, winenv
+from jaix import claude, codex, gw, hermes, paths, runtimes, winenv
 from jaix.lock import MARKETPLACE
 from jaix.paths import IS_WIN
 
@@ -64,6 +64,18 @@ def check_path():
         else:
             out.append(Check("fail", "PATH", f"{d} 가 사용자 PATH에 없음", "jaix setup 다시 실행 후 새 창 열기"))
     return out
+
+
+def check_gw():
+    url = gw.source()
+    if not url:
+        return [Check("skip", "gw(그룹웨어)", "원본 위치 미정 — 정해지면 jaix setup이 원내에서 설치")]
+    if gw.installed():
+        return [Check("ok", "gw(그룹웨어)", f"설치됨 ({gw.exe_path()})")]
+    if not gw.reachable(url):
+        return [Check("warn", "gw(그룹웨어)", "원내 위치에 닿지 않아 설치 안 됨 (원내망 필요)",
+                      "원내망(사무실·VPN)에서 jaix setup")]
+    return [Check("fail", "gw(그룹웨어)", "원내 위치에 닿는데 설치 안 됨", "jaix setup")]
 
 
 def check_claude(lock):
@@ -140,7 +152,7 @@ def check_hermes(lock):
 
 
 def run(lock):
-    return [*check_runtimes(), *check_path(), *check_claude(lock), *check_codex(lock), *check_hermes(lock)]
+    return [*check_runtimes(), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock), *check_hermes(lock)]
 
 
 def render(checks):
