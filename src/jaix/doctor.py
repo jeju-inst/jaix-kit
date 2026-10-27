@@ -3,6 +3,7 @@
 판정: ok 통과 · warn 주의(동작은 함, 손볼 것 있음) · fail 실패(종료 코드 1) · skip 해당 없음.
 """
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from jaix import claude, codex, hermes, paths, runtimes, winenv
 from jaix.lock import MARKETPLACE
@@ -47,7 +48,14 @@ def check_path():
     if not IS_WIN:
         return []
     out = []
-    dirs = {paths.bin_dir()} | {rt.path_dir() for rt in runtimes.RUNTIMES if runtimes.find(rt).managed}
+    # jaix가 깐 폴더와 winget 바로가기 폴더는 사용자 PATH에 있어야 새 창·다시 연 앱이 찾는다
+    dirs = {paths.bin_dir()}
+    for rt in runtimes.RUNTIMES:
+        found = runtimes.find(rt)
+        if found.managed:
+            dirs.add(rt.path_dir())
+        elif found.path and Path(found.path).parent == paths.winget_links():
+            dirs.add(paths.winget_links())
     for d in sorted(dirs, key=str):
         if not d.is_dir():
             continue

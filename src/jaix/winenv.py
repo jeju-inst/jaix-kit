@@ -4,6 +4,7 @@ Windows가 아니면 레지스트리 대신 지금 프로세스의 PATH만 고�
 """
 import os
 
+from jaix import paths
 from jaix.paths import IS_WIN
 
 if IS_WIN:
@@ -80,8 +81,7 @@ def refresh_process_path():
     """winget 등 다른 설치기가 사용자 PATH를 바꾼 뒤 지금 프로세스에도 반영한다."""
     if not IS_WIN:
         return
-    links = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links")
-    extra = [os.path.expandvars(p) for p in user_path_entries()] + [links]
+    extra = [os.path.expandvars(p) for p in user_path_entries()] + [str(paths.winget_links())]
     current = os.environ.get("PATH", "").split(os.pathsep)
     have = {_norm(p) for p in current if p}
     os.environ["PATH"] = os.pathsep.join(current + [p for p in extra if _norm(p) not in have])

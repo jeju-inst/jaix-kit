@@ -86,9 +86,10 @@ class Found:
 
 
 def find(rt):
-    """jaix가 깐 위치를 먼저 보고, 없으면 PATH에서 찾는다."""
+    """jaix가 깐 위치 → PATH → winget 바로가기 폴더 순. 마지막은 winget이 방금 깔아 이 프로세스의
+    PATH엔 아직 없는 경우다(새 창부터 보인다)."""
     own = shutil.which(rt.exe, path=str(rt.path_dir()))
-    path = own or shutil.which(rt.exe)
+    path = own or shutil.which(rt.exe) or (IS_WIN and shutil.which(rt.exe, path=str(paths.winget_links())))
     if not path:
         return Found(None, None)
     try:

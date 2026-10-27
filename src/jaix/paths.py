@@ -37,6 +37,11 @@ def bin_dir():
     return jaix_home() / "bin"
 
 
+def winget_links():
+    """winget 사용자 범위 설치가 실행파일 바로가기를 두는 곳(winget이 사용자 PATH에 넣는다)."""
+    return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Microsoft" / "WinGet" / "Links"
+
+
 def desktop_claude_code_root():
     """Claude Desktop이 Code 탭용으로 내려받는 Claude Code 바이너리 폴더(claude-code/<버전>/...)."""
     if IS_WIN:

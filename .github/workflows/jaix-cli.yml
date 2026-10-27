@@ -44,10 +44,26 @@ jobs:
           npm install -g @anthropic-ai/claude-code
       - name: jaix setup (all runtimes, Claude channel)
         run: jaix setup --channels claude,codex --runtimes all --log setup.log
-      - name: jaix doctor
-        run: jaix doctor
-      - name: jaix doctor --json
-        run: jaix doctor --json > doctor.json
+      - name: jaix doctor (new login — user PATH re-read from the registry)
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+          jaix doctor
+          if ($LASTEXITCODE -ne 0) { throw "jaix doctor 실패" }
+          jaix doctor --json > doctor.json
+      # 러너엔 Git·uv가 이미 있어 위 setup은 포터블 경로를 안 탈 수 있다. 깨끗한 PC(winget 거절)에서 쓰는
+      # 포터블 설치를 따로 돌려 압축 구조가 맞는지 본다
+      - name: Portable installs (what a clean PC falls back to)
+        shell: pwsh
+        run: |
+          $env:JAIX_HOME = "$env:RUNNER_TEMP\jaix-portable"
+          python -c "from jaix import runtimes as r; [r.install_portable(r.BY_KEY[k], print) for k in ('uv', 'git', 'age')]"
+          & "$env:JAIX_HOME\bin\uv.exe" --version
+          & "$env:JAIX_HOME\bin\uvx.exe" --version
+          & "$env:JAIX_HOME\git\cmd\git.exe" --version
+          & "$env:JAIX_HOME\bin\age.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "포터블 실행 실패" }
       - name: Second setup changes nothing
         shell: pwsh
         run: |
