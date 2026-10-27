@@ -164,10 +164,15 @@ def test_lint_plugin_violations_repo(make_local_repo, tmp_path, monkeypatch, cap
 
     out = capsys.readouterr().out
     assert "△ bad-plugin" in out
+    assert "TS-FORMAT-2" in out
     assert "version" in out
+    assert "TS-VER-2" in out
     assert ".github/workflows/calver.yml 없음" in out
+    assert "TS-MCP-1" in out
     assert "--python 3.12" in out
+    assert "TS-SKILL-2" in out
     assert "path/to" in out
+    assert "TS-TOKEN-2" in out
     assert "10,000 토큰 초과" in out
     assert "위반 4건, 경고 1건" in out
 
@@ -211,7 +216,7 @@ def test_lint_plugin_subdir_and_unit_checks():
         return dummy_read(p)
 
     issues, _ = plugin_lint.lint_plugin(entry, files, dummy_read_bad_calver)
-    assert any("40자 SHA" in i for i in issues)
+    assert any("TS-VER-3" in i and "40자 SHA" in i for i in issues)
 
     # 2-1. calver.yml 주석에 40자 SHA가 적혀 있어도 실제 호출이 @main 이면 위반
     def dummy_read_commented_sha(p):
@@ -223,9 +228,9 @@ def test_lint_plugin_subdir_and_unit_checks():
         return dummy_read(p)
 
     issues, _ = plugin_lint.lint_plugin(entry, files, dummy_read_commented_sha)
-    assert any("40자 SHA" in i for i in issues)
+    assert any("TS-VER-3" in i and "40자 SHA" in i for i in issues)
 
     # 3. skills/*/SKILL.md 가 아예 없는 경우
     files_no_skill = {f for f in files if "SKILL.md" not in f}
     issues, _ = plugin_lint.lint_plugin(entry, files_no_skill, dummy_read)
-    assert any("SKILL.md 없음" in i for i in issues)
+    assert any("TS-FORMAT-3" in i and "SKILL.md 없음" in i for i in issues)
