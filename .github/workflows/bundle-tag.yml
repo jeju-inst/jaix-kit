@@ -2,11 +2,13 @@ name: bundle-tag
 
 # JAIX 묶음 버전: main(stable)에 잠금 변경이 머지될 때마다 이 저장소에 날짜 태그를 단다.
 # "지금 전원이 쓰는 묶음 = v2026.11.10.1" 처럼 한 번호로 부를 수 있게.
+# 설치 프로그램(jaix CLI·installer)이 바뀌어도 태그를 단다 — 묶음 = 잠금 + 그것을 까는 설치본.
+# 새 태그면 그 태그로 jaix-setup.exe 를 빌드해 릴리스로 올린다.
 
 on:
   push:
     branches: [main]
-    paths: [".claude-plugin/marketplace.json"]
+    paths: [".claude-plugin/marketplace.json", "src/**", "installer/**", "pyproject.toml"]
 
 concurrency: calver-tag
 
@@ -15,3 +17,15 @@ jobs:
     uses: ./.github/workflows/calver-tag.yml
     permissions:
       contents: write
+
+  # GITHUB_TOKEN 으로 단 태그는 push: tags 를 깨우지 않으므로 빌드를 직접 부른다
+  installer:
+    needs: tag
+    if: needs.tag.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run jaix-setup.yml --repo "${{ github.repository }}" --ref "${{ needs.tag.outputs.tag }}"
