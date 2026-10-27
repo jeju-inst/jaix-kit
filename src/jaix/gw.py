@@ -181,7 +181,16 @@ def base_url():
 
 
 def save_base_url(url, log):
-    """share.toml 의 [gw].base_url 만 바꾼다. 다른 키·표는 그대로 둔다."""
+    """share.toml 의 [gw].base_url 만 바꾼다. 다른 키·표는 그대로 둔다. 실패해도 예외를 내지 않는다
+    (선택 설정 하나 때문에 Claude·Codex 단계까지 멈추지 않게)."""
+    try:
+        return _save_base_url(url, log)
+    except (OSError, UnicodeError) as e:
+        log(f"  gw: {share_toml()} 을 읽거나 쓰지 못해 건드리지 않음({type(e).__name__}: {e}) — 고친 뒤 jaix setup")
+        return False
+
+
+def _save_base_url(url, log):
     f = share_toml()
     text = f.read_text(encoding="utf-8") if f.exists() else ""
     try:

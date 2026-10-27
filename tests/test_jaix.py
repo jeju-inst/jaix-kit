@@ -711,3 +711,11 @@ def test_gw_setup_records_base_url_only_when_present(isolated, monkeypatch):
     gw.setup(print)
     assert gw.base_url() == "https://gw.example.internal/"
     assert {c.area: c for c in doctor.check_gw()}["gw 그룹웨어 주소"].status == "ok"
+
+
+def test_gw_base_url_unreadable_file_does_not_raise(isolated):
+    f = gw.share_toml()
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"[gw]\nother = \"\xff\xfe\"\n")  # UTF-8 아님
+    lines = []
+    assert gw.save_base_url("https://x/", lines.append) is False and "UnicodeDecodeError" in lines[0]

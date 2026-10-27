@@ -91,11 +91,13 @@ jobs:
       - name: Install Claude Code (so setup can install plugins right away)
         run: npm install -g @anthropic-ai/claude-code
 
+      # /GWSOURCE=none: 실제 원내 배포 서버(IP 제한)를 CI 에서 부르지 않는다. 설치본의 jaix setup 은 작업 스케줄러로
+      # 돌 수 있어 환경변수가 안 넘어가므로 설정값(config.json)으로 끈다
       - name: Silent install (per-user, no admin)
         shell: pwsh
         run: |
           $p = Start-Process installer\Output\jaix-setup.exe -Wait -PassThru -ArgumentList `
-            '/VERYSILENT','/CURRENTUSER','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log','/CHANNELS=claude,codex'
+            '/VERYSILENT','/CURRENTUSER','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log','/CHANNELS=claude,codex','/GWSOURCE=none'
           Get-Content install.log -Tail 60
           if ($p.ExitCode -ne 0) { throw "설치 종료 코드 $($p.ExitCode)" }
           $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
