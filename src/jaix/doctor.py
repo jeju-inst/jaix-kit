@@ -5,7 +5,7 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, gw, hermes, paths, runtimes, winenv
+from jaix import claude, codex, gw, hermes, paths, runtimes, uvpython, winenv
 from jaix.lock import MARKETPLACE
 from jaix.paths import IS_WIN
 
@@ -41,6 +41,26 @@ def check_runtimes():
         if rt.key == "hwp2pdf" and found.path and not runtimes.hancom_installed():
             out.append(Check("warn", "한컴오피스", "없음 → HWP 렌더는 rhwp 근사 렌더로 대체 (hwp2pdf는 설치돼 있음)",
                              "정확한 렌더가 필요하면 한컴오피스 설치"))
+    return out
+
+
+def check_uv_python():
+    """플러그인 MCP(uvx)가 쓸 uv 관리 Python. Windows에서 없으면 Claude 앱이 받다가 가상화로 깨져
+    MCP가 오류 없이 안 뜬다(jaix-kit#14). 맥·리눅스는 uvx가 처음 실행 때 받아도 되므로 주의로만."""
+    area = "uv 관리 Python"
+    if not runtimes.find(runtimes.BY_KEY["uv"]).path:
+        return [Check("skip", area, "uv 없음 (위 uv 항목 참고)")]
+    out = []
+    missing = [v for v in uvpython.recorded() if not uvpython.find(v)]
+    if missing:
+        out.append(Check("fail" if IS_WIN else "warn", area,
+                         f"{', '.join(missing)} 없음 — Claude 앱에서 HWP 등 플러그인 도구가 조용히 안 뜸",
+                         "jaix setup (다시 실행)" if IS_WIN else f"uv python install {' '.join(missing)}"))
+    else:
+        out.append(Check("ok", area, ", ".join(uvpython.recorded())))
+    for d in uvpython.virtualized_dirs():
+        out.append(Check("warn", "uv 가상화 흔적", f"Claude 앱 안에서 받은 uv 파일: {d}",
+                         "위 항목이 통과면 무해. 도구가 계속 안 보이면 이 폴더를 지우고 Claude 재시작"))
     return out
 
 
@@ -152,7 +172,7 @@ def check_hermes(lock):
 
 
 def run(lock):
-    return [*check_runtimes(), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock), *check_hermes(lock)]
+    return [*check_runtimes(), *check_uv_python(), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock), *check_hermes(lock)]
 
 
 def render(checks):

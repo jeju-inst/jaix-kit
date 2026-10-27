@@ -114,6 +114,7 @@ jobs:
           jaix doctor
           if ($LASTEXITCODE -ne 0) { throw "jaix doctor 실패" }
           (Get-Command hwp2pdf-cli).Source
+          Get-ChildItem "$env:APPDATA\uv\python"   # jaix-kit#14: 설치본이 uv 관리 Python을 앱 밖에서 깔았는지
 
       - name: Uninstall
         shell: pwsh
