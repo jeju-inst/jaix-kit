@@ -1,0 +1,195 @@
+"""jaix — 제주연구원 JAIX 도구 설치(setup) · 점검(doctor) · 갱신(update).
+
+설치 프로그램 jaix-setup.exe는 체크박스만 받아 `jaix setup --channels …`에 넘기는 껍데기다
+(ji-deploy-standards 3.2). 안내문도 여기서 만들어 설치 화면과 터미널이 같은 문구를 쓴다.
+"""
+import argparse
+import json
+import sys
+
+from jaix import __version__, claude, codex, doctor, gw, hermes, lock as lockmod, paths, runtimes, winenv
+
+CHANNELS = ("claude", "codex", "hermes")
+
+# 한국어 Windows 콘솔(cp949)·CI(cp1252)로 파이프될 때도 한글이 죽지 않게
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+class Log:
+    def __init__(self, path=None):
+        self.file = open(path, "a", encoding="utf-8") if path else None
+
+    def __call__(self, msg=""):
+        print(msg, flush=True)
+        if self.file:
+            self.file.write(msg + "\n")
+            self.file.flush()
+
+
+def guide(channels, result):
+    """채널별 "이렇게 쓰세요". 고른 채널만 보여 준다(ji-deploy-standards 3.1)."""
+    out = []
+    if "claude" in channels:
+        out += [
+            "■ Claude (데스크톱 앱 · Claude Code)",
+            "  1. Claude 앱을 완전히 종료했다가 다시 여세요(작업 표시줄 아이콘 → 종료).",
+            "     HWP 편집 · 업무일지 · 보고서 작성 표준 도구가 저절로 켜집니다.",
+            "     새 버전도 앱을 다시 열 때 저절로 받습니다.",
+            "  2. 왼쪽 위 모델 선택에서 Sonnet을 고르세요. 사용량을 아낍니다.",
+            "  3. HWP 파일 작업은 Code 탭에서 하세요. Cowork에서 HWP 도구가 보이지 않으면",
+            "     같은 일을 Code 탭에서 하면 됩니다(Cowork의 로컬 도구 실행은 확인 중).",
+        ]
+        if result.get("claude", {}).get("managed"):
+            out.append("  (도구 목록은 기관 관리자 설정으로 내려옵니다)")
+    if "codex" in channels:
+        if result.get("codex", {}).get("cli"):
+            out += [
+                "■ Codex",
+                "  Codex를 다시 시작하세요. 플러그인 목록에 jaix 도구가 켜져 있습니다.",
+                "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.",
+            ]
+        else:
+            out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
+    if "hermes" in channels:
+        out += ["■ 슬랙으로도 쓰기 (Hermes)", f"  {hermes.NOT_YET}"]
+    out += ["", "문제가 있으면 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
+    return "\n".join(out)
+
+
+def _channels(value):
+    chosen = [c.strip() for c in value.split(",") if c.strip()]
+    bad = [c for c in chosen if c not in CHANNELS]
+    if bad:
+        raise SystemExit(f"모르는 채널: {', '.join(bad)} (가능: {', '.join(CHANNELS)})")
+    return chosen
+
+
+def _runtimes(value):
+    if value in (None, ""):
+        return runtimes.select([])
+    if value == "none":
+        return []
+    if value == "all":
+        return [rt for rt in runtimes.RUNTIMES if rt.applies]
+    return runtimes.select([k.strip() for k in value.split(",") if k.strip()])
+
+
+def cmd_setup(args, log):
+    lock = lockmod.load(args.lock, args.channel, args.offline)
+    chosen = _channels(args.channels)
+    log(f"jaix {__version__} · 잠금: {lock.source}")
+    if not args.dry_run:
+        paths.bin_dir().mkdir(parents=True, exist_ok=True)
+        winenv.add_to_path([paths.bin_dir()])
+    log("\n[1/3] 런타임")
+    for rt in _runtimes(args.runtimes):
+        runtimes.ensure(rt, log, dry_run=args.dry_run)
+    result = {}
+    if args.gw_source and not args.dry_run:
+        gw.save_source(args.gw_source)
+    gw.setup(log, dry_run=args.dry_run)
+    log("\n[2/3] Claude")
+    if "claude" in chosen:
+        result["claude"] = claude.setup(lock, log, dry_run=args.dry_run)
+    else:
+        log("  선택 안 함")
+    log("\n[3/3] Codex · Hermes")
+    if "codex" in chosen:
+        result["codex"] = codex.setup(lock, log, dry_run=args.dry_run)
+    if "hermes" in chosen:
+        log(f"  {hermes.NOT_YET}")
+    text = guide(chosen, result)
+    log("\n" + text)
+    if args.guide_out:
+        # Inno Setup LoadStringsFromFile가 UTF-8로 읽게 BOM을 붙인다
+        with open(args.guide_out, "w", encoding="utf-8-sig") as f:
+            f.write(text + "\n")
+    return 0
+
+
+def cmd_doctor(args, log):
+    lock = lockmod.load(args.lock, args.channel, args.offline)
+    checks = doctor.run(lock)
+    failed = any(c.status == "fail" for c in checks)
+    if args.json:
+        print(json.dumps({"version": __version__, "lock": lock.source, "ok": not failed,
+                          "checks": doctor.as_dicts(checks)}, ensure_ascii=False, indent=2))
+    else:
+        log(f"jaix {__version__} · 잠금: {lock.source}")
+        log(doctor.render(checks))
+        log("\n결과: " + ("고칠 것이 있습니다 — 위 → 줄을 따라 하세요" if failed else "정상"))
+    return 1 if failed else 0
+
+
+def cmd_update(args, log):
+    lock = lockmod.load(args.lock, args.channel, args.offline)
+    log(f"jaix {__version__} · 잠금: {lock.source}")
+    log("\n[1/3] 런타임 갱신")
+    for rt in runtimes.RUNTIMES:
+        if rt.applies and (rt.required or runtimes.find(rt).path):
+            runtimes.ensure(rt, log, dry_run=args.dry_run, upgrade=True)
+    gw.setup(log, dry_run=args.dry_run)
+    log("\n[2/3] Claude · Codex 플러그인")
+    claude.setup(lock, log, dry_run=args.dry_run, update=True)
+    if codex.find_cli():
+        codex.setup(lock, log, dry_run=args.dry_run, update=True)
+    log("\n[3/3] Hermes 스킬")
+    changed = hermes.sync(lock, log, dry_run=args.dry_run)
+    log(f"  {len(changed)}개 맞춤" if changed else "  맞출 것 없음")
+    return 0
+
+
+def cmd_cleanup(args, log):
+    """설치본 제거(jaix-setup 언인스톨러)가 부른다: 사용자 PATH에서 jaix 폴더를 뺀다. 사용자 설정은 그대로 둔다."""
+    for p in winenv.remove_from_path(paths.jaix_home()):
+        log(f"PATH에서 뺌: {p}")
+    return 0
+
+
+def build_parser():
+    ap = argparse.ArgumentParser(prog="jaix", description="제주연구원 JAIX 도구 설치·점검·갱신")
+    ap.add_argument("--version", action="version", version=f"jaix {__version__}")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--lock", help="잠금 파일 경로(기본: GitHub의 채널 브랜치, 안 되면 묶은 사본)")
+    common.add_argument("--channel", choices=sorted(lockmod.CHANNEL_BRANCH), default="stable",
+                        help="stable(main, 전원) 또는 beta(AI센터 파일럿)")
+    common.add_argument("--offline", action="store_true", help="잠금을 내려받지 않고 묶은 사본을 씀")
+    common.add_argument("--log", help="진행 기록을 이 파일에도 덧붙임")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("setup", parents=[common], help="런타임 설치 + 채널별 도구 등록")
+    s.add_argument("--channels", default="claude,codex", help="claude,codex,hermes 중 쉼표로 (기본 claude,codex)")
+    s.add_argument("--runtimes", help="설치할 런타임: 쉼표 목록 | all | none (기본: 필수만)")
+    s.add_argument("--dry-run", action="store_true", help="바꾸지 않고 할 일만 보여 줌")
+    s.add_argument("--gw-source", help="그룹웨어(gw) 런타임 원내 원본 URL(저장해 두고 update도 씀). 원내망이 아니면 gw만 건너뜀")
+    s.add_argument("--guide-out", help="마지막 안내문을 이 파일에 씀(설치 프로그램용)")
+    s.set_defaults(func=cmd_setup)
+
+    d = sub.add_parser("doctor", parents=[common], help="런타임·등록·플러그인 버전이 잠금과 맞는지 점검")
+    d.add_argument("--json", action="store_true")
+    d.set_defaults(func=cmd_doctor)
+
+    u = sub.add_parser("update", parents=[common], help="런타임 갱신 + 플러그인·Hermes 스킬을 잠금에 맞춤")
+    u.add_argument("--dry-run", action="store_true")
+    u.set_defaults(func=cmd_update)
+
+    c = sub.add_parser("cleanup", parents=[common], help=argparse.SUPPRESS)
+    c.set_defaults(func=cmd_cleanup)
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    log = Log(args.log)
+    try:
+        return args.func(args, log)
+    except FileNotFoundError as e:  # 잠금을 못 받았고 묶은 사본도 없음
+        log(f"멈춤: {e}")
+        return 2
+    except ValueError as e:  # 깨진 settings.json 등 — 덮어쓰지 않고 멈춘다
+        log(f"멈춤: {e}")
+        return 2
+    except KeyboardInterrupt:
+        return 130
