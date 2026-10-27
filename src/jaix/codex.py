@@ -76,7 +76,7 @@ def setup(lock, log, dry_run=False, update=False):
         return {"cli": False}
     log(f"  Codex: {cli}")
     if dry_run:
-        return {"cli": True}
+        return {"cli": True, "failed": failed}
     if not marketplace_configured():
         if not _run(cli, ["plugin", "marketplace", "add", GIT_URL], log):
             return {"cli": True, "error": "marketplace add"}
@@ -87,7 +87,7 @@ def setup(lock, log, dry_run=False, update=False):
         return {"cli": True, "error": "marketplace upgrade"}
     # 기록은 바라는 잠금이 아니라 실제로 받아 둔 사본의 커밋으로 남긴다
     snap = {e["name"]: e["source"].get("sha") for e in (snapshot_lock() or {}).get("plugins", [])}
-    have, rec = enabled_plugins(), recorded()
+    have, rec, failed = enabled_plugins(), recorded(), []
     for p in lock.plugins:
         stale = rec.get(p.id) != p.sha
         if p.id in have and not (update and stale):
@@ -96,6 +96,8 @@ def setup(lock, log, dry_run=False, update=False):
             rec[p.id] = snap.get(p.name)
             note = "" if snap.get(p.name) == p.sha else f" (받은 사본 {str(snap.get(p.name))[:7]} ≠ 잠금 — jaix update)"
             log(f"    {'갱신' if p.id in have else '설치'}: {p.id} {p.label}{note}")
+        else:
+            failed.append(p.name)
     _record_file().parent.mkdir(parents=True, exist_ok=True)
     _record_file().write_text(json.dumps(rec, indent=2), encoding="utf-8")
-    return {"cli": True}
+    return {"cli": True, "failed": failed}

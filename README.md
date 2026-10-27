@@ -52,6 +52,12 @@
 
 ## `jaix` CLI — 설치·점검·갱신 (`src/jaix/`)
 연구원 PC에서는 설치 프로그램 **`jaix-setup.exe`**(https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe, 관리자 권한 불필요)가 이것을 부른다.
+### 처음 실행할 때 "Windows의 PC 보호" 창이 뜨면
+설치 파일에 아직 코드 서명이 없어서 SmartScreen이 막을 수 있다. 창에서 **추가 정보** → **실행**을 누른다.
+
+<!-- 스크린샷 자리: jaix-win 실기(namun-ji) 때 ① 첫 경고 창 ② "추가 정보"를 누른 뒤 "실행" 버튼이 보이는 창 두 장을 docs/img/ 에 넣고 여기 링크한다 -->
+_(화면 예시는 실기 시험 뒤 추가)_
+
 설치본은 채널 체크박스(Claude · Codex · 슬랙[다음 버전])만 받아 `jaix setup --channels …` 에 넘기는 껍데기다(`installer/jaix-setup.iss`).
 묶음 태그가 새로 달리면 `jaix-setup.yml` 이 Windows 러너에서 빌드 → 무인 설치 → `jaix doctor` → 제거까지 시험하고 그 태그의 릴리스로 올린다. 개발자는 `uv tool install git+https://github.com/jeju-inst/jaix-kit` 로 같은 명령을 쓴다.
 
@@ -60,10 +66,12 @@
 | `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, 선택 himalaya·age)을 사용자 범위로 설치(winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
 | `jaix doctor [--json]` | 런타임 버전·사용자 PATH·마켓플레이스 등록·플러그인 버전이 잠금과 맞는지. 어긋나면 고치는 방법 한 줄. 실패가 있으면 종료 코드 1 |
 | `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
+| `jaix update --quiet` | 같은 일을 화면 없이. `jaix setup` 이 등록한 **로그온 자동 갱신**이 부르고, 결과는 `update.log`·`update-status.json` 에 남아 `jaix doctor` 가 보여 준다 |
 
 - 잠금은 GitHub `main`(stable) 또는 `--channel beta` 에서 읽고, 못 받으면 실행파일에 묶은 사본을 쓴다. jaix 는 잠금을 고치지 않는다.
 - **gw(그룹웨어)** 는 라이선스상 공개 저장소에 넣지 않고 원내 위치에서 받는다(ji-gw-ai#108 Q2). 위치가 정해지기 전이라 `jaix setup --gw-source <URL>` 자리만 있다 — 원내망이 아니면 gw만 건너뛰고 doctor가 안내한다.
 - **uv 관리 Python 미리 설치**: Claude Desktop(Windows MSIX)이 띄운 `uvx` 가 Python을 처음 받으면 `%APPDATA%\uv\python` 쓰기가 MSIX 가상화로 앱 안에만 생기고 uv 정션이 깨져 플러그인 MCP(hwp-agent 등)가 오류 없이 안 뜬다(#14). 그래서 `jaix setup`·`update` 가 앱 밖에서 `uv python install` 을 해 둔다 — 버전은 잠금 플러그인 `.mcp.json` 의 `--python` 고정 + 기본 3.12. doctor가 있는지와 가상화 흔적(`Packages\Claude_*\LocalCache\Roaming\uv`)을 점검한다.
+- **로그온 자동 갱신**: Claude는 마켓플레이스 `autoUpdate` 로 저절로 갱신되지만 Codex·Hermes는 그런 장치가 없다. 그래서 `jaix setup` 이 로그온마다 `jaix update --quiet` 를 도는 사용자 범위 예약 작업을 둔다 — Windows 작업 스케줄러 `jaix-update`(이 사용자 로그온 트리거, 일반 권한, 2분 지연), macOS LaunchAgent `kr.re.ji.jaix.update`. 작업은 반드시 **사용자가 로그온할 때만 실행**(대화형 세션)이다 — 세션 0(무인)에서는 한컴 COM이 뜨지 않는다(hwp-render 실측). doctor가 이 실행 모드도 점검한다. 실패하면 다음 로그온에 다시 하고 doctor가 [주의]로 보인다. 설치본을 제거하면(`jaix cleanup`) 함께 지운다. 끄려면 `jaix setup --no-autoupdate`.
 - 관리자 콘솔(managed settings)이 jaix 마켓플레이스를 이미 내려주면 사용자 설정 등록은 건너뛴다.
 - 관리자 권한·시스템 PATH·재부팅을 쓰지 않는다. 시험은 `CLAUDE_CONFIG_DIR`·`CODEX_HOME`·`JAIX_HOME`·`HERMES_HOME` 으로 격리한다.
 

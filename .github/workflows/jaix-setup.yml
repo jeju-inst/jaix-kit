@@ -56,8 +56,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install . pyinstaller
           # 잠금 사본을 묶어 네트워크가 막혀도 doctor가 돈다(평소엔 GitHub의 최신 잠금을 먼저 본다)
+          # hide-early: 콘솔을 혼자 가진 때(로그온 예약 작업)만 창을 숨긴다. 명령창·바로가기(cmd /K)에선 그대로 보인다
           pyinstaller --onefile --name jaix --paths src `
             --add-data ".claude-plugin/marketplace.json;." `
+            --hide-console hide-early `
             src/jaix/__main__.py
           .\dist\jaix.exe --version
 
@@ -116,6 +118,42 @@ jobs:
           (Get-Command hwp2pdf-cli).Source
           Get-ChildItem "$env:APPDATA\uv\python"   # jaix-kit#14: 설치본이 uv 관리 Python을 앱 밖에서 깔았는지
 
+      # 로그온 자동 갱신: 이 사용자로 못박은 예약 작업이 있고, 그 명령이 돌아 상태를 남기는지
+      - name: Logon auto-update task
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+          $raw = schtasks /Query /TN jaix-update /XML | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "예약 작업 jaix-update 없음" }
+          $task = ([xml]$raw).Task
+          $exec = $task.Actions.Exec
+          Write-Host "명령: $($exec.Command) $($exec.Arguments)"
+          $pr = $task.Principals.Principal
+          Write-Host "로그온 트리거 사용자: $($task.Triggers.LogonTrigger.UserId) · 실행: $($pr.LogonType) · 권한: $($pr.RunLevel)"
+          # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
+          if ($pr.RunLevel -and $pr.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨: $($pr.RunLevel)" }
+          if ($pr.LogonType -ne 'InteractiveToken') { throw "'로그온할 때만 실행'이 아님: $($pr.LogonType)" }
+          $jaix = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          $status = "$jaix\update-status.json"
+          Remove-Item $status -ErrorAction SilentlyContinue
+          schtasks /Run /TN jaix-update
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $status); $i++) { Start-Sleep 5 }
+          if (-not (Test-Path $status)) {
+            # 러너는 대화형 로그온이 아니라 InteractiveToken 작업이 안 돌 수 있다 → 등록된 명령을 그대로 실행
+            Write-Warning "작업 스케줄러가 작업을 돌리지 않음 → 등록된 명령을 직접 실행"
+            schtasks /Query /TN jaix-update /V /FO LIST
+            Start-Process -FilePath $exec.Command.Trim('"') -ArgumentList $exec.Arguments -Wait -NoNewWindow
+          }
+          Get-Content "$jaix\update.log" -Tail 40
+          $s = Get-Content $status -Raw | ConvertFrom-Json
+          if (-not $s.ok) { throw "자동 갱신 실패: $($s.error) $($s.problems)" }
+          jaix doctor
+          # 실행 모드('로그온할 때만 실행'·일반 권한)와 마지막 결과까지 doctor가 통과로 보는지
+          $c = (jaix doctor --json | Out-String | ConvertFrom-Json).checks | Where-Object area -eq '로그온 자동 갱신'
+          Write-Host "doctor: $($c.status) $($c.message)"
+          if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
+
       - name: Uninstall
         shell: pwsh
         run: |
@@ -126,6 +164,9 @@ jobs:
           if (Test-Path $app) { Get-ChildItem -Recurse $app | Select-Object -First 20; throw "$app 가 남음" }
           $user = [Environment]::GetEnvironmentVariable('Path', 'User')
           if ($user -like "*Programs\jaix*") { throw "사용자 PATH에 jaix가 남음: $user" }
+          schtasks /Query /TN jaix-update 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "예약 작업 jaix-update 가 남음" }
+          $global:LASTEXITCODE = 0   # 없어서 난 1이 단계 결과가 되지 않게
           Write-Host "제거 확인"
 
       - uses: actions/upload-artifact@v4

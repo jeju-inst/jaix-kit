@@ -56,6 +56,41 @@ jobs:
           $c = (Get-Content doctor.json -Raw | ConvertFrom-Json).checks | Where-Object area -eq 'uv 관리 Python'
           if ($c.status -ne 'ok') { throw "uv 관리 Python: $($c.status) $($c.message)" }
           Get-ChildItem "$env:APPDATA\uv\python"
+      # 로그온 자동 갱신: 이 사용자로 못박은 예약 작업이 있고, 그 명령이 돌아 상태를 남기는지
+      - name: Logon auto-update task
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+          $raw = schtasks /Query /TN jaix-update /XML | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "예약 작업 jaix-update 없음" }
+          $task = ([xml]$raw).Task
+          $exec = $task.Actions.Exec
+          Write-Host "명령: $($exec.Command) $($exec.Arguments)"
+          $pr = $task.Principals.Principal
+          Write-Host "로그온 트리거 사용자: $($task.Triggers.LogonTrigger.UserId) · 실행: $($pr.LogonType) · 권한: $($pr.RunLevel)"
+          # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
+          if ($pr.RunLevel -and $pr.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨: $($pr.RunLevel)" }
+          if ($pr.LogonType -ne 'InteractiveToken') { throw "'로그온할 때만 실행'이 아님: $($pr.LogonType)" }
+          $jaix = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          $status = "$jaix\update-status.json"
+          Remove-Item $status -ErrorAction SilentlyContinue
+          schtasks /Run /TN jaix-update
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $status); $i++) { Start-Sleep 5 }
+          if (-not (Test-Path $status)) {
+            # 러너는 대화형 로그온이 아니라 InteractiveToken 작업이 안 돌 수 있다 → 등록된 명령을 그대로 실행
+            Write-Warning "작업 스케줄러가 작업을 돌리지 않음 → 등록된 명령을 직접 실행"
+            schtasks /Query /TN jaix-update /V /FO LIST
+            Start-Process -FilePath $exec.Command.Trim('"') -ArgumentList $exec.Arguments -Wait -NoNewWindow
+          }
+          Get-Content "$jaix\update.log" -Tail 40
+          $s = Get-Content $status -Raw | ConvertFrom-Json
+          if (-not $s.ok) { throw "자동 갱신 실패: $($s.error) $($s.problems)" }
+          jaix doctor
+          # 실행 모드('로그온할 때만 실행'·일반 권한)와 마지막 결과까지 doctor가 통과로 보는지
+          $c = (jaix doctor --json | Out-String | ConvertFrom-Json).checks | Where-Object area -eq '로그온 자동 갱신'
+          Write-Host "doctor: $($c.status) $($c.message)"
+          if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
       # 러너엔 Git·uv가 이미 있어 위 setup은 포터블 경로를 안 탈 수 있다. 깨끗한 PC(winget 거절)에서 쓰는
       # 포터블 설치를 따로 돌려 압축 구조가 맞는지 본다
       - name: Portable installs (what a clean PC falls back to)

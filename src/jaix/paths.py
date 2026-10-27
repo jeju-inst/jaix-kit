@@ -37,6 +37,11 @@ def bin_dir():
     return jaix_home() / "bin"
 
 
+def launch_agents_dir():
+    """macOS 로그온 자동 갱신(LaunchAgent) 파일을 두는 곳."""
+    return _env_path("JAIX_LAUNCH_AGENTS", Path.home() / "Library" / "LaunchAgents")
+
+
 def winget_links():
     """winget 사용자 범위 설치가 실행파일 바로가기를 두는 곳(winget이 사용자 PATH에 넣는다)."""
     return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Microsoft" / "WinGet" / "Links"
