@@ -7,6 +7,7 @@
 | 파일 | 역할 |
 |---|---|
 | `.claude-plugin/marketplace.json` | **잠금 목록(lockfile)**. 도구마다 저장소 + 태그 + 40자 커밋으로 고정. Claude 마켓플레이스 형식 그대로 |
+| `src/jaix/` | `jaix` CLI(setup · doctor · update). 아래 절 참고 |
 | `scripts/jaixlock.py` | `check`(고정 상태 점검) · `bump NAME REF`(수동 고정) · `update`(새 날짜 태그·커밋으로 전부 올리기) |
 | `.github/workflows/ci.yml` | Windows·Linux 새 머신에서 전 플러그인 설치 시험 + 매일 태그 감시 |
 | `.github/workflows/calver-tag.yml` | 재사용 워크플로. 도구 저장소가 main 머지마다 불러 날짜 태그를 단다 |
@@ -47,6 +48,19 @@
    → 전원 자동 반영(다음 앱 시작 때) + 묶음 태그.
 - 급할 때: Actions 탭에서 `lock-update` 를 수동 실행하거나, `python scripts/jaixlock.py bump <plugin> <tag>` 로 PR.
 - 되돌리기: 승격 PR 을 revert 하면 이전 잠금으로 돌아간다(도구 태그는 지우지 않는다).
+
+## `jaix` CLI — 설치·점검·갱신 (`src/jaix/`)
+연구원 PC에서는 설치 프로그램 `jaix-setup.exe` 가 이것을 부른다. 개발자는 `uv tool install git+https://github.com/jeju-inst/jaix-kit` 로 같은 명령을 쓴다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, 선택 himalaya·age)을 사용자 범위로 설치(winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
+| `jaix doctor [--json]` | 런타임 버전·사용자 PATH·마켓플레이스 등록·플러그인 버전이 잠금과 맞는지. 어긋나면 고치는 방법 한 줄. 실패가 있으면 종료 코드 1 |
+| `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
+
+- 잠금은 GitHub `main`(stable) 또는 `--channel beta` 에서 읽고, 못 받으면 실행파일에 묶은 사본을 쓴다. jaix 는 잠금을 고치지 않는다.
+- 관리자 콘솔(managed settings)이 jaix 마켓플레이스를 이미 내려주면 사용자 설정 등록은 건너뛴다.
+- 관리자 권한·시스템 PATH·재부팅을 쓰지 않는다. 시험은 `CLAUDE_CONFIG_DIR`·`CODEX_HOME`·`JAIX_HOME`·`HERMES_HOME` 으로 격리한다.
 
 ## 수동 설치 (관리자 콘솔 배포 전·개발자용)
 ```

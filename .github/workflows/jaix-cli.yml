@@ -1,0 +1,64 @@
+name: jaix-cli
+
+# jaix CLI(setup · doctor · update) 시험. 단위 시험은 세 OS, 실제 설치는 Windows 새 러너에서
+# `jaix setup` → `jaix doctor` 까지 돌린다(관리자 권한 없이 사용자 범위로만 설치하는지 포함).
+
+on:
+  pull_request:
+    paths: ["src/**", "tests/**", "pyproject.toml", ".github/workflows/jaix-cli.yml"]
+  push:
+    branches: [main]
+    paths: ["src/**", "tests/**", "pyproject.toml", ".github/workflows/jaix-cli.yml"]
+  workflow_dispatch:
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  windows-setup:
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}   # 런타임 릴리스 조회가 익명 한도에 걸리지 않게
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install jaix + Claude Code
+        run: |
+          pip install -e .
+          npm install -g @anthropic-ai/claude-code
+      - name: jaix setup (all runtimes, Claude channel)
+        run: jaix setup --channels claude,codex --runtimes all --log setup.log
+      - name: jaix doctor
+        run: jaix doctor
+      - name: jaix doctor --json
+        run: jaix doctor --json > doctor.json
+      - name: Second setup changes nothing
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8   # jaix는 UTF-8로 쓴다
+          $out = jaix setup --channels claude --runtimes none | Out-String
+          Write-Host $out
+          if ($out -notmatch "이미 등록됨") { throw "두 번째 setup이 설정을 또 바꿈" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jaix-setup-windows
+          path: |
+            setup.log
+            doctor.json

@@ -1,0 +1,24 @@
+[project]
+name = "jaix"
+# 소스 버전은 0.0.0+dev 다. 릴리스 빌드(jaix-setup.yml)가 jaix-kit 묶음 태그 값으로 바꿔 찍는다.
+version = "0.0.0+dev"
+description = "제주연구원 JAIX 도구 설치·점검·갱신 (setup · doctor · update)"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+jaix = "jaix.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jaix"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
