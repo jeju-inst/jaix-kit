@@ -6,8 +6,9 @@
 import argparse
 import json
 import sys
+from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hermes, lock as lockmod, paths, runtimes, uvpython, winenv
+from jaix import __version__, claude, codex, doctor, gw, hermes, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -18,11 +19,13 @@ for stream in (sys.stdout, sys.stderr):
 
 
 class Log:
-    def __init__(self, path=None):
+    def __init__(self, path=None, quiet=False):
         self.file = open(path, "a", encoding="utf-8") if path else None
+        self.quiet = quiet
 
     def __call__(self, msg=""):
-        print(msg, flush=True)
+        if not self.quiet:
+            print(msg, flush=True)
         if self.file:
             self.file.write(msg + "\n")
             self.file.flush()
@@ -48,8 +51,9 @@ def guide(channels, result):
             out += [
                 "■ Codex",
                 "  Codex를 다시 시작하세요. 플러그인 목록에 jaix 도구가 켜져 있습니다.",
-                "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.",
             ]
+            out.append("  새 버전은 로그온할 때 jaix가 저절로 맞춥니다." if result.get("autoupdate")
+                       else "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.")
         else:
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
     if "hermes" in channels:
@@ -102,6 +106,8 @@ def cmd_setup(args, log):
         result["codex"] = codex.setup(lock, log, dry_run=args.dry_run)
     if "hermes" in chosen:
         log(f"  {hermes.NOT_YET}")
+    if not args.no_autoupdate:
+        result["autoupdate"] = schedule.register(log, dry_run=args.dry_run)
     text = guide(chosen, result)
     log("\n" + text)
     if args.guide_out:
@@ -126,26 +132,60 @@ def cmd_doctor(args, log):
 
 
 def cmd_update(args, log):
+    if not args.quiet:
+        return _update(args, log)
+    # 로그온 예약 작업이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다. 실패는 doctor가 보여 준다
+    log = Log(schedule.open_log(), quiet=True)
+    log(f"\n== {datetime.now().isoformat(timespec='seconds')} 로그온 자동 갱신")
+    try:
+        problems = _update(args, log)
+    except Exception as e:  # 잠금을 못 받음(오프라인)·깨진 설정 등 — 다음 로그온에 다시 한다
+        log(f"멈춤: {e}")
+        schedule.write_status([], error=str(e))
+        return 1
+    schedule.write_status(problems)
+    for p in problems:
+        log(f"문제: {p}")
+    return 1 if problems else 0
+
+
+def _update(args, log):
+    """돌려준 목록은 잠금에 못 맞춘 것들(--quiet 상태 기록용)."""
+    problems = []
     lock = lockmod.load(args.lock, args.channel, args.offline)
     log(f"jaix {__version__} · 잠금: {lock.source}")
     log("\n[1/3] 런타임 갱신")
     for rt in runtimes.RUNTIMES:
         if rt.applies and (rt.required or runtimes.find(rt).path):
-            runtimes.ensure(rt, log, dry_run=args.dry_run, upgrade=True)
-    uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run)  # 플러그인이 버전 고정을 바꿨으면 보충
-    gw.setup(log, dry_run=args.dry_run)
+            found = runtimes.ensure(rt, log, dry_run=args.dry_run, upgrade=True)
+            if rt.required and not runtimes.ok(rt, found):
+                problems.append(f"{rt.label} 없음")
+    if not uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run):  # 플러그인이 버전 고정을 바꿨으면 보충
+        problems.append("uv 관리 Python 설치 실패")
+    if gw.setup(log, dry_run=args.dry_run)["status"] == "failed":
+        problems.append("gw 설치 실패")
     log("\n[2/3] Claude · Codex 플러그인")
     claude.setup(lock, log, dry_run=args.dry_run, update=True)
+    if claude.find_cli() and not args.dry_run:
+        have = claude.installed()
+        stale = [p.name for p in lock.plugins if p.id not in have or not claude.matches(p, have[p.id])]
+        if stale:
+            problems.append(f"Claude 플러그인 잠금과 다름: {', '.join(stale)}")
     if codex.find_cli():
-        codex.setup(lock, log, dry_run=args.dry_run, update=True)
+        res = codex.setup(lock, log, dry_run=args.dry_run, update=True)
+        if res.get("error"):
+            problems.append(f"Codex {res['error']} 실패")
     log("\n[3/3] Hermes 스킬")
     changed = hermes.sync(lock, log, dry_run=args.dry_run)
     log(f"  {len(changed)}개 맞춤" if changed else "  맞출 것 없음")
-    return 0
+    return problems
 
 
 def cmd_cleanup(args, log):
-    """설치본 제거(jaix-setup 언인스톨러)가 부른다: 사용자 PATH에서 jaix 폴더를 뺀다. 사용자 설정은 그대로 둔다."""
+    """설치본 제거(jaix-setup 언인스톨러)가 부른다: 사용자 PATH에서 jaix 폴더와 로그온 자동 갱신을 뺀다.
+    사용자 설정은 그대로 둔다."""
+    if schedule.unregister():
+        log("로그온 자동 갱신을 지움")
     for p in winenv.remove_from_path(paths.jaix_home()):
         log(f"PATH에서 뺌: {p}")
     return 0
@@ -167,6 +207,7 @@ def build_parser():
     s.add_argument("--runtimes", help="설치할 런타임: 쉼표 목록 | all | none (기본: 필수만)")
     s.add_argument("--dry-run", action="store_true", help="바꾸지 않고 할 일만 보여 줌")
     s.add_argument("--gw-source", help="그룹웨어(gw) 런타임 원내 원본 URL(저장해 두고 update도 씀). 원내망이 아니면 gw만 건너뜀")
+    s.add_argument("--no-autoupdate", action="store_true", help="로그온 자동 갱신(jaix update --quiet)을 등록하지 않음")
     s.add_argument("--guide-out", help="마지막 안내문을 이 파일에 씀(설치 프로그램용)")
     s.set_defaults(func=cmd_setup)
 
@@ -176,6 +217,8 @@ def build_parser():
 
     u = sub.add_parser("update", parents=[common], help="런타임 갱신 + 플러그인·Hermes 스킬을 잠금에 맞춤")
     u.add_argument("--dry-run", action="store_true")
+    u.add_argument("--quiet", action="store_true",
+                   help="화면에 쓰지 않고 update.log·update-status.json에만 남김(로그온 자동 갱신용)")
     u.set_defaults(func=cmd_update)
 
     c = sub.add_parser("cleanup", parents=[common], help=argparse.SUPPRESS)

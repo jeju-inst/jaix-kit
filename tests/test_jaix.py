@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jaix import claude, cli, codex, doctor, gw, hermes, lock, runtimes, uvpython, winenv
+from jaix import claude, cli, codex, doctor, gw, hermes, lock, runtimes, schedule, uvpython, winenv
 
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
@@ -20,6 +20,9 @@ def isolated(tmp_path, monkeypatch):
     # uv python install 은 진짜로 돌리지 않는다(내려받기)
     monkeypatch.setattr(uvpython, "ensure", lambda versions, log, dry_run=False: True)
     monkeypatch.setattr(uvpython, "needed", lambda lock, offline=False: [uvpython.DEFAULT])
+    # 예약 작업은 진짜로 등록하지 않는다(맥이면 launchctl이 시험 중에 update를 돌린다)
+    monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
+    monkeypatch.setattr(schedule, "_run", lambda args: (True, ""))
     return tmp_path
 
 
@@ -217,3 +220,49 @@ def test_doctor_uv_python(monkeypatch):
     assert doctor.check_uv_python()[0].status == "ok"
     monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found(None, None))
     assert doctor.check_uv_python()[0].status == "skip"
+def test_task_xml_pins_logon_to_this_user():
+    xml = schedule.task_xml([r"C:\Users\a b\jaix.exe", "update", "--quiet"], r"JI\홍길동")
+    assert "<UserId>JI\\홍길동</UserId>" in xml and "<LogonTrigger>" in xml
+    assert "<RunLevel>LeastPrivilege</RunLevel>" in xml
+    assert '<Command>"C:\\Users\\a b\\jaix.exe"</Command>' in xml
+    assert "<Arguments>update --quiet</Arguments>" in xml
+
+
+def test_setup_registers_autoupdate_and_cleanup_removes(isolated, monkeypatch):
+    guide = isolated / "guide.txt"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "codex", "--guide-out", str(guide)]) == 0
+    if schedule.IS_MAC:
+        text = schedule.plist_path().read_text(encoding="utf-8")
+        assert "<string>update</string>" in text and "<key>PATH</key>" in text
+    if schedule.supported():
+        assert cli.main(["cleanup"]) == 0
+        assert not schedule.plist_path().exists()
+
+
+def test_no_autoupdate_flag(isolated):
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
+    assert not schedule.plist_path().exists()
+
+
+def test_quiet_update_records_status_for_doctor(isolated, monkeypatch, capsys):
+    monkeypatch.setattr(schedule, "supported", lambda: True)
+    monkeypatch.setattr(schedule, "registered", lambda: True)
+    assert doctor.check_autoupdate()[0].status == "ok"  # 아직 돈 적 없음
+    monkeypatch.setattr(cli, "_update", lambda args, log: (log("하는 중"), [])[1])
+    assert cli.main(["update", "--quiet"]) == 0
+    assert capsys.readouterr().out == ""
+    assert "하는 중" in schedule.log_file().read_text(encoding="utf-8")
+    assert doctor.check_autoupdate()[0].message.startswith("마지막 갱신")
+
+    def offline(args, log):
+        raise FileNotFoundError("잠금을 받지 못함")
+    monkeypatch.setattr(cli, "_update", offline)
+    assert cli.main(["update", "--quiet"]) == 1
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "warn" and "잠금을 받지 못함" in c.message and c.fix == "jaix update"
+
+
+def test_doctor_warns_when_autoupdate_missing(monkeypatch):
+    monkeypatch.setattr(schedule, "supported", lambda: True)
+    monkeypatch.setattr(schedule, "registered", lambda: False)
+    assert doctor.check_autoupdate()[0].status == "warn"

@@ -5,7 +5,7 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, gw, hermes, paths, runtimes, uvpython, winenv
+from jaix import claude, codex, gw, hermes, paths, runtimes, schedule, uvpython, winenv
 from jaix.lock import MARKETPLACE
 from jaix.paths import IS_WIN
 
@@ -171,8 +171,25 @@ def check_hermes(lock):
     return [Check("ok", "Hermes 스킬", f"{len(have)}개 잠금과 같음")]
 
 
+def check_autoupdate():
+    """로그온 자동 갱신(jaix update --quiet). 실패는 다음 로그온에 다시 하므로 주의로만 보인다."""
+    area = "로그온 자동 갱신"
+    if not schedule.supported():
+        return [Check("skip", area, "이 OS는 지원 안 함 — 가끔 jaix update")]
+    if not schedule.registered():
+        return [Check("warn", area, "등록 안 됨 — Codex·Hermes 도구가 저절로 갱신되지 않음", "jaix setup")]
+    last = schedule.last_status()
+    if not last:
+        return [Check("ok", area, "등록됨 (아직 돈 적 없음)")]
+    if last.get("ok"):
+        return [Check("ok", area, f"마지막 갱신 {last.get('time')}")]
+    why = last.get("error") or "; ".join(last.get("problems") or [])
+    return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()})", "jaix update")]
+
+
 def run(lock):
-    return [*check_runtimes(), *check_uv_python(), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock), *check_hermes(lock)]
+    return [*check_runtimes(), *check_uv_python(), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
+            *check_hermes(lock), *check_autoupdate()]
 
 
 def render(checks):
