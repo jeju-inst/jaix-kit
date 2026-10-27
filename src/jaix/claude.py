@@ -114,15 +114,15 @@ def find_cli():
     exe = shutil.which("claude")
     if exe:
         return exe
-    root = paths.desktop_claude_code_root()
-    if not root.is_dir():
-        return None
     name = "claude.exe" if IS_WIN else "claude"
     found = []
-    for ver in root.iterdir():
-        if ver.is_dir() and re.match(r"^\d+\.\d+\.\d+$", ver.name):
-            found += [(tuple(map(int, ver.name.split("."))), p) for p in ver.rglob(name) if p.is_file()]
-    return str(max(found)[1]) if found else None
+    for root in paths.desktop_claude_code_roots():  # 여러 위치 중 가장 높은 버전
+        if not root.is_dir():
+            continue
+        for ver in root.iterdir():
+            if ver.is_dir() and re.match(r"^\d+\.\d+\.\d+$", ver.name):
+                found += [(tuple(map(int, ver.name.split("."))), str(p)) for p in ver.rglob(name) if p.is_file()]
+    return max(found)[1] if found else None
 
 
 def installed():

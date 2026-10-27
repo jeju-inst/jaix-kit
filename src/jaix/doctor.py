@@ -5,7 +5,7 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, gw, hermes, paths, runtimes, schedule, uvpython, winenv
+from jaix import claude, codex, gw, hermes, hwpjar, paths, runtimes, schedule, uvpython, winenv
 from jaix.lock import MARKETPLACE
 from jaix.paths import IS_WIN
 
@@ -62,6 +62,15 @@ def check_uv_python():
         out.append(Check("warn", "uv 가상화 흔적", f"Claude 앱 안에서 받은 uv 파일: {d}",
                          "위 항목이 통과면 무해. 도구가 계속 안 보이면 이 폴더를 지우고 Claude 재시작"))
     return out
+
+
+def check_hwp_jar(lock):
+    """hwp-agent 변환기 jar. 없으면 처음 hwp를 변환할 때 에이전트가 setup 안내를 보고 우회한다(jaix-kit#19)."""
+    if not hwpjar.plugin(lock):
+        return []
+    if hwpjar.dest().is_file():
+        return [Check("ok", "HWP 변환기(jar)", str(hwpjar.dest()))]
+    return [Check("fail", "HWP 변환기(jar)", f"없음 — hwp → hwpx 변환이 안 됨 ({hwpjar.dest()})", "jaix setup")]
 
 
 def check_path():
@@ -130,6 +139,7 @@ def check_claude(lock):
             out.append(Check("fail", "Claude 플러그인 켜기", f"꺼져 있음: {', '.join(off)}", "jaix setup"))
     have = claude.installed()
     cli = claude.find_cli()
+    missing = []
     for p in lock.plugins:
         rec = have.get(p.id)
         if claude.matches(p, rec):
@@ -139,9 +149,16 @@ def check_claude(lock):
             out.append(Check("fail", f"Claude {p.name}", f"설치 {now} ≠ 잠금 {p.label}",
                              "Claude 앱을 완전히 종료했다가 다시 열기 (또는 jaix update)"))
         else:
-            # 설정은 맞는데 아직 앱을 다시 열지 않은 경우. CLI까지 있는데 없으면 설치가 실패한 것
-            out.append(Check("fail" if cli else "warn", f"Claude {p.name}", f"아직 설치 안 됨 (잠금 {p.label})",
-                             "jaix setup" if cli else "Claude Desktop을 다시 시작하면 설치됨"))
+            missing.append(p)
+    if missing:
+        # 잠금 대비 누락은 늘 실패(jaix-kit#19: 0개인데 '정상'으로 나왔다). Desktop 재시작만으로는 깔리지 않는다
+        names = ", ".join(p.name for p in missing)
+        out.append(Check("fail", "Claude 플러그인", f"{len(missing)}/{len(lock.plugins)}개 설치 안 됨: {names}",
+                         "jaix setup" if cli else
+                         "Claude 앱에서 Code 탭을 한 번 연 뒤(Claude Code가 내려받아짐) jaix setup"))
+    if paths.desktop_installed():
+        out.append(Check("skip", "Claude 데스크톱·Cowork",
+                         "관리자 배포 대상(조직 플러그인) — jaix는 Code 탭·Claude Code에만 등록함"))
     return out
 
 
@@ -195,7 +212,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(), *check_uv_python(), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate()]
 
 
