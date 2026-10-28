@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hermes, hwpjar, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
+from jaix import __version__, claude, codex, doctor, gw, hermes, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -172,6 +172,9 @@ def cmd_setup(args, log):
                                                                           dry_run=args.dry_run))
     # 첫 hwp 변환 때 에이전트가 우회하지 않게
     result["hwpjar"] = steps.run("HWP 변환기(jar)", hwpjar.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
+    # 한글이 열려 있으면 hwp2pdf-cli가 건너뛴다 — 서버 없는 PC의 미리보기 폴백
+    result["rhwp"] = steps.run("HWP 미리보기 엔진(rhwp)", hwprhwp.ensure, lock, log, dry_run=args.dry_run,
+                               offline=args.offline)
     if args.gw_source and not args.dry_run:
         gw.save_source(args.gw_source)
     gw_res = steps.run("gw", gw.setup, log, dry_run=args.dry_run)
@@ -210,7 +213,7 @@ def cmd_setup(args, log):
 
 def _setup_problems(result):
     codex_res = result.get("codex") or {}
-    return bool(result.get("uvpython") is False or result.get("hwpjar") is False
+    return bool(result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
                 or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed")
 
@@ -267,6 +270,8 @@ def _update(args, log):
         problems.append("uv 관리 Python 설치 실패")
     if not hwpjar.ensure(lock, log, dry_run=args.dry_run, offline=args.offline):
         problems.append("HWP 변환기(jar) 받기 실패")
+    if not hwprhwp.ensure(lock, log, dry_run=args.dry_run, offline=args.offline):
+        problems.append("HWP 미리보기 엔진(rhwp) 받기 실패")
     if gw.setup(log, dry_run=args.dry_run)["status"] == "failed":
         problems.append("gw 설치 실패")
     log("\n[2/3] Claude · Codex 플러그인")
