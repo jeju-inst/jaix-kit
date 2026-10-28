@@ -77,6 +77,27 @@ def remove_from_path(prefix):
     return removed
 
 
+def remove_entry(path):
+    """사용자 PATH에서 path 와 같은 항목만 뺀다(그 아래 폴더는 둔다). 뺀 것을 돌려준다."""
+    if not IS_WIN:
+        return []
+    entries = user_path_entries()
+    keep = [p for p in entries if _norm(p) != _norm(path)]
+    removed = [p for p in entries if p not in keep]
+    if removed:
+        _write_user_path(keep)
+    return removed
+
+
+def drop_old_exe_dir():
+    """예전(onefile) 설치본이 사용자 PATH에 넣은 프로그램 폴더 자체를 뺀다. 지금 설치본은 jaix.exe 를 그 아래
+    jaix\\ 에 두므로 그 항목은 빈 자리를 가리킨다(jaix-kit#46). 그 자리에 jaix.exe 가 아직 있으면 둔다."""
+    here, home = paths.exe_dir(), paths.jaix_home()
+    if here is None or _norm(here) == _norm(home) or (home / "jaix.exe").exists():
+        return []
+    return remove_entry(home)
+
+
 def refresh_process_path():
     """winget 등 다른 설치기가 사용자 PATH를 바꾼 뒤 지금 프로세스에도 반영한다."""
     if not IS_WIN:
