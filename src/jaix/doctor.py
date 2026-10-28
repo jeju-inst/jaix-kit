@@ -5,7 +5,7 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, gw, hermes, hwpjar, paths, runtimes, schedule, uvpython, winenv
+from jaix import claude, codex, gw, hermes, hwpjar, hwprhwp, paths, runtimes, schedule, uvpython, winenv
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -71,6 +71,16 @@ def check_hwp_jar(lock):
     if hwpjar.dest().is_file():
         return [Check("ok", "HWP 변환기(jar)", str(hwpjar.dest()))]
     return [Check("fail", "HWP 변환기(jar)", f"없음 — hwp → hwpx 변환이 안 됨 ({hwpjar.dest()})", "jaix setup")]
+
+
+def check_rhwp(lock):
+    """hwp-agent 폴백 렌더 엔진. 없으면 한글이 열린 PC에서 미리보기(pdf·verify)가 결과 없이 끝난다."""
+    if not hwpjar.plugin(lock):
+        return []
+    if hwprhwp.exe().is_file():
+        return [Check("ok", "HWP 미리보기 엔진(rhwp)", f"{hwprhwp.installed_version() or '버전 미상'} · {hwprhwp.exe()}")]
+    return [Check("warn", "HWP 미리보기 엔진(rhwp)",
+                  "없음 — 한글이 열려 있으면 미리보기 렌더가 안 됨(한글을 닫으면 한컴으로 렌더)", "jaix setup")]
 
 
 def check_path():
@@ -234,7 +244,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate()]
 
 

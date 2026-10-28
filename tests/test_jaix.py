@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import re
 import sys
@@ -6,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, lock, runtimes, schedule, uvpython, winenv
+from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, hwprhwp, lock, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
+REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_UV_ENSURE = uvpython.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
@@ -28,6 +30,7 @@ def isolated(tmp_path, monkeypatch):
     REAL_HWPJAR["ensure"] = REAL_HWPJAR.get("ensure", hwpjar.ensure)
     monkeypatch.setattr(hwpjar, "ensure", lambda lock, log, dry_run=False, offline=False: True)
     monkeypatch.setattr(hwpjar, "dest", lambda: tmp_path / "hwp-agent" / "hwp2hwpx.jar")
+    monkeypatch.setattr(hwprhwp, "ensure", lambda lock, log, dry_run=False, offline=False: True)
     monkeypatch.setattr(paths, "desktop_installed", lambda: False)
     # 예약 작업은 진짜로 등록하지 않는다(맥이면 launchctl이 시험 중에 update를 돌린다)
     monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
@@ -682,7 +685,8 @@ def test_same_commit_prefix(the_lock):
     assert same_commit("07040e21d448", full) and same_commit(full, "07040e2")
     assert not same_commit("07040e", full)  # 7자 미만은 판단 안 함
     assert not same_commit("17040e21d448", full) and not same_commit(None, full)
-    branch = next(p for p in the_lock.plugins if not p.version)
+    # 잠금이 전부 태그 고정이 돼도 시험하도록 branch 고정 플러그인을 만들어 쓴다
+    branch = dataclasses.replace(the_lock.plugins[0], version=None)
     # Claude Code 기록: branch 고정이면 version 칸에 12자리 해시
     assert claude.matches(branch, {"version": branch.sha[:12]})
     assert not claude.matches(branch, {"version": "0" * 12})
@@ -867,3 +871,66 @@ def test_batch_wrapper_real_cmd_passes_args_verbatim(tmp_path, monkeypatch):
     assert code == 0, out
     assert json.loads(out.strip().splitlines()[-1])[:5] == args[:5]
     assert not (tmp_path / "2").exists() and not (tmp_path / "=1.2,").exists()  # 리다이렉션이 안 일어났다
+
+
+RHWP_SRC = '''RHWP_REPO = "edwardkim/rhwp"
+RHWP_VERSION = "v0.8.7"
+RHWP_ASSETS = {
+    "windows-x86_64": (
+        f"rhwp-{RHWP_VERSION}-windows-x86_64.zip",
+        "f7ac326e98f595ae8fecd8da7a614ee9a37db77bdf938782a8e07c9da473ec6f",
+    ),
+    "macos-aarch64": (
+        f"rhwp-{RHWP_VERSION}-macos-aarch64.tar.gz",
+        "6ed46aa63f6d10c447842999f73abc59cf9586c5645fefc5e763bd6a6d43662d",
+    ),
+}
+'''
+
+
+def test_rhwp_spec_parsed_from_fetch_rhwp_source():
+    got = hwprhwp.parse_spec(RHWP_SRC, "windows-x86_64")
+    assert got == {"version": "v0.8.7", "asset": "rhwp-v0.8.7-windows-x86_64.zip",
+                   "sha256": "f7ac326e98f595ae8fecd8da7a614ee9a37db77bdf938782a8e07c9da473ec6f",
+                   "url": "https://github.com/edwardkim/rhwp/releases/download/v0.8.7/rhwp-v0.8.7-windows-x86_64.zip"}
+    assert hwprhwp.parse_spec(RHWP_SRC, "linux-x86_64") is None
+    assert hwprhwp.parse_spec("nothing") is None
+
+
+def _rhwp_release(tmp, name):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(f"rhwp/{name}", b"fake rhwp")
+        zf.writestr("rhwp/LICENSE", b"MIT License")
+        zf.writestr("rhwp/README.md", b"skip")
+    src = tmp / "rel" / "rhwp-v0.8.7-x.zip"
+    src.parent.mkdir()
+    src.write_bytes(buf.getvalue())
+    return src
+
+
+def test_rhwp_download_checks_sha256_and_keeps_license(isolated, monkeypatch, the_lock):
+    import hashlib
+    src = _rhwp_release(isolated, hwprhwp.exe().name)
+    good = {"version": "v0.8.7", "asset": src.name, "url": src.as_uri(),
+            "sha256": hashlib.sha256(src.read_bytes()).hexdigest()}
+    monkeypatch.setattr(hwprhwp, "spec", lambda lock, offline=False: {**good, "sha256": "0" * 64})
+    assert REAL_RHWP_ENSURE(the_lock, print) is False and not hwprhwp.exe().exists()
+    assert doctor.check_rhwp(the_lock)[0].status == "warn"  # 폴백이라 fail 아님
+    monkeypatch.setattr(hwprhwp, "spec", lambda lock, offline=False: good)
+    assert REAL_RHWP_ENSURE(the_lock, print) is True
+    assert hwprhwp.exe().read_bytes() == b"fake rhwp"
+    assert (hwprhwp.dest_dir() / "LICENSE").read_bytes() == b"MIT License"
+    assert not (hwprhwp.dest_dir() / "README.md").exists()
+    assert hwprhwp.installed_version() == "v0.8.7"
+    assert doctor.check_rhwp(the_lock)[0].status == "ok"
+    src.unlink()  # 같은 버전이면 다시 받지 않는다
+    assert REAL_RHWP_ENSURE(the_lock, print) is True
+
+
+def test_rhwp_skipped_when_locked_hwp_agent_has_no_pin(isolated, monkeypatch, the_lock):
+    monkeypatch.setattr(hwprhwp, "spec", lambda lock, offline=False: None)
+    logs = []
+    assert REAL_RHWP_ENSURE(the_lock, logs.append) is True and "건너뜀" in logs[0]
