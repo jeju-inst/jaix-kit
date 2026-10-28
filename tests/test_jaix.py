@@ -819,3 +819,16 @@ def test_setup_log_banner_records_path(isolated):
     assert "setup (via task)" in logf.read_text(encoding="utf-8")
     assert cli.main(["update", "--quiet", "--offline"]) in (0, 1)
     assert "update (logon task)" in schedule.log_file().read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="진짜 cmd.exe 로 배치 래퍼를 돌려 본다")
+def test_batch_wrapper_real_cmd_passes_args_verbatim(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    shim = tmp_path / "fake.cmd"
+    shim.write_text(f'@echo off\r\n"{sys.executable}" -c "import sys, json; print(json.dumps(sys.argv[1:]))" %*\r\n',
+                    encoding="utf-8")
+    args = ["--with", "mcp>=1.2,<2", "--from", "C:\\a b\\local", "x&y", "100%"]
+    code, out = proc.run(str(shim), args, timeout=60)
+    assert code == 0, out
+    assert json.loads(out.strip().splitlines()[-1])[:5] == args[:5]
+    assert not (tmp_path / "2").exists() and not (tmp_path / "=1.2,").exists()  # 리다이렉션이 안 일어났다
