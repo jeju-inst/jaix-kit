@@ -16,8 +16,8 @@
         "source": "git-subdir",
         "url": "https://github.com/jeju-inst/calendar-worklog.git",
         "path": "plugin",
-        "ref": "v2026.10.26.3",
-        "sha": "8eb8d8b2cb20e8ad3ad0c7f0953d40009a1e986c"
+        "ref": "v2026.10.27.2",
+        "sha": "1efba86e709169f2fd59b8e1313663ad9054af92"
       },
       "homepage": "https://github.com/jeju-inst/calendar-worklog",
       "metadata": {
@@ -25,7 +25,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.26.3"
+      "version": "2026.10.27.2"
     },
     {
       "name": "hwp-agent",
@@ -35,8 +35,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v2026.10.26.4",
-        "sha": "f8dba282b3a428e1353f982e6df3fc0c05c4f54d"
+        "ref": "v2026.10.27.6",
+        "sha": "b34a4f473869a24e630ed449a867f7c768e6a4e4"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
@@ -44,7 +44,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.26.4"
+      "version": "2026.10.27.6"
     },
     {
       "name": "ji-report-writing",
@@ -54,15 +54,73 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/ji-writing-standards.git",
-        "ref": "main",
-        "sha": "34195f3223f61e183109bff0deb747146846c1fc"
+        "ref": "v2026.10.27.1",
+        "sha": "81aa08cf71332cd18f2e13feea80c82a2589bc15"
       },
       "homepage": "https://github.com/jeju-inst/ji-writing-standards",
       "metadata": {
         "jaix": {
-          "refKind": "branch"
+          "refKind": "tag"
         }
-      }
+      },
+      "version": "2026.10.27.1"
+    },
+    {
+      "name": "ji-project-template",
+      "displayName": "연구과제 폴더·서식 (ji-project-template)",
+      "description": "JRI 정책연구 과제의 표준 폴더 구조 생성과 연구계획서·심의 서식 템플릿 배치를 지원한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jeju-inst/ji-project-template.git",
+        "ref": "v2026.10.27.1",
+        "sha": "d41f4765a1cbb20933c23fbb9a502ea440e2b2af"
+      },
+      "homepage": "https://github.com/jeju-inst/ji-project-template",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.10.27.1"
+    },
+    {
+      "name": "korea-rio-mcp",
+      "displayName": "지역산업연관분석 (korea-rio-mcp)",
+      "description": "한국은행 지역산업연관표 기반으로 경제적 파급효과(생산·부가가치·취업·고용)를 분석·산출한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/z0nam/korea-rio-mcp.git",
+        "ref": "v2026.10.27.2",
+        "sha": "7794491d6579526132aaf22c59ea2214cd1aa6e7"
+      },
+      "homepage": "https://github.com/z0nam/korea-rio-mcp",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.10.27.2"
+    },
+    {
+      "name": "gw",
+      "displayName": "그룹웨어 (gw)",
+      "description": "본인 계정으로 회의실 예약, 근태·출장·증명서 기안 준비와 상신, 결재함·결재 본문 읽기. 런타임(gw)은 jaix-setup 이 원내 위치에서 설치한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jeju-inst/jaix-gw.git",
+        "ref": "v2026.10.27.3",
+        "sha": "37e11f353616c8fbbd78c2059bad658ad4dd43bc"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-gw",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.10.27.3"
     }
   ]
 }

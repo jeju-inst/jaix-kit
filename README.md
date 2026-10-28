@@ -7,11 +7,13 @@
 | 파일 | 역할 |
 |---|---|
 | `.claude-plugin/marketplace.json` | **잠금 목록(lockfile)**. 도구마다 저장소 + 태그 + 40자 커밋으로 고정. Claude 마켓플레이스 형식 그대로 |
+| `src/jaix/` | `jaix` CLI(setup · doctor · update). 아래 절 참고 |
 | `scripts/jaixlock.py` | `check`(고정 상태 점검) · `bump NAME REF`(수동 고정) · `update`(새 날짜 태그·커밋으로 전부 올리기) |
 | `.github/workflows/ci.yml` | Windows·Linux 새 머신에서 전 플러그인 설치 시험 + 매일 태그 감시 |
 | `.github/workflows/calver-tag.yml` | 재사용 워크플로. 도구 저장소가 main 머지마다 불러 날짜 태그를 단다 |
 | `.github/workflows/lock-update.yml` | 갱신 봇. 매일 새 버전을 찾아 beta 갱신 PR과 beta → main 승격 PR을 연다 |
-| `.github/workflows/bundle-tag.yml` | main 잠금이 바뀔 때마다 묶음 날짜 태그 |
+| `.github/workflows/bundle-tag.yml` | main 잠금·설치본이 바뀔 때마다 묶음 날짜 태그 → `jaix-setup.yml` 빌드 호출 |
+| `.github/workflows/jaix-setup.yml` | `jaix.exe`·`jaix-setup.exe` 빌드, 무인 설치·doctor·제거 시험, 태그 릴리스 |
 
 ## 채널
 - `main` = **stable** (전원). 관리자 콘솔이 이 브랜치를 자동 업데이트로 배포한다.
@@ -48,10 +50,41 @@
 - 급할 때: Actions 탭에서 `lock-update` 를 수동 실행하거나, `python scripts/jaixlock.py bump <plugin> <tag>` 로 PR.
 - 되돌리기: 승격 PR 을 revert 하면 이전 잠금으로 돌아간다(도구 태그는 지우지 않는다).
 
+## `jaix` CLI — 설치·점검·갱신 (`src/jaix/`)
+연구원 PC에서는 설치 프로그램 **`jaix-setup.exe`**(https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe, 관리자 권한 불필요)가 이것을 부른다.
+### 처음 실행할 때 "Windows의 PC 보호" 창이 뜨면
+설치 파일에 아직 코드 서명이 없어서 SmartScreen이 막을 수 있다. 창에서 **추가 정보** → **실행**을 누른다.
+
+<!-- 스크린샷 자리: jaix-win 실기(namun-ji) 때 ① 첫 경고 창 ② "추가 정보"를 누른 뒤 "실행" 버튼이 보이는 창 두 장을 docs/img/ 에 넣고 여기 링크한다 -->
+_(화면 예시는 실기 시험 뒤 추가)_
+
+설치본은 채널 체크박스(Claude · Codex · 슬랙[다음 버전])만 받아 `jaix setup --channels …` 에 넘기는 껍데기다(`installer/jaix-setup.iss`).
+묶음 태그가 새로 달리면 `jaix-setup.yml` 이 Windows 러너에서 빌드 → 무인 설치 → `jaix doctor` → 제거까지 시험하고 그 태그의 릴리스로 올린다. 개발자는 `uv tool install git+https://github.com/jeju-inst/jaix-kit` 로 같은 명령을 쓴다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, 선택 himalaya·age)을 사용자 범위로 설치(winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
+| `jaix doctor [--json]` | 런타임 버전·사용자 PATH·마켓플레이스 등록·플러그인 버전이 잠금과 맞는지. 어긋나면 고치는 방법 한 줄. 실패가 있으면 종료 코드 1 |
+| `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
+| `jaix update --quiet` | 같은 일을 화면 없이. `jaix setup` 이 등록한 **로그온 자동 갱신**이 부르고, 결과는 `update.log`·`update-status.json` 에 남아 `jaix doctor` 가 보여 준다. Windows 에선 창 없는 `jaixw.exe` 로 돌아 콘솔 창이 뜨지 않는다 |
+
+- 잠금은 GitHub `main`(stable) 또는 `--channel beta` 에서 읽고, 못 받으면 실행파일에 묶은 사본을 쓴다. jaix 는 잠금을 고치지 않는다.
+- **gw(그룹웨어)** 는 라이선스상 공개 저장소에 넣지 않고 원내 위치에서 받는다(ji-gw-ai#108 Q2, 배포 형식 #122). `jaix setup`·`update` 가 `https://jaix.namun.net/gw/latest.json`(IP 게이트)을 읽어 wheel 을 받고 sha256 을 확인한 뒤 `uv tool install <wheel>` 한다. 설치된 버전이 배포 버전과 다르면(새 버전·롤백) 다시 깐다. 원내망이 아니면 gw만 건너뛰고 doctor가 안내하며, doctor는 설치된 `gw --version` 과 배포 버전을 비교한다. 주소는 `--gw-source <URL>`(설치본 `/GWSOURCE=`)로 바꾸고 `none` 이면 끈다.
+- **uv 관리 Python 미리 설치**: Claude Desktop(Windows MSIX)이 띄운 `uvx` 가 Python을 처음 받으면 `%APPDATA%\uv\python` 쓰기가 MSIX 가상화로 앱 안에만 생기고 uv 정션이 깨져 플러그인 MCP(hwp-agent 등)가 오류 없이 안 뜬다(#14). 그래서 `jaix setup`·`update` 가 앱 밖에서 `uv python install` 을 해 둔다 — 버전은 잠금 플러그인 `.mcp.json` 의 `--python` 고정 + 기본 3.12. doctor가 있는지와 가상화 흔적(`Packages\Claude_*\LocalCache\Roaming\uv`)을 점검한다.
+- **로그온 자동 갱신**: Claude는 마켓플레이스 `autoUpdate` 로 저절로 갱신되지만 Codex·Hermes는 그런 장치가 없다. 그래서 `jaix setup` 이 로그온마다 `jaix update --quiet` 를 도는 사용자 범위 예약 작업을 둔다 — Windows 작업 스케줄러 `jaix-update`(이 사용자 로그온 트리거, 일반 권한, 2분 지연), macOS LaunchAgent `kr.re.ji.jaix.update`. 작업은 반드시 **사용자가 로그온할 때만 실행**(대화형 세션)이다 — 세션 0(무인)에서는 한컴 COM이 뜨지 않는다(hwp-render 실측). doctor가 이 실행 모드도 점검한다. 실패하면 다음 로그온에 다시 하고 doctor가 [주의]로 보인다. 설치본을 제거하면(`jaix cleanup`) 함께 지운다. 끄려면 `jaix setup --no-autoupdate`.
+- **Claude 데스크톱·Cowork 는 관리자 배포 대상이다**(#19 실측): 데스크톱 앱(Cowork)은 `settings.json` 의 `extraKnownMarketplaces` 를 읽지 않고 계정 단위 조직 플러그인에서 도구를 받는다. jaix 는 Code 탭·Claude Code 쪽만 등록·설치하고, Code 탭 실행파일은 `%LOCALAPPDATA%\Claude-Data\claude_*\claude-code\<버전>\…\claude.exe`(가장 높은 버전)에서 찾는다. doctor 는 잠금 대비 빠진 플러그인이 있으면 [실패]로 보인다.
+- **HWP 변환기 jar 미리 받기**: hwp-agent 가 `hwp-agent setup` 으로 받는 `hwp2hwpx.jar` 를 같은 자리(`%LOCALAPPDATA%\hwp-agent`, 맥 `~/.local/share/hwp-agent`)에 미리 받는다. 주소·sha256 은 잠금이 고정한 hwp-agent 커밋의 `fetch_jar.py` 에서 읽는다.
+- **폴더**: 프로그램(`jaix.exe`·`jaixw.exe`·포터블 런타임)은 `%LOCALAPPDATA%\Programs\jaix`, 기록·상태(`setup.log`·`update.log`·`update-status.json`·소유 기록·gw wheel)는 `%LOCALAPPDATA%\jaix`(맥은 둘 다 `~/.local/share/jaix`). 설치본을 제거하면 프로그램 폴더만 지우고 기록 폴더는 남긴다 — Claude·Codex 설정에 넣은 항목을 남기므로 재설치 때 jaix가 쓴 항목을 알아보게. 예전 설치본이 프로그램 폴더에 둔 기록은 jaix가 처음 돌 때 옮긴다.
+- 관리자 콘솔(managed settings)이 jaix 마켓플레이스를 이미 내려주면 사용자 설정 등록은 건너뛴다.
+- 관리자 권한·시스템 PATH·재부팅을 쓰지 않는다. 시험은 `CLAUDE_CONFIG_DIR`·`CODEX_HOME`·`JAIX_HOME`·`JAIX_DATA`·`HERMES_HOME` 으로 격리한다.
+
 ## 수동 설치 (관리자 콘솔 배포 전·개발자용)
 ```
 claude plugin marketplace add jeju-inst/jaix-kit
 claude plugin install calendar-worklog-ji@jaix
 ```
 
-설계 근거: `docs/design.md`, 상위 표준: `ji-deploy-standards`.
+## 새 도구를 넣을 때
+도구 편입 표준은 [`docs/tool-standard.md`](docs/tool-standard.md)다. 형식·버전·잠금·MCP·Windows·토큰 예산 같은 규칙에 ID(`TS-…`)가 붙어 있고, 잠금 CI가 같은 ID로 검사한다. 편입 PR 본문 끝에 이 문서의 체크리스트를 붙인다.
+
+설계 근거: `docs/design.md`. 상위 표준이던 `ji-deploy-standards`(v1)는 `docs/tool-standard.md`에 흡수했다.
