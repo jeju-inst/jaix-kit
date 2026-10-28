@@ -327,6 +327,41 @@ def test_quiet_update_records_status_for_doctor(isolated, monkeypatch, capsys):
     assert c.status == "warn" and "잠금을 받지 못함" in c.message and c.fix == "jaix update"
 
 
+def test_setup_or_direct_update_success_clears_old_logon_failure(isolated, monkeypatch):
+    """지난 로그온 갱신 실패 뒤 setup·직접 update 가 성공하면 doctor 가 더는 실패를 보이지 않는다(jaix-win v.28.1 실측)."""
+    monkeypatch.setattr(schedule, "supported", lambda: True)
+    monkeypatch.setattr(schedule, "registered", lambda: True)
+    monkeypatch.setattr(schedule, "run_mode", lambda: None)
+    schedule.write_status(["Codex 플러그인 설치 실패: MCP 경로"])
+    assert doctor.check_autoupdate()[0].status == "warn"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and c.message.endswith("(jaix setup)")
+
+    schedule.write_status(["Codex 플러그인 설치 실패: MCP 경로"])
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    assert cli.main(["update"]) == 0
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "jaix setup" not in c.message
+
+    monkeypatch.setattr(cli, "_update", lambda args, log: ["gw 설치 실패"])
+    assert cli.main(["update"]) == 1
+    assert doctor.check_autoupdate()[0].status == "warn"
+
+
+def test_setup_keeps_old_failure_when_setup_has_problems():
+    assert cli._setup_problems({"codex": {"failed": ["hwp-agent"]}})
+    assert cli._setup_problems({"codex": {"error": "MCP 등록"}})
+    assert cli._setup_problems({"gw": {"status": "failed"}})
+    assert cli._setup_problems({"uvpython": False}) and cli._setup_problems({"hwpjar": False})
+    assert not cli._setup_problems({"codex": {"failed": []}, "gw": {"status": "offsite"}})
+
+
+def test_guide_gw_login_covers_agent_window_and_terminal():
+    text = cli.guide(["claude"], {"gw": {"status": "installed"}})
+    assert "gw 로그인해 줘" in text and "입력 창" in text and "그 자리에서 묻습니다" in text
+
+
 def test_doctor_warns_when_autoupdate_missing(monkeypatch):
     monkeypatch.setattr(schedule, "supported", lambda: True)
     monkeypatch.setattr(schedule, "registered", lambda: False)

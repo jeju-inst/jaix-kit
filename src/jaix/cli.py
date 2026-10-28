@@ -99,8 +99,9 @@ def guide(channels, result):
         out += ["■ 슬랙으로도 쓰기 (Hermes)", f"  {hermes.NOT_YET}"]
     if (result.get("gw") or {}).get("status") in ("installed", "current"):
         out += ["■ 그룹웨어 (gw)",
-                "  gw 를 처음 쓰기 전에 새 명령창에서 `gw login` 을 한 번 실행하세요.",
-                "  뜨는 창에 그룹웨어 아이디·비밀번호를 넣으면 이 PC에 안전하게 저장됩니다."]
+                "  gw 를 처음 쓰기 전에 한 번 로그인하세요. 아이디·비밀번호는 이 PC에 안전하게 저장됩니다.",
+                "  Claude·Codex 에게 'gw 로그인해 줘'라고 하면 입력 창이 뜹니다.",
+                "  새 명령창에서 직접 `gw login` 을 치면 그 자리에서 묻습니다."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
             "문제가 있으면 새 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
     return "\n".join(out)
@@ -165,10 +166,12 @@ def cmd_setup(args, log):
     for rt in _runtimes(args.runtimes):
         steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
     # Claude 앱(MSIX) 안에서 uvx가 Python을 처음 받으면 가상화로 깨진다(jaix-kit#14) → 앱 밖인 지금 깐다
-    steps.run("uv 관리 Python", lambda: uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run))
-    # 첫 hwp 변환 때 에이전트가 우회하지 않게
-    steps.run("HWP 변환기(jar)", hwpjar.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
     result = {}
+    # ensure 들은 실패를 예외가 아니라 False 로 알린다 — 지난 실패 기록을 덮을지 판단에 쓴다
+    result["uvpython"] = steps.run("uv 관리 Python", lambda: uvpython.ensure(uvpython.needed(lock, args.offline), log,
+                                                                          dry_run=args.dry_run))
+    # 첫 hwp 변환 때 에이전트가 우회하지 않게
+    result["hwpjar"] = steps.run("HWP 변환기(jar)", hwpjar.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
     if args.gw_source and not args.dry_run:
         gw.save_source(args.gw_source)
     gw_res = steps.run("gw", gw.setup, log, dry_run=args.dry_run)
@@ -192,6 +195,9 @@ def cmd_setup(args, log):
         result["autoupdate"] = steps.run("로그온 자동 갱신", schedule.register, log, dry_run=args.dry_run)
     elif not args.dry_run and schedule.unregister():  # 끄라고 했으니 예전에 등록한 것도 지운다
         log("  로그온 자동 갱신: 지움 (--no-autoupdate)")
+    if not args.dry_run and steps.code == 0 and not _setup_problems(result):
+        # 다 맞췄으면 지난 로그온 자동 갱신의 실패 기록을 덮는다 — 남겨 두면 doctor 가 고쳐진 뒤에도 주의로 보인다
+        schedule.write_status([], by="setup")
     text = guide(chosen, result)
     log("\n" + text)
     if args.guide_out:
@@ -200,6 +206,13 @@ def cmd_setup(args, log):
         with open(args.guide_out, "w", encoding="utf-8-sig") as f:
             f.write(text + "\n")
     return steps.summary()
+
+
+def _setup_problems(result):
+    codex_res = result.get("codex") or {}
+    return bool(result.get("uvpython") is False or result.get("hwpjar") is False
+                or codex_res.get("error") or codex_res.get("failed")
+                or (result.get("gw") or {}).get("status") == "failed")
 
 
 def cmd_doctor(args, log):
@@ -219,7 +232,10 @@ def cmd_doctor(args, log):
 def cmd_update(args, log):
     if not args.quiet:
         log(_banner("update", "direct"))
-        return 1 if _update(args, log) else 0
+        problems = _update(args, log)
+        if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
+            schedule.write_status(problems)
+        return 1 if problems else 0
     # 로그온 예약 작업이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다. 실패는 doctor가 보여 준다
     log = Log(schedule.open_log(), quiet=True)
     log(_banner("update", "logon task") + " — 로그온 자동 갱신")

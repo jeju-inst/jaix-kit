@@ -227,7 +227,8 @@ def check_autoupdate():
     if not last:
         return [Check("ok", area, "등록됨 (아직 돈 적 없음)")]
     if last.get("ok"):
-        return [Check("ok", area, f"마지막 갱신 {last.get('time')}")]
+        by = " (jaix setup)" if last.get("by") == "setup" else ""
+        return [Check("ok", area, f"마지막 갱신 {last.get('time')}{by}")]
     why = last.get("error") or "; ".join(last.get("problems") or [])
     return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()})", "jaix update")]
 
