@@ -11,7 +11,7 @@ import re
 import subprocess
 import tomllib
 
-from jaix import paths
+from jaix import paths, proc
 from jaix.paths import IS_WIN
 from jaix.lock import GIT_URL, MARKETPLACE, same_commit
 
@@ -59,14 +59,13 @@ def recorded():
 
 def _run(cli, args, log):
     try:
-        r = subprocess.run([cli, *args], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=600,
-                           encoding="utf-8", errors="replace")
+        code, out = proc.run(cli, args)  # npm 래퍼(.cmd)도 인자가 cmd에 해석되지 않게(#36)
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"    codex {' '.join(args)} 실패: {e}")
         return False
-    if r.returncode != 0:
-        tail = [ln for ln in (r.stdout + r.stderr).strip().splitlines() if ln.strip()][-1:] or [""]
-        log(f"    codex {' '.join(args)} 실패(코드 {r.returncode}): {tail[0][:200]}")
+    if code != 0:
+        tail = [ln for ln in out.strip().splitlines() if ln.strip()][-1:] or [""]
+        log(f"    codex {' '.join(args)} 실패(코드 {code}): {tail[0][:200]}")
         return False
     return True
 
