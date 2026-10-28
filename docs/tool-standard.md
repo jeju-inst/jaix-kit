@@ -109,9 +109,11 @@ jobs:
 |---|---|---|
 | TS-TOKEN-1 | **상시 분량**(플러그인 설명 + 모든 스킬 frontmatter + MCP 도구 스키마)은 도구 하나당 합계 **3k 토큰 이하**로 한다 | △ |
 | TS-TOKEN-2 | **호출 한 번에 싣는 분량**(SKILL.md + 그 워크플로가 읽는 reference)은 **10k 토큰 이하**로 한다 | △ (plugin_lint, 경고) |
-| TS-TOKEN-3 | 편입 PR에 측정값을 적는다. 측정법은 다음과 같다. `claude -p --output-format json`으로 문서를 붙인 프롬프트와 빈 프롬프트를 번갈아 3회씩 보내고, `input + cache_creation + cache_read`의 차이를 낸 뒤 **중앙값**을 적는다(기준선이 회차마다 튀기 때문). 워크플로별 합계는 SKILL.md와 해당 reference를 한 번에 붙여 잰다 | 문서 |
+| TS-TOKEN-3 | 편입 PR에 측정값을 적는다. 측정법은 다음과 같다. **`claude -p --setting-sources project --output-format json`**으로, 문서를 붙인 프롬프트와 빈 프롬프트를 번갈아 3회씩 보낸다. 각 호출의 `input + cache_creation + cache_read`의 차이를 낸다. 실행 폴더는 프로젝트 설정이 없는 빈 폴더로 한다. **3회 값이 모두 같아야 한다.** 다르면 기준선이 고정되지 않은 것이므로 원인을 찾고, 중앙값으로 덮지 않는다. 워크플로별 합계는 SKILL.md와 해당 reference를 한 번에 붙여 잰다 | 문서 |
 
 근거: `docs/handoff/README.md` 공통 규칙 9, jeju-inst/calendar-worklog#41(측정법, 22k → 10k 이하).
+
+왜 `--setting-sources project`인가 (z0nam/hwp-agent#80): 사용자 설정(`~/.claude/settings.json`)의 훅·플러그인이 매 호출에 가변 컨텍스트를 넣는다. 그래서 빈 프롬프트의 기준선이 **681 토큰 단위로** 바뀌었다. 3회 중 2회가 같은 쪽으로 튀면 중앙값도 그대로 틀린다. 실제로 hwp-agent 상시 분량을 3,071로 보고했지만 실제는 3,732였다(z0nam/hwp-agent#79 → #80에서 정정). 7회로 늘려도 값이 681 간격 격자 위에서 갈렸다. 사용자 설정을 빼면 기준선이 5회 연속 같은 값으로 고정되고 측정 3회가 모두 같게 나온다. `--bare`는 훅을 빼지만 키체인을 읽지 않아 로그인이 풀리므로 쓸 수 없다.
 
 ### WIN — Windows
 

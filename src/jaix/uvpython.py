@@ -57,7 +57,7 @@ def needed(lock, offline=False):
 
 
 def _record():
-    return paths.jaix_home() / "uv-python.json"
+    return paths.data_dir() / "uv-python.json"
 
 
 def recorded():
@@ -81,7 +81,7 @@ def find(version, uv=None):
         # --system·--no-project: 작업 폴더의 .venv를 관리 Python으로 잘못 세지 않게
         r = subprocess.run([uv, "python", "find", "--system", "--no-project", "--python-preference", "only-managed",
                             version],
-                           capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+                           capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=60, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired):
         return on_disk(version)
     if r.returncode == 0 and r.stdout.strip():
@@ -107,9 +107,16 @@ def on_disk(version):
     """
     exe = "python.exe" if IS_WIN else "bin/python3"
     root = python_dir()
-    for d in sorted([*root.glob(f"cpython-{version}.*"), *root.glob(f"cpython-{version}-*")]):
-        if (d / exe).is_file():
-            return str(d / exe)
+    try:
+        candidates = sorted([*root.glob(f"cpython-{version}.*"), *root.glob(f"cpython-{version}-*")])
+    except OSError:
+        return None
+    for d in candidates:
+        try:  # 정션(cpython-3.12-…-none)은 상속된 RedirectionGuard 아래에서 WinError 448 을 낸다(#27)
+            if (d / exe).is_file():
+                return str(d / exe)
+        except OSError:
+            continue
     return None
 
 
@@ -128,7 +135,7 @@ def ensure(versions, log, dry_run=False):
             log(f"  uv 관리 Python {v}: 설치 예정 (uv python install {v})")
             continue
         try:
-            r = subprocess.run([uv, "python", "install", v], capture_output=True, text=True, timeout=900,
+            r = subprocess.run([uv, "python", "install", v], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=900,
                                encoding="utf-8", errors="replace")
             code = r.returncode
             msg = ([ln for ln in (r.stdout + r.stderr).splitlines() if ln.strip()][-1:] or [""])[0][:200]

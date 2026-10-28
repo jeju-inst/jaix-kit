@@ -12,8 +12,11 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
+import tomllib
 from pathlib import Path
+from urllib.parse import urlparse
 
 from jaix import net, paths, runtimes, winenv
 from jaix.paths import IS_WIN
@@ -24,7 +27,7 @@ EXE = "gw"
 
 
 def _config_file():
-    return paths.jaix_home() / "config.json"
+    return paths.data_dir() / "config.json"
 
 
 def _config():
@@ -50,8 +53,22 @@ def save_source(url):
     _save_config(gw_source=url)
 
 
+def unpublished(url=None):
+    """배포처 이름이 DNS에 없다 = 아직 배포 전(원내망 밖이라 막힌 것과 구분한다)."""
+    host = urlparse(url or source() or "").hostname
+    if not host:
+        return False
+    try:
+        socket.getaddrinfo(host, 443)
+        return False
+    except socket.gaierror:
+        return True
+    except OSError:
+        return False
+
+
 def latest(url=None, timeout=8):
-    """원내 위치의 latest.json. 닿지 않거나(원외·IP 게이트 거절) 형식이 틀리면 None."""
+    """원내 위치의 latest.json. 닿지 않거나(원외·IP 게이트 거절·배포 전) 형식이 틀리면 None."""
     url = url or source()
     if not url:
         return None
@@ -71,7 +88,7 @@ def _uv():
 
 def _run(args, timeout=60):
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace")
+        r = subprocess.run(args, capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=timeout, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     return r.returncode == 0, (r.stdout + r.stderr).strip()
@@ -115,9 +132,14 @@ def setup(log, dry_run=False):
         log("  gw: 끔 (--gw-source none)")
         return {"status": "off"}
     info = latest(url)
+    if not info and unpublished(url):
+        log(f"  gw: 배포처({urlparse(url).hostname})가 아직 준비되지 않음(배포 전) → 건너뜀. 배포가 시작되면 `jaix update`가 설치")
+        return {"status": "unpublished"}
     if not info:
         log(f"  gw: 원내 위치({url})에 닿지 않음 → 건너뜀. 원내망(사무실·VPN)에서 `jaix setup` 다시 실행")
         return {"status": "offsite"}
+    if info.get("gw_base_url") and not dry_run:
+        save_base_url(info["gw_base_url"], log)
     uv = _uv()
     if not uv:
         log("  gw: uv가 없어 설치 못 함 (위 uv 항목 참고)")
@@ -138,8 +160,78 @@ def setup(log, dry_run=False):
     return {"status": "installed", "version": info["version"]}
 
 
+# --- gw 런타임 사용자 설정(share.toml) ----------------------------------------------------------------
+# gw 런타임은 그룹웨어 주소를 GW_BASE_URL → share.toml [gw].base_url 순으로 찾는다(ji-gw-ai). 원내 주소라
+# 공개 저장소에 둘 수 없어, IP 제한 배포의 latest.json(gw_base_url)으로만 받는다 — 원외에서는 서버가 이 필드를
+# 빼고 내주므로 없으면 파일을 건드리지 않는다. 비밀번호는 jaix가 다루지 않는다(`gw login`이 OS 자격 증명 저장소에).
+def share_toml():
+    """ji_gw_ai.core.paths 와 같은 규칙: JI_GW_CONFIG_DIR 또는 모든 OS에서 ~/.config/ji-gw-ai."""
+    env = os.environ.get("JI_GW_CONFIG_DIR", "").strip()
+    return (Path(env).expanduser() if env else Path.home() / ".config" / "ji-gw-ai") / "share.toml"
+
+
+def base_url():
+    """gw 런타임이 쓸 그룹웨어 주소(환경변수 우선). 없으면 None."""
+    if os.environ.get("GW_BASE_URL", "").strip():
+        return os.environ["GW_BASE_URL"].strip()
+    try:
+        return (tomllib.loads(share_toml().read_text(encoding="utf-8")).get("gw") or {}).get("base_url") or None
+    except (OSError, ValueError):
+        return None  # 깨진 파일은 런타임도 없는 것으로 본다
+
+
+def save_base_url(url, log):
+    """share.toml 의 [gw].base_url 만 바꾼다. 다른 키·표는 그대로 둔다. 실패해도 예외를 내지 않는다
+    (선택 설정 하나 때문에 Claude·Codex 단계까지 멈추지 않게)."""
+    try:
+        return _save_base_url(url, log)
+    except (OSError, UnicodeError) as e:
+        log(f"  gw: {share_toml()} 을 읽거나 쓰지 못해 건드리지 않음({type(e).__name__}: {e}) — 고친 뒤 jaix setup")
+        return False
+
+
+def _save_base_url(url, log):
+    f = share_toml()
+    text = f.read_text(encoding="utf-8") if f.exists() else ""
+    try:
+        cur = tomllib.loads(text)
+    except ValueError:
+        log(f"  gw: {f} 이 TOML 로 읽히지 않아 건드리지 않음 — 고친 뒤 jaix setup")
+        return False
+    if (cur.get("gw") or {}).get("base_url") == url:
+        return True
+    line = f"base_url = {json.dumps(url, ensure_ascii=False)}"
+    head = re.search(r"""^[ \t]*\[[ \t]*(?:gw|"gw"|'gw')[ \t]*\][^\n]*$""", text, re.M)
+    if head:
+        nxt = re.search(r"^[ \t]*\[", text[head.end():], re.M)  # [gw] 표의 끝 = 다음 표 머리
+        body_end = head.end() + (nxt.start() if nxt else len(text) - head.end())
+        body = text[head.end():body_end]
+        if re.search(r"^[ \t]*base_url[ \t]*=", body, re.M):
+            body = re.sub(r"^[ \t]*base_url[ \t]*=.*$", line, body, count=1, flags=re.M)
+        else:
+            body = "\n" + line + body
+        new = text[:head.end()] + body + text[body_end:]
+    elif "gw" in cur:  # 인라인 표 등 알아보기 어려운 꼴
+        log(f"  gw: {f} 의 [gw] 꼴을 알아보지 못해 건드리지 않음")
+        return False
+    else:
+        new = text.rstrip("\n") + ("\n\n" if text.strip() else "") + f"[gw]\n{line}\n"
+    try:
+        if (tomllib.loads(new).get("gw") or {}).get("base_url") != url:
+            raise ValueError("쓴 값이 읽히지 않음")
+    except ValueError as e:
+        log(f"  gw: share.toml 을 고치지 못함({e}) — 건드리지 않음")
+        return False
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f.name + ".jaix-tmp")
+    tmp.write_text(new, encoding="utf-8")
+    os.replace(tmp, f)
+    log(f"  gw: 그룹웨어 주소를 {f} 에 기록")
+    return True
+
+
 def _install(info, uv):
-    dest = paths.jaix_home() / "gw" / Path(info["wheel"]).name  # uv가 wheel 파일 이름에서 버전을 읽으므로 이름 그대로
+    dest = paths.data_dir() / "gw" / Path(info["wheel"]).name  # uv가 wheel 파일 이름에서 버전을 읽으므로 이름 그대로
     net.download(info["url"], dest)
     digest = hashlib.sha256(dest.read_bytes()).hexdigest()
     if digest != info["sha256"].lower():

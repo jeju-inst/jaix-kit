@@ -4,13 +4,12 @@ Claude는 마켓플레이스 autoUpdate로 저절로 갱신되지만 Codex·Herm
 - Windows: 작업 스케줄러 루트에 `jaix-update`. 로그온 트리거를 **이 사용자로** 못박은 XML로 등록한다
   (`schtasks /SC ONLOGON`은 모든 사용자 대상이라 관리자 권한을 요구한다). 하위 폴더를 만들려면 권한이 필요해서 루트에 둔다.
 - macOS: ~/Library/LaunchAgents의 LaunchAgent(RunAtLoad). launchd의 PATH는 비어 있다시피 해서 등록할 때 PATH를 적어 둔다.
-결과는 jaix_home의 update-status.json·update.log에 남고 doctor가 보여 준다.
+결과는 data_dir(Windows %LOCALAPPDATA%\\jaix)의 update-status.json·update.log에 남고 doctor가 보여 준다.
 """
 import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -30,17 +29,16 @@ def supported():
 
 
 def command():
-    """예약 작업이 부를 명령. 설치본(PyInstaller)이면 jaix.exe 자신, 개발 설치면 같은 파이썬의 -m jaix."""
-    base = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "jaix"]
-    return [*base, "update", "--quiet"]
+    """예약 작업이 부를 명령. 설치본이면 옆의 창 없는 jaixw.exe(없으면 jaix.exe), 개발 설치면 같은 파이썬의 -m jaix."""
+    return [*paths.self_command(windowless=True), "update", "--quiet"]
 
 
 def status_file():
-    return paths.jaix_home() / "update-status.json"
+    return paths.data_dir() / "update-status.json"
 
 
 def log_file():
-    return paths.jaix_home() / "update.log"
+    return paths.data_dir() / "update.log"
 
 
 def plist_path():
@@ -52,22 +50,26 @@ def _user_id():
     return f"{domain}\\{user}" if domain else user
 
 
-def task_xml(cmd, user):
+def task_xml(cmd, user, logon=True):
+    """logon=False면 트리거 없는 작업(schtasks /Run 으로만 돈다 — 설치본의 한 번 실행용)."""
     exe, *args = cmd
-    arg_text = " ".join(f'"{a}"' if " " in a else a for a in args)
-    return f"""<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>JAIX 도구를 잠금 버전에 맞춤(로그온 때 jaix update). jaix-setup 제거 시 함께 지워짐</Description>
-  </RegistrationInfo>
-  <Triggers>
+    arg_text = " ".join(f'"{a}"' if (" " in a or not a) else a for a in args)
+    desc = ("JAIX 도구를 잠금 버전에 맞춤(로그온 때 jaix update). jaix-setup 제거 시 함께 지워짐" if logon
+            else "jaix-setup 이 설치 중에 jaix setup 을 한 번 돌림(끝나면 지워짐)")
+    triggers = f"""  <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>{escape(user)}</UserId>
       <Delay>PT2M</Delay>
     </LogonTrigger>
   </Triggers>
-  <Principals>
+""" if logon else ""
+    return f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>{escape(desc)}</Description>
+  </RegistrationInfo>
+{triggers}  <Principals>
     <Principal id="Author">
       <UserId>{escape(user)}</UserId>
       <LogonType>InteractiveToken</LogonType>
@@ -79,7 +81,7 @@ def task_xml(cmd, user):
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <RunOnlyIfNetworkAvailable>{str(logon).lower()}</RunOnlyIfNetworkAvailable>
     <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
     <Enabled>true</Enabled>
   </Settings>
@@ -121,7 +123,7 @@ def plist_text(cmd, path_env):
 
 def _run(args):
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
+        r = subprocess.run(args, capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=60, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     tail = [ln for ln in (r.stdout + r.stderr).strip().splitlines() if ln.strip()][-1:] or [""]
@@ -142,7 +144,7 @@ def run_mode():
     if not IS_WIN:
         return None  # LaunchAgent는 gui/<uid> 도메인 = 로그온한 사용자 세션
     try:
-        r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/XML"], capture_output=True, timeout=60)
+        r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/XML"], capture_output=True, creationflags=paths.NO_WINDOW, timeout=60)
         raw = r.stdout
         text = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8", errors="replace")
         # 선언의 encoding="UTF-16"이 이미 푼 문자열과 어긋나 파서가 거절하므로 뗀다
@@ -190,6 +192,7 @@ def register(log, dry_run=False):
 def unregister():
     """설치본 제거(jaix cleanup)가 부른다. 없으면 아무 일 없음."""
     if IS_WIN:
+        _run(["schtasks", "/Delete", "/TN", "jaix-setup-once", "/F"])  # 설치 중 끊겼으면 남아 있을 수 있다
         return registered() and _run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])[0]
     if IS_MAC and plist_path().exists():
         _run(["launchctl", "bootout", f"gui/{os.getuid()}", str(plist_path())])
@@ -219,3 +222,58 @@ def last_status():
         return json.loads(status_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+# --- 설치본에서 jaix setup 을 상속 없이 돌리기 (jaix-kit#27) -------------------------------------------
+# Inno 프로세스의 자식은 Windows 11 RedirectionGuard 같은 완화 정책을 물려받아, 사용자가 만든 정션(uv Python 등)을
+# 지날 때 os error 448 로 막힌다(#21·#27 실측: cmd 에서는 성공). 작업 스케줄러 작업은 Schedule 서비스(svchost)가
+# 사용자 세션에 새로 만드는 프로세스라 설치본의 프로세스 계보·완화 정책과 무관하다 — 로그온 자동 갱신(#12)
+# CI 에서 schtasks /Run 으로 실제로 도는 것도 확인했다. 그래서 설치본은 이 작업을 /Run 하고 결과를 기다린다.
+ONCE_TASK = "jaix-setup-once"
+
+
+def run_via_task(cmd, log_path, status_path, echo, start_timeout=120, timeout=3600):
+    """cmd 를 한 번짜리 작업으로 돌리고 끝날 때까지 log_path 에 새로 붙는 줄을 echo 로 흘린다.
+    작업을 만들거나 띄우지 못하면 None(호출자가 직접 실행으로 물러선다), 끝나면 status_path 의 종료 코드."""
+    import time
+
+    status_path, log_path = Path(status_path), Path(log_path)
+    status_path.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        xml = Path(tmp) / "once.xml"
+        xml.write_text(task_xml(cmd, _user_id(), logon=False), encoding="utf-16")
+        ok, msg = _run(["schtasks", "/Create", "/TN", ONCE_TASK, "/XML", str(xml), "/F"])
+    if not ok:
+        echo(f"(작업 스케줄러에 등록 못 함: {msg} → 직접 실행)")
+        return None
+    try:
+        offset = log_path.stat().st_size if log_path.exists() else 0
+        ok, msg = _run(["schtasks", "/Run", "/TN", ONCE_TASK])
+        if not ok:
+            echo(f"(작업을 시작 못 함: {msg} → 직접 실행)")
+            return None
+        echo("(작업 스케줄러로 jaix setup 을 돌리는 중 — 설치 프로그램의 프로세스 제약을 물려받지 않게)")
+        began, started = time.monotonic(), False
+        while time.monotonic() - began < timeout:
+            if log_path.exists() and log_path.stat().st_size > offset:
+                started = True
+                with open(log_path, "rb") as f:
+                    f.seek(offset)
+                    chunk = f.read()
+                offset += len(chunk)
+                for line in chunk.decode("utf-8", errors="replace").splitlines():
+                    echo(line)
+            if status_path.exists():
+                try:
+                    return int(json.loads(status_path.read_text(encoding="utf-8"))["code"])
+                except (OSError, ValueError, KeyError):
+                    pass  # 쓰는 중 — 다음 바퀴에
+            if not started and time.monotonic() - began > start_timeout:
+                echo("(작업이 시작되지 않음 → 직접 실행)")
+                return None
+            time.sleep(1)
+        echo("(시간 초과 — 작업이 끝나지 않음)")
+        return 1
+    finally:
+        _run(["schtasks", "/End", "/TN", ONCE_TASK])
+        _run(["schtasks", "/Delete", "/TN", ONCE_TASK, "/F"])

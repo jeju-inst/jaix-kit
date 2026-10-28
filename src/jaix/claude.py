@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from jaix import paths
-from jaix.lock import GIT_URL, MARKETPLACE, REPO
+from jaix.lock import GIT_URL, MARKETPLACE, REPO, same_commit
 from jaix.paths import IS_WIN
 
 MARKET_ENTRY = {"source": {"source": "git", "url": GIT_URL}, "autoUpdate": True}
@@ -152,12 +152,13 @@ def matches(plugin, record):
         return False
     if plugin.version:
         return record.get("version") == plugin.version
-    return record.get("gitCommitSha") == plugin.sha
+    # 날짜 버전이 없는(branch 고정) 플러그인은 Claude Code가 version 칸에 12자리 해시를 적는다
+    return any(same_commit(record.get(k), plugin.sha) for k in ("gitCommitSha", "version"))
 
 
 def _run(cli, args, log):
     try:
-        r = subprocess.run([cli, *args], capture_output=True, text=True, timeout=600,
+        r = subprocess.run([cli, *args], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=600,
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"    claude {' '.join(args)} 실패: {e}")

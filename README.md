@@ -66,7 +66,7 @@ _(화면 예시는 실기 시험 뒤 추가)_
 | `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, 선택 himalaya·age)을 사용자 범위로 설치(winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
 | `jaix doctor [--json]` | 런타임 버전·사용자 PATH·마켓플레이스 등록·플러그인 버전이 잠금과 맞는지. 어긋나면 고치는 방법 한 줄. 실패가 있으면 종료 코드 1 |
 | `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
-| `jaix update --quiet` | 같은 일을 화면 없이. `jaix setup` 이 등록한 **로그온 자동 갱신**이 부르고, 결과는 `update.log`·`update-status.json` 에 남아 `jaix doctor` 가 보여 준다 |
+| `jaix update --quiet` | 같은 일을 화면 없이. `jaix setup` 이 등록한 **로그온 자동 갱신**이 부르고, 결과는 `update.log`·`update-status.json` 에 남아 `jaix doctor` 가 보여 준다. Windows 에선 창 없는 `jaixw.exe` 로 돌아 콘솔 창이 뜨지 않는다 |
 
 - 잠금은 GitHub `main`(stable) 또는 `--channel beta` 에서 읽고, 못 받으면 실행파일에 묶은 사본을 쓴다. jaix 는 잠금을 고치지 않는다.
 - **gw(그룹웨어)** 는 라이선스상 공개 저장소에 넣지 않고 원내 위치에서 받는다(ji-gw-ai#108 Q2, 배포 형식 #122). `jaix setup`·`update` 가 `https://jaix.namun.net/gw/latest.json`(IP 게이트)을 읽어 wheel 을 받고 sha256 을 확인한 뒤 `uv tool install <wheel>` 한다. 설치된 버전이 배포 버전과 다르면(새 버전·롤백) 다시 깐다. 원내망이 아니면 gw만 건너뛰고 doctor가 안내하며, doctor는 설치된 `gw --version` 과 배포 버전을 비교한다. 주소는 `--gw-source <URL>`(설치본 `/GWSOURCE=`)로 바꾸고 `none` 이면 끈다.
@@ -74,8 +74,9 @@ _(화면 예시는 실기 시험 뒤 추가)_
 - **로그온 자동 갱신**: Claude는 마켓플레이스 `autoUpdate` 로 저절로 갱신되지만 Codex·Hermes는 그런 장치가 없다. 그래서 `jaix setup` 이 로그온마다 `jaix update --quiet` 를 도는 사용자 범위 예약 작업을 둔다 — Windows 작업 스케줄러 `jaix-update`(이 사용자 로그온 트리거, 일반 권한, 2분 지연), macOS LaunchAgent `kr.re.ji.jaix.update`. 작업은 반드시 **사용자가 로그온할 때만 실행**(대화형 세션)이다 — 세션 0(무인)에서는 한컴 COM이 뜨지 않는다(hwp-render 실측). doctor가 이 실행 모드도 점검한다. 실패하면 다음 로그온에 다시 하고 doctor가 [주의]로 보인다. 설치본을 제거하면(`jaix cleanup`) 함께 지운다. 끄려면 `jaix setup --no-autoupdate`.
 - **Claude 데스크톱·Cowork 는 관리자 배포 대상이다**(#19 실측): 데스크톱 앱(Cowork)은 `settings.json` 의 `extraKnownMarketplaces` 를 읽지 않고 계정 단위 조직 플러그인에서 도구를 받는다. jaix 는 Code 탭·Claude Code 쪽만 등록·설치하고, Code 탭 실행파일은 `%LOCALAPPDATA%\Claude-Data\claude_*\claude-code\<버전>\…\claude.exe`(가장 높은 버전)에서 찾는다. doctor 는 잠금 대비 빠진 플러그인이 있으면 [실패]로 보인다.
 - **HWP 변환기 jar 미리 받기**: hwp-agent 가 `hwp-agent setup` 으로 받는 `hwp2hwpx.jar` 를 같은 자리(`%LOCALAPPDATA%\hwp-agent`, 맥 `~/.local/share/hwp-agent`)에 미리 받는다. 주소·sha256 은 잠금이 고정한 hwp-agent 커밋의 `fetch_jar.py` 에서 읽는다.
+- **폴더**: 프로그램(`jaix.exe`·`jaixw.exe`·포터블 런타임)은 `%LOCALAPPDATA%\Programs\jaix`, 기록·상태(`setup.log`·`update.log`·`update-status.json`·소유 기록·gw wheel)는 `%LOCALAPPDATA%\jaix`(맥은 둘 다 `~/.local/share/jaix`). 설치본을 제거하면 프로그램 폴더만 지우고 기록 폴더는 남긴다 — Claude·Codex 설정에 넣은 항목을 남기므로 재설치 때 jaix가 쓴 항목을 알아보게. 예전 설치본이 프로그램 폴더에 둔 기록은 jaix가 처음 돌 때 옮긴다.
 - 관리자 콘솔(managed settings)이 jaix 마켓플레이스를 이미 내려주면 사용자 설정 등록은 건너뛴다.
-- 관리자 권한·시스템 PATH·재부팅을 쓰지 않는다. 시험은 `CLAUDE_CONFIG_DIR`·`CODEX_HOME`·`JAIX_HOME`·`HERMES_HOME` 으로 격리한다.
+- 관리자 권한·시스템 PATH·재부팅을 쓰지 않는다. 시험은 `CLAUDE_CONFIG_DIR`·`CODEX_HOME`·`JAIX_HOME`·`JAIX_DATA`·`HERMES_HOME` 으로 격리한다.
 
 ## 수동 설치 (관리자 콘솔 배포 전·개발자용)
 ```

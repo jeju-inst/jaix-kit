@@ -16,7 +16,7 @@ LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplac
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """실제 사용자 설정을 건드리지 않게 모든 경로를 tmp로."""
-    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "HERMES_HOME"):
+    for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "JAIX_DATA", "HERMES_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
     monkeypatch.setattr(claude, "managed_declaration", lambda: None)
@@ -32,7 +32,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
     monkeypatch.setattr(schedule, "_run", lambda args: (True, ""))
     monkeypatch.setattr(schedule, "run_mode", lambda: None)
-    monkeypatch.setenv(gw.ENV, "none")  # 기본 원내 주소로 나가지 않게(gw 시험이 저마다 바꾼다)
+    monkeypatch.setenv(gw.ENV, "none")
+    monkeypatch.setenv("JI_GW_CONFIG_DIR", str(tmp_path / "gwconf"))
+    monkeypatch.delenv("GW_BASE_URL", raising=False)  # 기본 원내 주소로 나가지 않게(gw 시험이 저마다 바꾼다)
     return tmp_path
 
 
@@ -419,7 +421,7 @@ def test_doctor_fails_when_plugins_missing(isolated, monkeypatch, the_lock):
 
 def test_guide_says_how_to_really_quit(the_lock):
     text = cli.guide(["claude"], {"claude": {"cli": False, "managed": None}})
-    assert ("Exit" if sys.platform == "win32" else "Quit") in text and "Code 탭을 한 번 연 뒤" in text
+    assert ("Exit" if sys.platform == "win32" else "Quit") in text and "한 번 더 여세요" in text
     assert "작업 표시줄 아이콘 → 종료" not in text
 
 
@@ -470,3 +472,288 @@ def test_codex_found_in_npm_global_dir(isolated, monkeypatch):
     monkeypatch.setattr(paths, "npm_global_bin", lambda: npm)
     monkeypatch.setattr(paths.shutil, "which", lambda n, path=None: str(npm / name) if path == str(npm) else None)
     assert codex.find_cli() == str(npm / name)
+
+
+def test_steps_continue_and_log_traceback(isolated, monkeypatch):
+    """#27: 한 단계가 예외를 내도 traceback 을 남기고 다음 단계로 간다."""
+    logf = isolated / "setup.log"
+
+    def boom(*a, **kw):
+        raise OSError(448, "신뢰할 수 없는 탑재 지점")
+    monkeypatch.setattr(uvpython, "ensure", boom)
+    guide = isolated / "guide.txt"
+    rc = cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--log", str(logf), "--guide-out", str(guide)])
+    text = logf.read_text(encoding="utf-8")
+    assert rc == 1 and "Traceback" in text and "uv 관리 Python" in text
+    assert "[2/3] Claude" in text and guide.exists()  # 뒤 단계도 돌았다
+    assert "일부 단계가 실패했습니다: uv 관리 Python" in text
+
+
+def test_main_logs_unexpected_exception_and_status(isolated, monkeypatch):
+    logf, status = isolated / "setup.log", isolated / "status.json"
+
+    def boom(*a, **kw):
+        raise RuntimeError("뜻밖")
+    monkeypatch.setattr(cli.lockmod, "load", boom)
+    rc = cli.main(["setup", "--runtimes", "none", "--log", str(logf), "--status-out", str(status)])
+    assert rc == 1 and "RuntimeError: 뜻밖" in logf.read_text(encoding="utf-8")
+    assert json.loads(status.read_text(encoding="utf-8")) == {"code": 1}
+
+
+def test_run_via_task_streams_log_and_returns_code(isolated, monkeypatch):
+    import threading
+    logf, status = isolated / "setup.log", isolated / "st.json"
+    seen, calls = [], []
+
+    def fake_run(args):
+        calls.append(args)
+        if args[:2] == ["schtasks", "/Run"]:  # 작업이 돈 것처럼: 로그를 쓰고 종료 코드를 남긴다
+            def work():
+                logf.write_text("[1/3] 런타임\n  uv: 있음\n", encoding="utf-8")
+                status.write_text('{"code": 0}', encoding="utf-8")
+            threading.Timer(0.2, work).start()
+        return True, ""
+    monkeypatch.setattr(schedule, "_run", fake_run)
+    monkeypatch.setattr(schedule, "_user_id", lambda: "u")
+    assert schedule.run_via_task(["jaix.exe", "setup"], logf, status, seen.append) == 0
+    assert "  uv: 있음" in seen
+    assert any(a[:2] == ["schtasks", "/Delete"] for a in calls)  # 끝나면 지운다
+
+
+def test_run_via_task_falls_back_when_cannot_register(isolated, monkeypatch):
+    monkeypatch.setattr(schedule, "_run", lambda args: (False, "액세스 거부"))
+    monkeypatch.setattr(schedule, "_user_id", lambda: "u")
+    seen = []
+    assert schedule.run_via_task(["jaix.exe"], isolated / "l", isolated / "s", seen.append) is None
+    assert "직접 실행" in seen[0]
+
+
+def test_once_task_xml_has_no_trigger():
+    xml = schedule.task_xml(["C:\\jaix.exe", "setup", "--log", "C:\\a b\\setup.log"], "u", logon=False)
+    assert "<Triggers>" not in xml and "<LogonType>InteractiveToken</LogonType>" in xml
+    assert '"C:\\a b\\setup.log"' in xml
+
+
+def test_on_disk_survives_untrusted_mount(isolated, monkeypatch):
+    pydir = isolated / "uvpy"
+    (pydir / "cpython-3.12-windows-x86_64-none").mkdir(parents=True)
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", str(pydir))
+    real = Path.is_file
+
+    def guarded(self):
+        if "none" in str(self):
+            raise OSError(448, "untrusted mount point")
+        return real(self)
+    monkeypatch.setattr(Path, "is_file", guarded)
+    assert uvpython.on_disk("3.12") is None  # 예외 없이
+
+
+def test_via_task_replays_setup_command(isolated, monkeypatch):
+    """작업으로 넘기는 명령이 그대로 다시 파싱되는지(setup 하위 명령 포함, --via-task 제외)."""
+    seen = {}
+
+    def fake(cmd, log_path, status, echo):
+        seen["cmd"] = cmd
+        return 0
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    monkeypatch.setattr(schedule, "run_via_task", fake)
+    assert cli.main(["setup", "--via-task", "--channels", "claude", "--log", str(isolated / "s.log")]) == 0
+    cmd = seen["cmd"]
+    i = cmd.index("setup")
+    replay = cli.build_parser().parse_args(cmd[i:])
+    assert replay.cmd == "setup" and replay.channels == "claude" and not replay.via_task
+    assert replay.status_out and replay.log == str(isolated / "s.log")
+
+
+def _codex_home_with_plugin(isolated, monkeypatch, the_lock):
+    """Codex가 hwp-agent 를 깐 상태를 흉내: 설치 폴더의 .mcp.json 은 ${CLAUDE_PLUGIN_ROOT} 를 쓴다."""
+    home = isolated / "codex_home"
+    root = home / "plugins" / "cache" / "jaix" / "hwp-agent" / "local"
+    root.mkdir(parents=True)
+    (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"hwp-agent": {
+        "command": "uvx", "args": ["--from", "${CLAUDE_PLUGIN_ROOT}", "hwp-agent", "mcp"]}}}), encoding="utf-8")
+    (home / "config.toml").write_text('[plugins."hwp-agent@jaix"]\nenabled = true\n', encoding="utf-8")
+    calls = []
+
+    def fake_run(cli, args, log):  # codex mcp add/remove 를 config.toml 에 흉내 내 쓴다
+        calls.append(args)
+        cfg = home / "config.toml"
+        if args[:2] == ["mcp", "add"]:
+            name, rest = args[2], args[args.index("--") + 1:]
+            body = f'\n[mcp_servers."{name}"]\ncommand = {json.dumps(rest[0])}\nargs = {json.dumps(rest[1:])}\n'
+            cfg.write_text(cfg.read_text(encoding="utf-8") + body, encoding="utf-8")
+        return True
+    monkeypatch.setattr(codex, "_run", fake_run)
+    return home, root, calls
+
+
+def test_codex_mcp_written_with_absolute_root(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    assert codex.mcp_servers(the_lock) == {"hwp-agent": {"command": "uvx", "args": ["--from", str(root), "hwp-agent", "mcp"],
+                                                       "env": {}}}
+    assert codex.write_mcp(the_lock, print, cli="codex")
+    assert calls[-1][:3] == ["mcp", "add", "hwp-agent"] and str(root) in calls[-1]
+    n = len(calls)
+    codex.write_mcp(the_lock, print, cli="codex")
+    assert len(calls) == n  # 이미 맞으면 다시 쓰지 않음
+
+
+def test_codex_mcp_keeps_user_definition(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    cfg = home / "config.toml"
+    cfg.write_text(cfg.read_text(encoding="utf-8") + '\n[mcp_servers."hwp-agent"]\ncommand = "my-hwp"\n', encoding="utf-8")
+    lines = []
+    codex.write_mcp(the_lock, lines.append, cli="codex")
+    assert not calls and "사용자 정의" in lines[0]
+
+
+def test_codex_sandbox_default_only_when_unset(isolated, monkeypatch):
+    monkeypatch.setattr(codex, "IS_WIN", True)
+    home = isolated / "codex_home"
+    home.mkdir()
+    cfg = home / "config.toml"
+    cfg.write_text('model = "x"\n', encoding="utf-8")
+    assert codex.ensure_sandbox(print) is True
+    import tomllib
+    assert tomllib.loads(cfg.read_text(encoding="utf-8"))["windows"]["sandbox"] == "unelevated"
+    cfg.write_text('[windows]\nsandbox = "elevated"\n', encoding="utf-8")
+    assert codex.ensure_sandbox(print) is False  # 있는 값은 건드리지 않음
+    cfg.write_text('[windows]\nother = 1\n', encoding="utf-8")
+    codex.ensure_sandbox(print)
+    assert tomllib.loads(cfg.read_text(encoding="utf-8"))["windows"] == {"sandbox": "unelevated", "other": 1}
+
+
+def test_gw_unpublished_when_dns_missing(monkeypatch):
+    monkeypatch.setenv(gw.ENV, "https://not-yet.invalid/gw/latest.json")
+    assert gw.unpublished()
+    assert gw.setup(print)["status"] == "unpublished"
+    assert doctor.check_gw()[0].status == "skip" and "배포 전" in doctor.check_gw()[0].message
+
+
+def test_enabled_plugins_refilled_after_uninstall_but_off_respected(the_lock):
+    """claude plugin uninstall 은 enabledPlugins 항목을 지운다 → setup/update 의 병합이 다시 채운다.
+    사용자가 끈 것(false)은 그대로 둔다."""
+    ids = [p.id for p in the_lock.plugins]
+    settings = {"enabledPlugins": {ids[0]: False}}  # ids[1:] 는 uninstall 로 지워진 상태
+    new, changes, warnings = claude.merge_settings(settings, the_lock.plugins)
+    assert new["enabledPlugins"][ids[0]] is False
+    assert all(new["enabledPlugins"][i] is True for i in ids[1:])
+
+
+def test_same_commit_prefix(the_lock):
+    from jaix.lock import same_commit
+    full = "07040e21d448" + "0" * 28
+    assert same_commit("07040e21d448", full) and same_commit(full, "07040e2")
+    assert not same_commit("07040e", full)  # 7자 미만은 판단 안 함
+    assert not same_commit("17040e21d448", full) and not same_commit(None, full)
+    branch = next(p for p in the_lock.plugins if not p.version)
+    # Claude Code 기록: branch 고정이면 version 칸에 12자리 해시
+    assert claude.matches(branch, {"version": branch.sha[:12]})
+    assert not claude.matches(branch, {"version": "0" * 12})
+    tagged = next(p for p in the_lock.plugins if p.version)
+    assert claude.matches(tagged, {"version": tagged.version}) and not claude.matches(tagged, {"version": tagged.sha[:12]})
+
+
+def test_codex_mcp_user_edit_after_jaix_is_kept(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    codex.write_mcp(the_lock, print, cli="codex")
+    cfg = home / "config.toml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace('command = "uvx"', 'command = "my-uvx"'), encoding="utf-8")
+    n = len(calls)
+    codex.write_mcp(the_lock, print, cli="codex")
+    assert len(calls) == n and "hwp-agent" not in codex.owned_mcp()
+
+
+def test_codex_sandbox_header_variants(isolated, monkeypatch):
+    import tomllib
+    monkeypatch.setattr(codex, "IS_WIN", True)
+    home = isolated / "codex_home"
+    home.mkdir()
+    cfg = home / "config.toml"
+    for text in ('[windows] # 설정\nother = 1\n', '["windows"]\nother = 1\n'):
+        cfg.write_text(text, encoding="utf-8")
+        assert codex.ensure_sandbox(print) is True
+        assert tomllib.loads(cfg.read_text(encoding="utf-8"))["windows"] == {"sandbox": "unelevated", "other": 1}
+    cfg.write_text('windows = { other = 1 }\n', encoding="utf-8")
+    assert codex.ensure_sandbox(print) is False  # 인라인 표는 그대로
+
+
+def test_gw_base_url_written_preserving_other_keys(isolated):
+    import tomllib
+    f = gw.share_toml()
+    f.parent.mkdir(parents=True)
+    f.write_text('# 내 설정\n[gw]\nother = 1\n\n[ui]\ntheme = "dark"\n', encoding="utf-8")
+    assert gw.save_base_url("https://gw.example.internal/", print)
+    d = tomllib.loads(f.read_text(encoding="utf-8"))
+    assert d == {"gw": {"base_url": "https://gw.example.internal/", "other": 1}, "ui": {"theme": "dark"}}
+    assert "# 내 설정" in f.read_text(encoding="utf-8")
+    assert gw.save_base_url("https://gw2.example.internal/", print)  # 있으면 그 줄만 바꿈
+    assert tomllib.loads(f.read_text(encoding="utf-8"))["gw"]["base_url"] == "https://gw2.example.internal/"
+    assert gw.base_url() == "https://gw2.example.internal/"
+
+
+def test_gw_base_url_new_file_and_broken_file(isolated):
+    assert gw.base_url() is None
+    assert gw.save_base_url("https://gw.example.internal/", print)
+    assert gw.base_url() == "https://gw.example.internal/"
+    gw.share_toml().write_text("[gw\nbroken", encoding="utf-8")
+    lines = []
+    assert gw.save_base_url("https://x/", lines.append) is False and "건드리지 않음" in lines[0]
+
+
+def test_gw_setup_records_base_url_only_when_present(isolated, monkeypatch):
+    calls, state = _gw_share(isolated, monkeypatch)
+    gw.setup(print)
+    assert gw.base_url() is None  # 필드 없음(원외 응답) → 파일 안 만듦
+    latest = json.loads((isolated / "share" / "gw" / "latest.json").read_text(encoding="utf-8"))
+    latest["gw_base_url"] = "https://gw.example.internal/"
+    (isolated / "share" / "gw" / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+    gw.setup(print)
+    assert gw.base_url() == "https://gw.example.internal/"
+    assert {c.area: c for c in doctor.check_gw()}["gw 그룹웨어 주소"].status == "ok"
+
+
+def test_gw_base_url_unreadable_file_does_not_raise(isolated):
+    f = gw.share_toml()
+    f.parent.mkdir(parents=True)
+    f.write_bytes(b"[gw]\nother = \"\xff\xfe\"\n")  # UTF-8 아님
+    lines = []
+    assert gw.save_base_url("https://x/", lines.append) is False and "UnicodeDecodeError" in lines[0]
+
+
+def test_migrate_data_moves_old_records_out_of_program_dir(isolated):
+    """jaix-win 실측: 기록·상태가 프로그램 폴더(제거하면 통째로 지워짐)에 있었다 → 데이터 폴더로 옮긴다."""
+    old, new = paths.jaix_home(), paths.data_dir()
+    (old / "gw").mkdir(parents=True)
+    (old / "update-status.json").write_text('{"ok": false}', encoding="utf-8")
+    (old / "codex-mcp.json").write_text("{}", encoding="utf-8")
+    (old / "gw" / "x.whl").write_text("w", encoding="utf-8")
+    new.mkdir(parents=True)
+    (new / "codex-mcp.json").write_text('{"keep": 1}', encoding="utf-8")  # 새 자리에 있으면 그쪽을 믿는다
+    (old / "bin").mkdir()  # 런타임은 프로그램 폴더에 그대로
+    assert sorted(paths.migrate_data()) == ["gw", "update-status.json"]
+    assert (new / "gw" / "x.whl").exists() and not (old / "update-status.json").exists()
+    assert json.loads((new / "codex-mcp.json").read_text(encoding="utf-8")) == {"keep": 1}
+    assert (old / "bin").is_dir()
+    assert schedule.status_file().parent == new
+
+
+def test_self_command_prefers_windowless_exe(tmp_path, monkeypatch):
+    exe = tmp_path / "jaix.exe"
+    exe.write_text("")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe))
+    monkeypatch.setattr(paths, "IS_WIN", True)
+    assert paths.self_command(windowless=True) == [str(exe)]  # jaixw.exe 가 없으면(옛 설치본) jaix.exe
+    (tmp_path / "jaixw.exe").write_text("")
+    assert paths.self_command(windowless=True) == [str(tmp_path / "jaixw.exe")]
+    assert paths.self_command() == [str(exe)]
+    assert schedule.command() == [str(tmp_path / "jaixw.exe"), "update", "--quiet"]
+
+
+def test_log_and_guide_create_data_dir(isolated):
+    logf = isolated / "fresh" / "setup.log"
+    guide = isolated / "fresh2" / "guide.txt"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--log", str(logf),
+                     "--guide-out", str(guide)]) == 0
+    assert logf.exists() and guide.exists()

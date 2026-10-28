@@ -99,6 +99,25 @@
           "refKind": "branch"
         }
       }
+    },
+    {
+      "name": "gw",
+      "displayName": "그룹웨어 (gw)",
+      "description": "본인 계정으로 회의실 예약, 근태·출장·증명서 기안 준비와 상신, 결재함·결재 본문 읽기. 런타임(gw)은 jaix-setup 이 원내 위치에서 설치한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jeju-inst/jaix-gw.git",
+        "ref": "v2026.10.27.2",
+        "sha": "ad2c777b05412271724bba7041110ef952f394aa"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-gw",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.10.27.2"
     }
   ]
 }

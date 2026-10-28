@@ -30,6 +30,7 @@ jobs:
     runs-on: windows-latest
     env:
       GITHUB_TOKEN: ${{ github.token }}   # 런타임 릴리스 조회가 익명 한도에 걸리지 않게
+      JAIX_GW_SOURCE: none   # 실제 원내 배포 서버(IP 제한)를 CI 에서 부르지 않는다 — gw 경로는 단위 시험의 file:// 로
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,7 +73,7 @@ jobs:
           # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
           if ($pr.RunLevel -and $pr.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨: $($pr.RunLevel)" }
           if ($pr.LogonType -ne 'InteractiveToken') { throw "'로그온할 때만 실행'이 아님: $($pr.LogonType)" }
-          $jaix = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          $jaix = Join-Path $env:LOCALAPPDATA 'jaix'   # 기록·상태는 데이터 폴더(프로그램 폴더와 나눔)
           $status = "$jaix\update-status.json"
           Remove-Item $status -ErrorAction SilentlyContinue
           schtasks /Run /TN jaix-update

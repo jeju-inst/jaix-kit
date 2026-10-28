@@ -104,3 +104,21 @@ def test_check_warns_on_pluginless_commit(tmp_path, monkeypatch, gen_repo, capsy
         jaixlock.check()
     assert e.value.code == 0  # 경고만
     assert "plugin.json 없음" in capsys.readouterr().out
+
+
+def test_add_refuses_seed_and_pins_valid_tag(tmp_path, monkeypatch, gen_repo):
+    repo, seed = gen_repo
+    good = _commit(repo, {".claude-plugin/plugin.json": "{}", "skills/gw/SKILL.md": "x"}, "v2026.10.27.2")
+    market = tmp_path / "marketplace.json"
+    market.write_text(json.dumps({"plugins": []}), encoding="utf-8")
+    monkeypatch.setattr(jaixlock, "MARKET", market)
+    url = "https://github.com/jeju-inst/jaix-gw.git"  # add 는 https 만 받으므로 조회만 로컬로 돌린다
+    real_resolve, real_has = jaixlock.resolve, jaixlock.has_plugin
+    monkeypatch.setattr(jaixlock, "resolve", lambda u, ref, kind=None: real_resolve(repo.as_uri(), ref, kind))
+    monkeypatch.setattr(jaixlock, "has_plugin", lambda u, sha, path: real_has(repo.as_uri(), sha, path))
+    with pytest.raises(SystemExit):
+        jaixlock.add("gw", url, "v2026.10.27.1", "그룹웨어 (gw)", "설명")
+    jaixlock.add("gw", url, "v2026.10.27.2", "그룹웨어 (gw)", "설명")
+    entry = jaixlock.load()["plugins"][0]
+    assert entry["source"] == {"source": "url", "url": url, "ref": "v2026.10.27.2", "sha": good}
+    assert entry["version"] == "2026.10.27.2" and entry["metadata"]["jaix"]["refKind"] == "tag"
