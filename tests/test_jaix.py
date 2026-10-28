@@ -628,13 +628,22 @@ def _codex_home_with_plugin(isolated, monkeypatch, the_lock):
 
 def test_codex_mcp_written_with_absolute_root(isolated, monkeypatch, the_lock):
     home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
-    assert codex.mcp_servers(the_lock) == {"hwp-agent": {"command": "uvx", "args": ["--from", str(root), "hwp-agent", "mcp"],
-                                                       "env": {}}}
+    assert codex.mcp_servers(the_lock) == {"hwp-agent": {"command": "uvx", "args": ["--python", "3.12", "--from", str(root),
+                                                                                  "hwp-agent", "mcp"], "env": {}}}
     assert codex.write_mcp(the_lock, print, cli="codex")
     assert calls[-1][:3] == ["mcp", "add", "hwp-agent"] and str(root) in calls[-1]
     n = len(calls)
     codex.write_mcp(the_lock, print, cli="codex")
     assert len(calls) == n  # 이미 맞으면 다시 쓰지 않음
+
+
+def test_codex_mcp_pins_python_only_when_missing():
+    """Hermes가 Codex 항목을 가져가 자기 VIRTUAL_ENV(3.14)로 띄워도 같은 Python을 쓰게(jaix-kit#45)."""
+    assert codex._pin_python({"command": "uvx", "args": ["--from", "x", "y"]})[:2] == ["--python", "3.12"]
+    assert codex._pin_python({"command": r"C:\\u\\uvx.exe", "args": ["y"]})[:2] == ["--python", "3.12"]
+    for args in (["--python", "3.11", "y"], ["-p", "3.13", "y"], ["--python=3.11", "y"]):
+        assert codex._pin_python({"command": "uvx", "args": args}) == args
+    assert codex._pin_python({"command": "node", "args": ["s.js"]}) == ["s.js"]
 
 
 def test_codex_mcp_keeps_user_definition(isolated, monkeypatch, the_lock):
