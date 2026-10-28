@@ -166,10 +166,12 @@ def cmd_setup(args, log):
     for rt in _runtimes(args.runtimes):
         steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
     # Claude 앱(MSIX) 안에서 uvx가 Python을 처음 받으면 가상화로 깨진다(jaix-kit#14) → 앱 밖인 지금 깐다
-    steps.run("uv 관리 Python", lambda: uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run))
-    # 첫 hwp 변환 때 에이전트가 우회하지 않게
-    steps.run("HWP 변환기(jar)", hwpjar.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
     result = {}
+    # ensure 들은 실패를 예외가 아니라 False 로 알린다 — 지난 실패 기록을 덮을지 판단에 쓴다
+    result["uvpython"] = steps.run("uv 관리 Python", lambda: uvpython.ensure(uvpython.needed(lock, args.offline), log,
+                                                                          dry_run=args.dry_run))
+    # 첫 hwp 변환 때 에이전트가 우회하지 않게
+    result["hwpjar"] = steps.run("HWP 변환기(jar)", hwpjar.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
     if args.gw_source and not args.dry_run:
         gw.save_source(args.gw_source)
     gw_res = steps.run("gw", gw.setup, log, dry_run=args.dry_run)
@@ -208,7 +210,8 @@ def cmd_setup(args, log):
 
 def _setup_problems(result):
     codex_res = result.get("codex") or {}
-    return bool(codex_res.get("error") or codex_res.get("failed")
+    return bool(result.get("uvpython") is False or result.get("hwpjar") is False
+                or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed")
 
 

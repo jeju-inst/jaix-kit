@@ -353,6 +353,7 @@ def test_setup_keeps_old_failure_when_setup_has_problems():
     assert cli._setup_problems({"codex": {"failed": ["hwp-agent"]}})
     assert cli._setup_problems({"codex": {"error": "MCP 등록"}})
     assert cli._setup_problems({"gw": {"status": "failed"}})
+    assert cli._setup_problems({"uvpython": False}) and cli._setup_problems({"hwpjar": False})
     assert not cli._setup_problems({"codex": {"failed": []}, "gw": {"status": "offsite"}})
 
 
