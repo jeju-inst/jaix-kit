@@ -41,9 +41,9 @@ ID 형식은 `TS-<분야>-<번호>`이다. 번호는 지우지 않고, 폐기한
 
 | ID | 규칙 | 검사 |
 |---|---|---|
-| TS-FORMAT-1 | **플러그인 루트**에 `.claude-plugin/plugin.json`을 둔다. `name`(잠금 entry 이름과 같게), `displayName`(한국어), `description`(한 문장), `author`, `homepage`, `repository`, `license`, `keywords`를 넣는다 | △ (설치되는지는 ○ 새 머신 설치, 필드는 아직 검사 안 함) |
-| TS-FORMAT-2 | `plugin.json`에 **`version`을 넣지 않는다.** Claude는 plugin.json의 version을 먼저 보므로, 고정값이 남아 있으면 새 버전을 못 알아챈다. 버전 표기는 잠금 entry의 `version` 하나뿐이다 | △ |
-| TS-FORMAT-3 | 스킬은 플러그인 루트의 `skills/<name>/SKILL.md`에 둔다. frontmatter는 `name`·`description`만 쓴다 | △ |
+| TS-FORMAT-1 | **플러그인 루트**에 `.claude-plugin/plugin.json`을 둔다. `name`(잠금 entry 이름과 같게), `displayName`(한국어), `description`(한 문장), `author`, `homepage`, `repository`, `license`, `keywords`를 넣는다 | △ (plugin_lint, 경고; 설치되는지는 ○ 새 머신 설치, 필드는 아직 검사 안 함) |
+| TS-FORMAT-2 | `plugin.json`에 **`version`을 넣지 않는다.** Claude는 plugin.json의 version을 먼저 보므로, 고정값이 남아 있으면 새 버전을 못 알아챈다. 버전 표기는 잠금 entry의 `version` 하나뿐이다 | △ (plugin_lint, 경고) |
+| TS-FORMAT-3 | 스킬은 플러그인 루트의 `skills/<name>/SKILL.md`에 둔다. frontmatter는 `name`·`description`만 쓴다 | △ (plugin_lint, 경고) |
 | TS-FORMAT-4 | MCP 서버는 플러그인 루트의 `.mcp.json`에 둔다(형식은 MCP 절) | △ |
 
 근거: README "버전", `docs/handoff/jaix-intake.md`(참고 구현 `z0nam/hwp-agent`). 하위 폴더 예: jeju-inst/calendar-worklog(`plugin/.claude-plugin/plugin.json`, `plugin/skills/calendar-worklog/SKILL.md`, 저장소 루트 `.github/workflows/calver.yml`).
@@ -53,8 +53,8 @@ ID 형식은 `TS-<분야>-<번호>`이다. 번호는 지우지 않고, 폐기한
 | ID | 규칙 | 검사 |
 |---|---|---|
 | TS-VER-1 | 버전은 날짜 태그 `vYYYY.MM.DD.N`(KST, 같은 날 N번째) 하나뿐이다. 사람은 번호를 매기지 않는다. 소스 안의 버전은 `0.0.0+dev` 같은 고정값으로 두고, 배포 빌드가 태그 값을 찍는다 | △ |
-| TS-VER-2 | 도구 **저장소 루트**에 `.github/workflows/calver.yml`을 두고(플러그인 루트가 하위 폴더여도 저장소 루트), main에 머지될 때마다 jaix-kit의 재사용 워크플로 `calver-tag.yml`을 부른다 | △ |
-| TS-VER-3 | `calver-tag.yml`은 `@main`이 아니라 **jaix-kit 커밋 40자 SHA**로 고정한다. 다른 저장소의 코드가 이 저장소의 태그 권한을 쥐기 때문이다. SHA를 올릴 때는 PR로 한다 | △ |
+| TS-VER-2 | 도구 **저장소 루트**에 `.github/workflows/calver.yml`을 두고(플러그인 루트가 하위 폴더여도 저장소 루트), main에 머지될 때마다 jaix-kit의 재사용 워크플로 `calver-tag.yml`을 부른다 | △ (plugin_lint, 경고) |
+| TS-VER-3 | `calver-tag.yml`은 `@main`이 아니라 **jaix-kit 커밋 40자 SHA**로 고정한다. 다른 저장소의 코드가 이 저장소의 태그 권한을 쥐기 때문이다. SHA를 올릴 때는 PR로 한다 | △ (plugin_lint, 경고) |
 | TS-VER-4 | 태그로 고정한 잠금 entry의 `version`은 태그에서 `v`를 뺀 값과 같아야 한다. 아직 태그가 없는 도구는 브랜치 head 커밋으로 고정하고 `version`을 비운다 | ○ `jaixlock.py check` (태그 entry만. 브랜치 entry는 △ 경고) |
 
 `calver.yml` 예시:
@@ -84,7 +84,7 @@ jobs:
 
 | ID | 규칙 | 검사 |
 |---|---|---|
-| TS-MCP-1 | Python MCP는 `uvx --python 3.12 --from ${CLAUDE_PLUGIN_ROOT} [--with …] <진입점>`으로 띄운다. **`--python`을 반드시 고정한다.** 고정하지 않으면 uv가 최신 Python(깨끗한 Windows 계정에서 3.15)을 고르는데, 바이너리 휠이 없는 의존성(lxml)이 소스 빌드에 실패해 MCP가 오류 없이 안 뜬다. `jaix setup`은 이 값을 읽어 그 Python을 앱 밖에서 미리 설치한다 | △ |
+| TS-MCP-1 | Python MCP는 `uvx --python 3.12 --from ${CLAUDE_PLUGIN_ROOT} [--with …] <진입점>`으로 띄운다. **`--python`을 반드시 고정한다.** 고정하지 않으면 uv가 최신 Python(깨끗한 Windows 계정에서 3.15)을 고르는데, 바이너리 휠이 없는 의존성(lxml)이 소스 빌드에 실패해 MCP가 오류 없이 안 뜬다. `jaix setup`은 이 값을 읽어 그 Python을 앱 밖에서 미리 설치한다 | △ (plugin_lint, 경고) |
 | TS-MCP-2 | Codex는 `.mcp.json`의 `${CLAUDE_PLUGIN_ROOT}`를 치환하지 않는다. 그래서 Codex용 MCP 등록은 `jaix`가 `~/.codex/config.toml`에 **절대경로로** 쓴다. 도구 저장소는 `.mcp.json`을 위 형태 하나로만 두고, Codex 전용 설정을 따로 만들지 않는다 | 문서 (jaix 쪽 구현) |
 | TS-MCP-3 | MCP 도구 스키마(이름·설명·입력 스키마) 크기를 재서 편입 PR에 적는다. 상시 분량 예산(TS-TOKEN-1)에 들어간다 | △ |
 | TS-MCP-4 | stdio MCP는 stdout에 프로토콜 메시지 말고 아무것도 쓰지 않는다(로그는 stderr로). 확인할 때는 실제 `.mcp.json` 명령을 그대로 띄워 `initialize`와 `tools/list`에 응답하는지 본다 | △ |
@@ -96,7 +96,7 @@ jobs:
 | ID | 규칙 | 검사 |
 |---|---|---|
 | TS-SKILL-1 | **호스트 중립**으로 쓴다. "PATH의 셸 명령을 Bash로 부른다"처럼 쓰고, 특정 호스트의 슬래시 명령·도구 이름을 가정하지 않는다 | 문서 |
-| TS-SKILL-2 | 스킬이 가리키는 저장소 파일은 **스킬 기준 디렉터리 상대 경로**로 적는다(예: `<skill_base_dir>/../../scripts/init_project.sh`). 플러그인으로 설치되면 파일이 플러그인 캐시에 있으므로, 저장소 루트 상대 경로나 **`path/to/...` 같은 자리표시 경로는 쓰지 않는다** | △ (`path/to` 문자열 검사) |
+| TS-SKILL-2 | 스킬이 가리키는 저장소 파일은 **스킬 기준 디렉터리 상대 경로**로 적는다(예: `<skill_base_dir>/../../scripts/init_project.sh`). 플러그인으로 설치되면 파일이 플러그인 캐시에 있으므로, 저장소 루트 상대 경로나 **`path/to/...` 같은 자리표시 경로는 쓰지 않는다** | △ (`path/to` 문자열 검사, plugin_lint, 경고) |
 | TS-SKILL-3 | 본문이 길면 워크플로별 `references/*.md`로 나누고, SKILL.md에는 공통 규칙과 "어느 경우에 어느 파일을 읽는지" 표만 남긴다(점진 공개). reference를 못 읽으면 추측하지 말고 알리게 한다 | 문서 |
 
 근거: jeju-inst/ji-project-template#3(커밋 b3eb688: `path/to/ji-project-template/...` → 스킬 기준 상대 경로), jeju-inst/calendar-worklog#41(점진 공개).
@@ -108,7 +108,7 @@ jobs:
 | ID | 규칙 | 검사 |
 |---|---|---|
 | TS-TOKEN-1 | **상시 분량**(플러그인 설명 + 모든 스킬 frontmatter + MCP 도구 스키마)은 도구 하나당 합계 **3k 토큰 이하**로 한다 | △ |
-| TS-TOKEN-2 | **호출 한 번에 싣는 분량**(SKILL.md + 그 워크플로가 읽는 reference)은 **10k 토큰 이하**로 한다 | △ |
+| TS-TOKEN-2 | **호출 한 번에 싣는 분량**(SKILL.md + 그 워크플로가 읽는 reference)은 **10k 토큰 이하**로 한다 | △ (plugin_lint, 경고) |
 | TS-TOKEN-3 | 편입 PR에 측정값을 적는다. 측정법은 다음과 같다. **`claude -p --setting-sources project --output-format json`**으로, 문서를 붙인 프롬프트와 빈 프롬프트를 번갈아 3회씩 보낸다. 각 호출의 `input + cache_creation + cache_read`의 차이를 낸다. 실행 폴더는 프로젝트 설정이 없는 빈 폴더로 한다. **3회 값이 모두 같아야 한다.** 다르면 기준선이 고정되지 않은 것이므로 원인을 찾고, 중앙값으로 덮지 않는다. 워크플로별 합계는 SKILL.md와 해당 reference를 한 번에 붙여 잰다 | 문서 |
 
 근거: `docs/handoff/README.md` 공통 규칙 9, jeju-inst/calendar-worklog#41(측정법, 22k → 10k 이하).

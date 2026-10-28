@@ -2,11 +2,11 @@
 """jaix 플러그인 표준 검사기 (plugin_lint.py).
 
 .claude-plugin/marketplace.json 에 잠긴 각 플러그인을 sha 로 얕게 받아 다음을 검사:
-  ① <path>/.claude-plugin/plugin.json 존재, JSON 파싱, "version" 필드 없음
-  ② 저장소 루트에 .github/workflows/calver.yml 존재하고 jeju-inst/jaix-kit 의 calver-tag.yml 을 40자 SHA 로 호출
-  ③ .mcp.json 이 있으면 command 가 uvx 인 서버는 args 에 "--python" 다음 "3.12" 가 있음
-  ④ skills/*/SKILL.md 존재, 본문에 'path/to' 문자열 없음
-  ⑤ SKILL.md 크기 근사(바이트/3)가 10,000 토큰 초과면 경고
+  ① <path>/.claude-plugin/plugin.json 존재, JSON 파싱, "version" 필드 없음 (TS-FORMAT-1, TS-FORMAT-2)
+  ② 저장소 루트에 .github/workflows/calver.yml 존재하고 jeju-inst/jaix-kit 의 calver-tag.yml 을 40자 SHA 로 호출 (TS-VER-2, TS-VER-3)
+  ③ .mcp.json 이 있으면 command 가 uvx 인 서버는 args 에 "--python" 다음 "3.12" 가 있음 (TS-MCP-1)
+  ④ skills/*/SKILL.md 존재, 본문에 'path/to' 문자열 없음 (TS-FORMAT-3, TS-SKILL-2)
+  ⑤ SKILL.md 크기 근사(바이트/3)가 10,000 토큰 초과면 경고 (TS-TOKEN-2)
 
 출력은 플러그인별 ✓/△ 목록이며, 기본은 전부 경고 모드(종료 코드 0)이다.
 --strict 옵션 지정 시 위반(①~④)이 1건이라도 있으면 종료 코드 1로 종료한다.
@@ -28,8 +28,15 @@ CALVER_TAG_SHA_RE = re.compile(r"^jeju-inst/jaix-kit/\.github/workflows/calver-t
 
 
 def check_calver_workflow(text):
-    """calver.yml 내용에서 주석을 제외한 실제 uses 호출이 calver-tag.yml을 40자 SHA로 호출하는지 검사한다."""
-    has_valid_call = False
+    """calver.yml 내용에서 주석을 제외한 실제 uses 호출을 검사한다.
+
+    반환값:
+      - None: 정상 (calver-tag.yml을 40자 SHA로 호출)
+      - "TS-VER-2": calver-tag.yml 호출 자체가 없음
+      - "TS-VER-3": calver-tag.yml을 호출하지만 40자 SHA가 아님 (@main 등)
+    """
+    has_call = False
+    has_sha_call = False
     for line in text.splitlines():
         code = line.split("#", 1)[0].strip()
         if not code:
@@ -38,11 +45,16 @@ def check_calver_workflow(text):
         if m_uses:
             target = m_uses.group(1).strip("'\"")
             if "jeju-inst/jaix-kit/.github/workflows/calver-tag.yml" in target:
+                has_call = True
                 if CALVER_TAG_SHA_RE.fullmatch(target):
-                    has_valid_call = True
+                    has_sha_call = True
                 else:
-                    return False
-    return has_valid_call
+                    return "TS-VER-3"
+    if not has_call:
+        return "TS-VER-2"
+    if not has_sha_call:
+        return "TS-VER-3"
+    return None
 
 
 def git_url(src):
@@ -104,29 +116,32 @@ def lint_plugin(plugin_entry, files, read_func):
     # ① <path>/.claude-plugin/plugin.json 존재, JSON 파싱, "version" 필드 없음
     manifest_path = f"{prefix}.claude-plugin/plugin.json"
     if manifest_path not in files:
-        issues.append(f"{manifest_path} 없음")
+        issues.append(f"TS-FORMAT-1: {manifest_path} 없음")
     else:
         try:
             text, _ = read_func(manifest_path)
             data = json.loads(text)
             if not isinstance(data, dict):
-                issues.append(f"{manifest_path} JSON 루트가 객체가 아님")
+                issues.append(f"TS-FORMAT-1: {manifest_path} JSON 루트가 객체가 아님")
             elif "version" in data:
-                issues.append(f"{manifest_path} 에 'version' 필드 있음 (버전은 marketplace.json 에서 관리)")
+                issues.append(f"TS-FORMAT-2: {manifest_path} 에 'version' 필드 있음 (버전은 marketplace.json 에서 관리)")
         except Exception as e:
-            issues.append(f"{manifest_path} JSON 파싱 실패: {e}")
+            issues.append(f"TS-FORMAT-1: {manifest_path} JSON 파싱 실패: {e}")
 
     # ② 저장소 루트에 .github/workflows/calver.yml 존재하고 jeju-inst/jaix-kit 의 calver-tag.yml 을 40자 SHA 로 호출
     calver_path = ".github/workflows/calver.yml"
     if calver_path not in files:
-        issues.append(f"{calver_path} 없음")
+        issues.append(f"TS-VER-2: {calver_path} 없음")
     else:
         try:
             text, _ = read_func(calver_path)
-            if not check_calver_workflow(text):
-                issues.append(f"{calver_path} 에서 jeju-inst/jaix-kit/.github/workflows/calver-tag.yml 을 40자 SHA 로 호출하지 않음")
+            err = check_calver_workflow(text)
+            if err == "TS-VER-2":
+                issues.append(f"TS-VER-2: {calver_path} 에서 jeju-inst/jaix-kit/.github/workflows/calver-tag.yml 을 호출하지 않음")
+            elif err == "TS-VER-3":
+                issues.append(f"TS-VER-3: {calver_path} 에서 jeju-inst/jaix-kit/.github/workflows/calver-tag.yml 을 40자 SHA 로 호출하지 않음")
         except Exception as e:
-            issues.append(f"{calver_path} 읽기 실패: {e}")
+            issues.append(f"TS-VER-2: {calver_path} 읽기 실패: {e}")
 
     # ③ .mcp.json 이 있으면 command 가 uvx 인 서버는 args 에 "--python" 다음 "3.12" 가 있음
     mcp_path = None
@@ -156,28 +171,28 @@ def lint_plugin(plugin_entry, files, read_func):
                                         has_py312 = True
                                         break
                         if not has_py312:
-                            issues.append(f"{mcp_path}: 서버 '{s_name}' uvx args 에 '--python 3.12' 없음")
+                            issues.append(f"TS-MCP-1: {mcp_path}: 서버 '{s_name}' uvx args 에 '--python 3.12' 없음")
         except Exception as e:
-            issues.append(f"{mcp_path} JSON 파싱 실패: {e}")
+            issues.append(f"TS-MCP-1: {mcp_path} JSON 파싱 실패: {e}")
 
     # ④ skills/*/SKILL.md 존재, 본문에 'path/to' 문자열 없음
     skill_re = re.compile(rf"^{re.escape(prefix)}skills/[^/]+/SKILL\.md$")
     skill_files = sorted([f for f in files if skill_re.match(f)])
     if not skill_files:
-        issues.append(f"{prefix}skills/*/SKILL.md 없음")
+        issues.append(f"TS-FORMAT-3: {prefix}skills/*/SKILL.md 없음")
     else:
         for sf in skill_files:
             try:
                 text, raw = read_func(sf)
                 if "path/to" in text:
-                    issues.append(f"{sf} 본문에 'path/to' 문자열 포함")
+                    issues.append(f"TS-SKILL-2: {sf} 본문에 'path/to' 문자열 포함")
 
                 # ⑤ SKILL.md 크기 근사(바이트/3 을 토큰 근사로) 10000 초과면 경고
                 tokens = len(raw) / 3
                 if tokens > 10000:
-                    warnings.append(f"{sf} 크기({len(raw):,} B, 약 {int(tokens):,} 토큰)가 10,000 토큰 초과")
+                    warnings.append(f"TS-TOKEN-2: {sf} 크기({len(raw):,} B, 약 {int(tokens):,} 토큰)가 10,000 토큰 초과")
             except Exception as e:
-                issues.append(f"{sf} 읽기 실패: {e}")
+                issues.append(f"TS-FORMAT-3: {sf} 읽기 실패: {e}")
 
     return issues, warnings
 

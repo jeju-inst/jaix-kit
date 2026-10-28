@@ -1,10 +1,11 @@
 import json
+import re
 import sys
 from pathlib import Path
 
 import pytest
 
-from jaix import paths
+from jaix import paths, proc
 from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, lock, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
@@ -324,6 +325,41 @@ def test_quiet_update_records_status_for_doctor(isolated, monkeypatch, capsys):
     assert cli.main(["update", "--quiet"]) == 1
     c = doctor.check_autoupdate()[0]
     assert c.status == "warn" and "잠금을 받지 못함" in c.message and c.fix == "jaix update"
+
+
+def test_setup_or_direct_update_success_clears_old_logon_failure(isolated, monkeypatch):
+    """지난 로그온 갱신 실패 뒤 setup·직접 update 가 성공하면 doctor 가 더는 실패를 보이지 않는다(jaix-win v.28.1 실측)."""
+    monkeypatch.setattr(schedule, "supported", lambda: True)
+    monkeypatch.setattr(schedule, "registered", lambda: True)
+    monkeypatch.setattr(schedule, "run_mode", lambda: None)
+    schedule.write_status(["Codex 플러그인 설치 실패: MCP 경로"])
+    assert doctor.check_autoupdate()[0].status == "warn"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and c.message.endswith("(jaix setup)")
+
+    schedule.write_status(["Codex 플러그인 설치 실패: MCP 경로"])
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    assert cli.main(["update"]) == 0
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "jaix setup" not in c.message
+
+    monkeypatch.setattr(cli, "_update", lambda args, log: ["gw 설치 실패"])
+    assert cli.main(["update"]) == 1
+    assert doctor.check_autoupdate()[0].status == "warn"
+
+
+def test_setup_keeps_old_failure_when_setup_has_problems():
+    assert cli._setup_problems({"codex": {"failed": ["hwp-agent"]}})
+    assert cli._setup_problems({"codex": {"error": "MCP 등록"}})
+    assert cli._setup_problems({"gw": {"status": "failed"}})
+    assert cli._setup_problems({"uvpython": False}) and cli._setup_problems({"hwpjar": False})
+    assert not cli._setup_problems({"codex": {"failed": []}, "gw": {"status": "offsite"}})
+
+
+def test_guide_gw_login_covers_agent_window_and_terminal():
+    text = cli.guide(["claude"], {"gw": {"status": "installed"}})
+    assert "gw 로그인해 줘" in text and "입력 창" in text and "그 자리에서 묻습니다" in text
 
 
 def test_doctor_warns_when_autoupdate_missing(monkeypatch):
@@ -757,3 +793,77 @@ def test_log_and_guide_create_data_dir(isolated):
     assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--log", str(logf),
                      "--guide-out", str(guide)]) == 0
     assert logf.exists() and guide.exists()
+
+
+def test_batch_wrapper_args_not_parsed_by_cmd(tmp_path, monkeypatch):
+    """#36: codex.CMD 를 거칠 때 `mcp>=1.2,<2` 의 < > 가 cmd 리다이렉션이 되지 않게 감싼다."""
+    monkeypatch.setattr(proc, "IS_WIN", True)
+    monkeypatch.setenv("COMSPEC", "C:\\Windows\\system32\\cmd.exe")
+    cli = tmp_path / "codex.CMD"
+    cli.write_text("@echo off\r\nsomething-else %*\r\n", encoding="utf-8")  # npm 래퍼가 아님 → 인용한 cmd 명령줄
+    args = ["mcp", "add", "hwp-agent", "--", "uvx", "--from", "C:\\a b\\local", "--with", "mcp>=1.2,<2", "hwp-agent", "mcp"]
+    line = proc.command(str(cli), args)
+    assert line.startswith('"C:\\Windows\\system32\\cmd.exe" /d /s /c "')
+    assert ' "mcp>=1.2,<2" ' in line and ' "C:\\a b\\local" ' in line and " mcp add hwp-agent -- uvx " in line
+    inner = line.split(" /c ", 1)[1][1:-1]
+    # 따옴표 밖에 < > 가 남지 않는다
+    assert not re.search(r"[<>]", re.sub(r'"[^"]*"', "", inner))
+
+
+def test_npm_shim_runs_node_directly(tmp_path, monkeypatch):
+    monkeypatch.setattr(proc, "IS_WIN", True)
+    script = tmp_path / "node_modules" / "@openai" / "codex" / "bin" / "codex.js"
+    script.parent.mkdir(parents=True)
+    script.write_text("", encoding="utf-8")
+    (tmp_path / "node.exe").write_text("", encoding="utf-8")
+    cli = tmp_path / "codex.cmd"
+    cli.write_text('@ECHO off\r\nGOTO start\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n'
+                   'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  '
+                   '"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n', encoding="utf-8")
+    assert proc.command(str(cli), ["mcp", "add", "x", "--", "mcp>=1.2,<2"]) == [
+        str(tmp_path / "node.exe"), str(script), "mcp", "add", "x", "--", "mcp>=1.2,<2"]
+
+
+def test_quote_roundtrips_msvcrt_rules():
+    assert proc._quote("plain") == "plain"
+    assert proc._quote("mcp<2") == '"mcp<2"'
+    assert proc._quote("") == '""'
+    assert proc._quote('C:\\dir\\') == 'C:\\dir\\'  # 특수문자 없으면 그대로
+    assert proc._quote('C:\\a b\\') == '"C:\\a b\\\\"'  # 끝 역슬래시가 닫는 따옴표를 먹지 않게
+    assert proc._quote('a"b') == '"a\\"b"'
+
+
+def test_decode_falls_back_to_oem_codepage(monkeypatch):
+    assert proc.decode("한글".encode("utf-8")) == "한글"
+    monkeypatch.setattr(proc, "IS_WIN", True)
+
+    class K:
+        @staticmethod
+        def GetOEMCP():
+            return 949
+    monkeypatch.setattr(proc.ctypes, "windll", type("W", (), {"kernel32": K}), raising=False)
+    assert proc.decode("액세스가 거부되었습니다.".encode("cp949")) == "액세스가 거부되었습니다."
+
+
+def test_setup_log_banner_records_path(isolated):
+    logf = isolated / "setup.log"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--log", str(logf)]) == 0
+    assert re.search(r"^== \d{4}-\d\d-\d\d \d\d:\d\d:\d\d setup \(direct\) · ", logf.read_text(encoding="utf-8"), re.M)
+    st = isolated / "st.json"
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--log", str(logf), "--status-out", str(st)]) == 0
+    assert "setup (via task)" in logf.read_text(encoding="utf-8")
+    assert cli.main(["update", "--quiet", "--offline"]) in (0, 1)
+    assert "update (logon task)" in schedule.log_file().read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="진짜 cmd.exe 로 배치 래퍼를 돌려 본다")
+def test_batch_wrapper_real_cmd_passes_args_verbatim(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    shim = tmp_path / "fake.cmd"
+    shim.write_text(f'@echo off\r\n"{sys.executable}" -c "import sys, json; print(json.dumps(sys.argv[1:]))" %*\r\n',
+                    encoding="utf-8")
+    args = ["--with", "mcp>=1.2,<2", "--from", "C:\\a b\\local", "x&y", "100%"]
+    code, out = proc.run(str(shim), args, timeout=60)
+    assert code == 0, out
+    assert json.loads(out.strip().splitlines()[-1])[:5] == args[:5]
+    assert not (tmp_path / "2").exists() and not (tmp_path / "=1.2,").exists()  # 리다이렉션이 안 일어났다
