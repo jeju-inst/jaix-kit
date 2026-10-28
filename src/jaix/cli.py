@@ -137,7 +137,15 @@ def _setup_via_task(args):
     if code is not None:
         return code
     args.via_task = False  # 작업으로 못 돌렸으면 직접(상속된 채로라도) 한다
+    args.task_fallback = True
     return cmd_setup(args, Log(args.log))
+
+
+def _banner(what, how):
+    """기록 섹션 머리줄: 언제·어느 길(작업 스케줄러인지 직접인지)·어느 실행파일로 돌았는지. 작업 스케줄러 기록은
+    꺼져 있기 쉽고 한 번짜리 작업은 끝나면 지워져, 나중에 길을 되짚을 근거가 이것뿐이다(jaix-win v.13 실측)."""
+    exe = Path(sys.executable).name if getattr(sys, "frozen", False) else "python -m jaix"
+    return f"\n== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {what} ({how}) · {exe}"
 
 
 def cmd_setup(args, log):
@@ -145,6 +153,9 @@ def cmd_setup(args, log):
         return _setup_via_task(args)
     lock = lockmod.load(args.lock, args.channel, args.offline)
     chosen = _channels(args.channels)
+    # --status-out 은 --via-task 가 작업에 넘길 때만 붙는다
+    how = "via task" if args.status_out else "direct, task fallback" if getattr(args, "task_fallback", False) else "direct"
+    log(_banner("setup", how))
     log(f"jaix {__version__} · 잠금: {lock.source}")
     steps = Steps(log)
     if not args.dry_run:
@@ -207,10 +218,11 @@ def cmd_doctor(args, log):
 
 def cmd_update(args, log):
     if not args.quiet:
+        log(_banner("update", "direct"))
         return 1 if _update(args, log) else 0
     # 로그온 예약 작업이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다. 실패는 doctor가 보여 준다
     log = Log(schedule.open_log(), quiet=True)
-    log(f"\n== {datetime.now().isoformat(timespec='seconds')} 로그온 자동 갱신")
+    log(_banner("update", "logon task") + " — 로그온 자동 갱신")
     try:
         problems = _update(args, log)
     except Exception as e:  # 잠금을 못 받음(오프라인)·깨진 설정 등 — 다음 로그온에 다시 한다
