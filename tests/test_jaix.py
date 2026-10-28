@@ -791,6 +791,44 @@ def test_self_command_prefers_windowless_exe(tmp_path, monkeypatch):
     assert schedule.command() == [str(tmp_path / "jaixw.exe"), "update", "--quiet"]
 
 
+def test_task_pointing_at_missing_exe_is_a_problem(tmp_path):
+    """onedir 로 옮긴 뒤 setup 을 다시 안 돌리면 작업이 예전 자리의 jaixw.exe 를 부른다(jaix-kit#46)."""
+    import xml.etree.ElementTree as ET
+    gone, here = tmp_path / "jaixw.exe", tmp_path / "jaix" / "jaixw.exe"
+    here.parent.mkdir()
+    here.write_text("")
+    for exe, bad in ((gone, True), (here, False)):
+        xml = schedule.task_xml([str(exe), "update", "--quiet"], "u").split("\n", 1)[1]
+        assert (schedule.missing_command(ET.fromstring(xml)) is not None) == bad
+    xml = schedule.task_xml(["jaixw.exe", "update"], "u").split("\n", 1)[1]
+    assert schedule.missing_command(ET.fromstring(xml)) is None  # 경로 없는 이름은 판단하지 않음
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="사용자 PATH(레지스트리)는 Windows")
+def test_old_onefile_path_entry_is_dropped(tmp_path, monkeypatch):
+    home = tmp_path / "Programs" / "jaix"
+    (home / "jaix").mkdir(parents=True)
+    monkeypatch.setenv("JAIX_HOME", str(home))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(home / "jaix" / "jaix.exe"))
+    try:
+        winenv.add_to_path([home, home / "jaix"])
+        (home / "jaix.exe").write_text("")
+        assert winenv.drop_old_exe_dir() == []  # 예전 jaix.exe 가 아직 있으면 둔다
+        (home / "jaix.exe").unlink()
+        assert winenv.drop_old_exe_dir() == [str(home)]
+        assert not winenv.in_user_path(home) and winenv.in_user_path(home / "jaix")
+    finally:
+        winenv.remove_from_path(home)
+
+
+def test_doctor_wants_exe_dir_on_path_only_when_frozen(tmp_path, monkeypatch):
+    assert paths.exe_dir() is None
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "jaix" / "jaix.exe"))
+    assert paths.exe_dir() == tmp_path / "jaix"
+
+
 def test_log_and_guide_create_data_dir(isolated):
     logf = isolated / "fresh" / "setup.log"
     guide = isolated / "fresh2" / "guide.txt"

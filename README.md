@@ -13,7 +13,7 @@
 | `.github/workflows/calver-tag.yml` | 재사용 워크플로. 도구 저장소가 main 머지마다 불러 날짜 태그를 단다 |
 | `.github/workflows/lock-update.yml` | 갱신 봇. 매일 새 버전을 찾아 beta 갱신 PR과 beta → main 승격 PR을 연다 |
 | `.github/workflows/bundle-tag.yml` | main 잠금·설치본이 바뀔 때마다 묶음 날짜 태그 → `jaix-setup.yml` 빌드 호출 |
-| `.github/workflows/jaix-setup.yml` | `jaix.exe`·`jaix-setup.exe` 빌드, 무인 설치·doctor·제거 시험, 태그 릴리스 |
+| `.github/workflows/jaix-setup.yml` | `jaix\`(onedir, `installer/jaix.spec`)·`jaix-setup.exe` 빌드, 무인 설치·doctor·제거 시험, 태그 릴리스 |
 
 ## 채널
 - `main` = **stable** (전원). 관리자 콘솔이 이 브랜치를 자동 업데이트로 배포한다.
@@ -75,7 +75,7 @@ _(화면 예시는 실기 시험 뒤 추가)_
 - **Claude 데스크톱·Cowork 는 관리자 배포 대상이다**(#19 실측): 데스크톱 앱(Cowork)은 `settings.json` 의 `extraKnownMarketplaces` 를 읽지 않고 계정 단위 조직 플러그인에서 도구를 받는다. jaix 는 Code 탭·Claude Code 쪽만 등록·설치하고, Code 탭 실행파일은 `%LOCALAPPDATA%\Claude-Data\claude_*\claude-code\<버전>\…\claude.exe`(가장 높은 버전)에서 찾는다. doctor 는 잠금 대비 빠진 플러그인이 있으면 [실패]로 보인다.
 - **HWP 변환기 jar 미리 받기**: hwp-agent 가 `hwp-agent setup` 으로 받는 `hwp2hwpx.jar` 를 같은 자리(`%LOCALAPPDATA%\hwp-agent`, 맥 `~/.local/share/hwp-agent`)에 미리 받는다. 주소·sha256 은 잠금이 고정한 hwp-agent 커밋의 `fetch_jar.py` 에서 읽는다.
 - **HWP 미리보기 엔진(rhwp) 미리 받기**: 한글이 열려 있으면 hwp-agent 의 첫 렌더 엔진(hwp2pdf-cli)이 건너뛰므로, 서버 없는 PC의 미리보기는 rhwp([edwardkim/rhwp](https://github.com/edwardkim/rhwp), MIT)가 맡는다. `hwp-agent setup` 이 받는 자리(`%LOCALAPPDATA%\hwp-agent\rhwp`)에 바이너리와 LICENSE 를 미리 받는다. 버전·sha256 은 잠금이 고정한 hwp-agent 커밋의 `render/fetch_rhwp.py` 에서 읽고, 그 파일이 없는 옛 커밋이면 건너뛴다. 실패는 doctor 주의(미리보기 폴백이라 실패 아님).
-- **폴더**: 프로그램(`jaix.exe`·`jaixw.exe`·포터블 런타임)은 `%LOCALAPPDATA%\Programs\jaix`, 기록·상태(`setup.log`·`update.log`·`update-status.json`·소유 기록·gw wheel)는 `%LOCALAPPDATA%\jaix`(맥은 둘 다 `~/.local/share/jaix`). 설치본을 제거하면 프로그램 폴더만 지우고 기록 폴더는 남긴다 — Claude·Codex 설정에 넣은 항목을 남기므로 재설치 때 jaix가 쓴 항목을 알아보게. 예전 설치본이 프로그램 폴더에 둔 기록은 jaix가 처음 돌 때 옮긴다.
+- **폴더**: 프로그램은 `%LOCALAPPDATA%\Programs\jaix` — 실행파일(`jaix.exe`·`jaixw.exe`·`_internal`, PyInstaller onedir)은 그 아래 `jaix\`, 포터블 런타임은 `bin`·`git`·`jre`. 예전 onefile 설치본(실행파일이 바로 아래)을 덮어 설치하면 옛 실행파일과 그 PATH 항목을 정리한다(#46). 기록·상태(`setup.log`·`update.log`·`update-status.json`·소유 기록·gw wheel)는 `%LOCALAPPDATA%\jaix`(맥은 둘 다 `~/.local/share/jaix`). 설치본을 제거하면 프로그램 폴더만 지우고 기록 폴더는 남긴다 — Claude·Codex 설정에 넣은 항목을 남기므로 재설치 때 jaix가 쓴 항목을 알아보게. 예전 설치본이 프로그램 폴더에 둔 기록은 jaix가 처음 돌 때 옮긴다.
 - 관리자 콘솔(managed settings)이 jaix 마켓플레이스를 이미 내려주면 사용자 설정 등록은 건너뛴다.
 - 관리자 권한·시스템 PATH·재부팅을 쓰지 않는다. 시험은 `CLAUDE_CONFIG_DIR`·`CODEX_HOME`·`JAIX_HOME`·`JAIX_DATA`·`HERMES_HOME` 으로 격리한다.
 

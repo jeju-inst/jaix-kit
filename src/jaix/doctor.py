@@ -89,6 +89,8 @@ def check_path():
     out = []
     # jaix가 깐 폴더와 winget 바로가기 폴더는 사용자 PATH에 있어야 새 창·다시 연 앱이 찾는다
     dirs = {paths.bin_dir()}
+    if paths.exe_dir():  # 설치본: 새 명령창이 jaix 를 찾으려면 jaix.exe 폴더({app}\\jaix)도 있어야 한다
+        dirs.add(paths.exe_dir())
     for rt in runtimes.RUNTIMES:
         found = runtimes.find(rt)
         if found.managed:

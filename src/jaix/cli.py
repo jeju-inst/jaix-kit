@@ -162,6 +162,8 @@ def cmd_setup(args, log):
     if not args.dry_run:
         paths.bin_dir().mkdir(parents=True, exist_ok=True)
         steps.run("PATH", winenv.add_to_path, [paths.bin_dir()])
+        for old in steps.run("PATH 정리", winenv.drop_old_exe_dir) or []:
+            log(f"  PATH에서 뺌(예전 설치 위치): {old}")
     log("\n[1/3] 런타임")
     for rt in _runtimes(args.runtimes):
         steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
