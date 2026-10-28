@@ -210,9 +210,10 @@ def open_log():
     return f
 
 
-def write_status(problems, error=None):
+def write_status(problems, error=None, by="update"):
+    """by: 누가 맞췄나(update·setup). setup·직접 update 가 성공해도 덮어써야 doctor 가 지난 실패를 계속 보이지 않는다."""
     data = {"time": datetime.now().isoformat(timespec="seconds"), "ok": not problems and not error,
-            "problems": problems, "error": error}
+            "problems": problems, "error": error, "by": by}
     status_file().parent.mkdir(parents=True, exist_ok=True)
     status_file().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
