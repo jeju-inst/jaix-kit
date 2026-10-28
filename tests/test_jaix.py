@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import re
 import sys
@@ -682,7 +683,8 @@ def test_same_commit_prefix(the_lock):
     assert same_commit("07040e21d448", full) and same_commit(full, "07040e2")
     assert not same_commit("07040e", full)  # 7자 미만은 판단 안 함
     assert not same_commit("17040e21d448", full) and not same_commit(None, full)
-    branch = next(p for p in the_lock.plugins if not p.version)
+    # 잠금이 전부 태그 고정이 돼도 시험하도록 branch 고정 플러그인을 만들어 쓴다
+    branch = dataclasses.replace(the_lock.plugins[0], version=None)
     # Claude Code 기록: branch 고정이면 version 칸에 12자리 해시
     assert claude.matches(branch, {"version": branch.sha[:12]})
     assert not claude.matches(branch, {"version": "0" * 12})
