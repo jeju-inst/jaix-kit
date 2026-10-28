@@ -2,6 +2,7 @@
 
 판정: ok 통과 · warn 주의(동작은 함, 손볼 것 있음) · fail 실패(종료 코드 1) · skip 해당 없음.
 """
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -83,13 +84,19 @@ def check_rhwp(lock):
                   "없음 — 한글이 열려 있으면 미리보기 렌더가 안 됨(한글을 닫으면 한컴으로 렌더)", "jaix setup")]
 
 
+def _same(a, b):
+    return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
+
+
 def check_path():
     if not IS_WIN:
         return []
     out = []
     # jaix가 깐 폴더와 winget 바로가기 폴더는 사용자 PATH에 있어야 새 창·다시 연 앱이 찾는다
     dirs = {paths.bin_dir()}
-    if paths.exe_dir():  # 설치본: 새 명령창이 jaix 를 찾으려면 jaix.exe 폴더({app}\\jaix)도 있어야 한다
+    # 설치본(Inno 가 {app}\\jaix 에 깔고 PATH 에 넣음)만: 새 명령창이 jaix 를 찾으려면 그 폴더가 있어야 한다.
+    # 풀어서 쓰는 jaix-windows.zip 은 PATH 에 넣지 않으므로 묻지 않는다
+    if paths.exe_dir() and _same(paths.exe_dir(), paths.jaix_home() / "jaix"):
         dirs.add(paths.exe_dir())
     for rt in runtimes.RUNTIMES:
         found = runtimes.find(rt)

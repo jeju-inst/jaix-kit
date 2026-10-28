@@ -827,6 +827,13 @@ def test_doctor_wants_exe_dir_on_path_only_when_frozen(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "jaix" / "jaix.exe"))
     assert paths.exe_dir() == tmp_path / "jaix"
+    monkeypatch.setattr(doctor, "IS_WIN", True)
+    monkeypatch.setattr(doctor.winenv, "in_user_path", lambda d: False)
+    (tmp_path / "jaix").mkdir()
+    monkeypatch.setenv("JAIX_HOME", str(tmp_path / "elsewhere"))  # 풀어서 쓰는 zip: PATH 를 묻지 않음
+    assert not any(str(tmp_path / "jaix") in c.message for c in doctor.check_path())
+    monkeypatch.setenv("JAIX_HOME", str(tmp_path))  # 설치본({app}\\jaix)
+    assert any(c.status == "fail" and str(tmp_path / "jaix") in c.message for c in doctor.check_path())
 
 
 def test_log_and_guide_create_data_dir(isolated):
