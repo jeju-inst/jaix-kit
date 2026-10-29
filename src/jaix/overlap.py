@@ -163,7 +163,11 @@ def codex_overlaps(lock):
         hits = [f"Codex 플러그인 {pid}" for pid in plugins
                 if pid not in mine and _same_name(pid.split("@", 1)[0], names)]
         hits += [f"Codex 스킬 {_describe(d)}" for d in skill_dirs(paths.codex_home() / "skills") if _same_name(d.name, names)]
-        hits += [f"Codex MCP '{n}' (config.toml)" for n in servers if n not in owned and _same_name(n, names)]
+        # 플러그인 서버와 이름이 똑같은 config 항목은 Codex가 그것만 띄우고 플러그인 쪽을 건너뛴다(codex.py #23 설명)
+        # → 두 벌이 아니라 사용자가 덮어쓴 것. 이름이 달라 둘 다 뜨는 것만 겹침이다
+        exact = plugin_mcp(plugins[p.id])
+        hits += [f"Codex MCP '{n}' (config.toml)" for n in servers
+                 if n not in owned and n not in exact and _same_name(n, names)]
         if hits:
             out[p.name] = hits
     return out

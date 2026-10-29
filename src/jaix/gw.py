@@ -106,12 +106,13 @@ def tool_bin(uv=None):
 
 
 def _is_jaix_wheel(req):
-    """uv-receipt 의 요구 항목이 jaix가 받은 wheel(data_dir/gw/*.whl)인가."""
+    """uv-receipt 의 요구 항목이 jaix가 받은 wheel(data_dir/gw/*.whl)인가. 예전(v2026.10.27 까지) 프로그램
+    폴더(jaix_home/gw)에서 깐 것도 jaix 것이다 — migrate_data 가 wheel 을 옮겨도 receipt 는 옛 경로를 적고 있다."""
     where = req.get("path") if isinstance(req, dict) else None
     if not where:
         return False
-    a, b = Path(where).parent, paths.data_dir() / "gw"
-    return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
+    key = lambda p: os.path.normcase(os.path.normpath(str(p)))  # noqa: E731
+    return key(Path(where).parent) in {key(paths.data_dir() / "gw"), key(paths.jaix_home() / "gw")}
 
 
 def _exe_names():

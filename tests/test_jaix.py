@@ -1028,6 +1028,12 @@ def test_gw_own_wheel_install_is_not_foreign(isolated, monkeypatch):
                         else base_run(args, timeout))
     assert gw.foreign() == []
     assert gw.setup(print)["status"] == "installed"
+    # 예전 프로그램 폴더(jaix_home/gw)에서 깐 receipt 도 jaix 것(migrate_data 가 wheel 만 옮김)
+    old = paths.jaix_home() / "gw" / whl.name
+    (tools / "ji-gw-ai" / "uv-receipt.toml").write_text(
+        f'[tool]\nrequirements = [{{ name = "ji-gw-ai", path = {json.dumps(str(old))} }}]\n'
+        'entrypoints = [{ name = "gw", install-path = "x", from = "ji-gw-ai" }]\n', encoding="utf-8")
+    assert gw.foreign() == []
 
 
 def test_gw_other_on_path_is_foreign(isolated, monkeypatch):
@@ -1090,7 +1096,8 @@ def test_doctor_reports_overlaps_without_removing(isolated, monkeypatch, the_loc
     xdir.mkdir(exist_ok=True)
     (xdir / "config.toml").write_text('[plugins."korea-rio-mcp@jaix"]\nenabled = true\n[plugins."hwp-agent@jaix"]\n'
                                       'enabled = true\n[mcp_servers.korea_rio]\ncommand = "uv"\n'
-                                      '[mcp_servers.hwp-agent]\ncommand = "uvx"\n', encoding="utf-8")
+                                      '[mcp_servers.hwp-agent]\ncommand = "uvx"\n'
+                                      '[mcp_servers.korea-rio]\ncommand = "uvx"\n', encoding="utf-8")
     paths.data_dir().mkdir(parents=True, exist_ok=True)
     (paths.data_dir() / "codex-mcp.json").write_text(json.dumps({"hwp-agent": {}}), encoding="utf-8")
     before = sorted(str(p) for p in isolated.rglob("*"))
@@ -1101,6 +1108,7 @@ def test_doctor_reports_overlaps_without_removing(isolated, monkeypatch, the_loc
     assert "'hwp_agent'" in c.message and "dayone" not in c.message and "slack" not in c.message
     x = checks["Codex 중복 korea-rio-mcp"]
     assert "korea_rio" in x.message
+    assert "'korea-rio'" not in x.message  # 플러그인 서버와 같은 이름 = Codex가 플러그인 쪽을 건너뜀(덮어쓰기)
     assert "Codex 중복 hwp-agent" not in checks
     assert sorted(str(p) for p in isolated.rglob("*")) == before  # 아무것도 지우거나 쓰지 않는다
 
