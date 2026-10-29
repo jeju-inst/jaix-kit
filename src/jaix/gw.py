@@ -7,6 +7,10 @@ jaix는 latest.json을 읽고 wheel을 받아 sha256을 확인한 뒤 `uv tool i
 설치된 버전이 latest.json과 다르면(새 버전·롤백 모두) 다시 깐다. 원본에 닿지 않으면(원내망이 아님) gw만 건너뛰고
 doctor가 안내한다. 원본은 기본 DEFAULT_SOURCE, `jaix setup --gw-source <URL>`(jaix_home/config.json에 저장)이나
 환경변수 JAIX_GW_SOURCE로 바꾼다. `none`이면 끈다.
+
+jaix가 깔지 않은 gw(개발용 `uv tool install -e ji-gw-ai`, PATH의 다른 gw)가 있으면 설치를 건너뛴다(status
+"foreign"). 같은 패키지 이름이라 `uv tool install`이 개발용 설치를 바꿔치기하기 때문이다(studio 운영 gw 보호).
+덮어쓰기·--force는 쓰지 않는다.
 """
 import hashlib
 import json
@@ -101,6 +105,53 @@ def tool_bin(uv=None):
     return Path(out.splitlines()[-1]) if ok and out else None
 
 
+def _is_jaix_wheel(req):
+    """uv-receipt 의 요구 항목이 jaix가 받은 wheel(data_dir/gw/*.whl)인가. 예전(v2026.10.27 까지) 프로그램
+    폴더(jaix_home/gw)에서 깐 것도 jaix 것이다 — migrate_data 가 wheel 을 옮겨도 receipt 는 옛 경로를 적고 있다."""
+    where = req.get("path") if isinstance(req, dict) else None
+    if not where:
+        return False
+    key = lambda p: os.path.normcase(os.path.normpath(str(p)))  # noqa: E731
+    return key(Path(where).parent) in {key(paths.data_dir() / "gw"), key(paths.jaix_home() / "gw")}
+
+
+def _exe_names():
+    return {EXE, EXE + ".exe"}
+
+
+def foreign(uv=None):
+    """jaix가 깔지 않은 gw 목록(사람이 읽을 설명). 비어 있으면 jaix가 깔아도 되는 상태.
+    - uv tool 중 gw 실행파일을 내는 것인데 jaix가 받은 wheel에서 깐 것이 아닌 것(editable·git·PyPI 등)
+    - PATH에서 먼저 잡히는 gw가 uv tool 실행파일 폴더의 것이 아닌 것"""
+    uv = uv or _uv()
+    out, ours = [], None
+    ok, tools = _run([uv, "tool", "dir"]) if uv else (False, "")
+    tools = Path(tools.splitlines()[-1]) if ok and tools else None
+    for receipt in sorted(tools.glob("*/uv-receipt.toml")) if tools and tools.is_dir() else []:
+        try:
+            tool = tomllib.loads(receipt.read_text(encoding="utf-8")).get("tool") or {}
+        except (OSError, ValueError):
+            continue
+        if not any(e.get("name") in _exe_names() for e in tool.get("entrypoints") or []):
+            continue
+        reqs = tool.get("requirements") or []
+        if any(_is_jaix_wheel(r) for r in reqs):
+            ours = receipt.parent.name
+            continue
+        src = next((f"{k} {r[k]}" for r in reqs if isinstance(r, dict) for k in ("editable", "path", "git", "url")
+                    if r.get(k)), "PyPI")
+        out.append(f"uv tool {receipt.parent.name} ({src})")
+    exe = paths.which(EXE)
+    if exe:
+        b = tool_bin(uv) if uv else None
+        mine = b and any(Path(exe).resolve() == (b / n).resolve() for n in _exe_names() if (b / n).exists())
+        if not mine:
+            out.append(f"PATH의 {exe}")
+    if out and ours:  # jaix 것과 따로 둔 것이 함께 있으면 둘 다 보여 준다
+        out.append(f"(jaix가 깐 uv tool {ours} 도 있음)")
+    return out
+
+
 def installed_version(uv=None):
     """jaix가 uv tool로 깐 gw의 버전. 개발용으로 따로 둔 gw(PATH의 다른 것)는 세지 않는다."""
     name = _config().get("gw_package")
@@ -131,6 +182,10 @@ def setup(log, dry_run=False):
     if not url:
         log("  gw: 끔 (--gw-source none)")
         return {"status": "off"}
+    other = foreign()
+    if other:
+        log(f"  gw: 개발용 gw가 있어 건너뜀 — {'; '.join(other)} (jaix는 덮어쓰지 않음)")
+        return {"status": "foreign", "paths": other}
     info = latest(url)
     if not info and unpublished(url):
         log(f"  gw: 배포처({urlparse(url).hostname})가 아직 준비되지 않음(배포 전) → 건너뜀. 배포가 시작되면 `jaix update`가 설치")

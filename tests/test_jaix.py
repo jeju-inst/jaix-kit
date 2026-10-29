@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, hwprhwp, lock, runtimes, schedule, uvpython, winenv
+from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, hwprhwp, lock, overlap, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
 REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_UV_ENSURE = uvpython.ensure  # isolated 픽스처가 막기 전의 진짜 함수
+REAL_GW_FOREIGN = gw.foreign  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
@@ -39,6 +40,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv(gw.ENV, "none")
     monkeypatch.setenv("JI_GW_CONFIG_DIR", str(tmp_path / "gwconf"))
     monkeypatch.delenv("GW_BASE_URL", raising=False)  # 기본 원내 주소로 나가지 않게(gw 시험이 저마다 바꾼다)
+    monkeypatch.setattr(gw, "foreign", lambda uv=None: [])  # 개발 PC의 진짜 uv tool·gw 를 보지 않게
+    monkeypatch.setattr(doctor, "PATH_TOOLS", {})  # 개발 PC의 진짜 hwp-agent 를 부르지 않게(시험이 저마다 켠다)
     return tmp_path
 
 
@@ -227,6 +230,7 @@ def _gw_share(isolated, monkeypatch, sha=None):
         return False, ""  # gw --version: 가짜라 못 돎 → uv tool list 버전을 씀
     monkeypatch.setattr(gw, "_uv", lambda: "uv")
     monkeypatch.setattr(gw, "_run", run)
+    monkeypatch.setattr(paths, "which", lambda name: None)  # 개발 PC PATH의 진짜 gw 를 보지 않게
     return calls, state
 
 
@@ -988,3 +992,137 @@ def test_rhwp_skipped_when_locked_hwp_agent_has_no_pin(isolated, monkeypatch, th
     monkeypatch.setattr(hwprhwp, "spec", lambda lock, offline=False: None)
     logs = []
     assert REAL_RHWP_ENSURE(the_lock, logs.append) is True and "건너뜀" in logs[0]
+
+
+def test_gw_dev_install_is_never_replaced(isolated, monkeypatch):
+    monkeypatch.setattr(gw, "foreign", REAL_GW_FOREIGN)
+    """개발용(editable) ji-gw-ai 가 있으면 설치를 건너뛰고 doctor 는 실패가 아닌 안내로 보인다."""
+    calls, state = _gw_share(isolated, monkeypatch)
+    tools = isolated / "uvtools"
+    (tools / "ji-gw-ai").mkdir(parents=True)
+    (tools / "ji-gw-ai" / "uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "ji-gw-ai", editable = "/Users/x/dev/ji-gw-ai" }]\n'
+        'entrypoints = [{ name = "gw", install-path = "/Users/x/.local/bin/gw", from = "ji-gw-ai" }]\n', encoding="utf-8")
+    base_run = gw._run
+    monkeypatch.setattr(gw, "_run", lambda args, timeout=60: (True, str(tools)) if args[1:] == ["tool", "dir"]
+                        else base_run(args, timeout))
+    res = gw.setup(print)
+    assert res["status"] == "foreign" and "editable" in res["paths"][0]
+    assert not any(a[1:3] == ["tool", "install"] for a in calls)
+    c = doctor.check_gw()[0]
+    assert c.status == "skip" and "개발용 gw" in c.message
+    assert not cli._setup_problems({"gw": res})
+
+
+def test_gw_own_wheel_install_is_not_foreign(isolated, monkeypatch):
+    monkeypatch.setattr(gw, "foreign", REAL_GW_FOREIGN)
+    calls, state = _gw_share(isolated, monkeypatch)
+    tools = isolated / "uvtools"
+    (tools / "ji-gw-ai").mkdir(parents=True)
+    whl = paths.data_dir() / "gw" / "ji_gw_ai-2026.10.27.1-py3-none-any.whl"
+    (tools / "ji-gw-ai" / "uv-receipt.toml").write_text(
+        f'[tool]\nrequirements = [{{ name = "ji-gw-ai", path = {json.dumps(str(whl))} }}]\n'
+        'entrypoints = [{ name = "gw", install-path = "x", from = "ji-gw-ai" }]\n', encoding="utf-8")
+    base_run = gw._run
+    monkeypatch.setattr(gw, "_run", lambda args, timeout=60: (True, str(tools)) if args[1:] == ["tool", "dir"]
+                        else base_run(args, timeout))
+    assert gw.foreign() == []
+    assert gw.setup(print)["status"] == "installed"
+    # 예전 프로그램 폴더(jaix_home/gw)에서 깐 receipt 도 jaix 것(migrate_data 가 wheel 만 옮김)
+    old = paths.jaix_home() / "gw" / whl.name
+    (tools / "ji-gw-ai" / "uv-receipt.toml").write_text(
+        f'[tool]\nrequirements = [{{ name = "ji-gw-ai", path = {json.dumps(str(old))} }}]\n'
+        'entrypoints = [{ name = "gw", install-path = "x", from = "ji-gw-ai" }]\n', encoding="utf-8")
+    assert gw.foreign() == []
+
+
+def test_gw_other_on_path_is_foreign(isolated, monkeypatch):
+    monkeypatch.setattr(gw, "foreign", REAL_GW_FOREIGN)
+    _gw_share(isolated, monkeypatch)
+    other = isolated / "elsewhere" / "gw"
+    monkeypatch.setattr(paths, "which", lambda name: str(other) if name == "gw" else None)
+    assert gw.foreign() == [f"PATH의 {other}"]
+    assert gw.setup(print)["status"] == "foreign"
+
+
+def test_doctor_path_tool_version(isolated, monkeypatch, the_lock):
+    monkeypatch.setattr(doctor, "PATH_TOOLS", {"hwp-agent": "hwp-agent"})
+    monkeypatch.setattr(paths, "which", lambda name: "/opt/hwp-agent" if name == "hwp-agent" else None)
+    want = next(p.version for p in the_lock.plugins if p.name == "hwp-agent")
+    for out, status, word in ((f"hwp-agent {want}\n", "ok", "같음"), ("hwp-agent 0.0.0+dev\n", "warn", "개발판"),
+                              ("hwp-agent 2026.9.1.1\n", "warn", "2026.9.1.1")):
+        monkeypatch.setattr(proc, "run", lambda exe, args, timeout=600, out=out: (0, out))
+        [c] = doctor.check_path_tools(the_lock)
+        assert c.status == status and word in c.message
+    monkeypatch.setattr(paths, "which", lambda name: None)
+    assert doctor.check_path_tools(the_lock) == []
+
+
+def _plugin_dir(root, mcp=(), skills=()):
+    root.mkdir(parents=True, exist_ok=True)
+    if mcp:
+        (root / ".mcp.json").write_text(json.dumps({"mcpServers": {n: {"command": "uvx"} for n in mcp}}), encoding="utf-8")
+    for s in skills:
+        (root / "skills" / s).mkdir(parents=True, exist_ok=True)
+        (root / "skills" / s / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+    return root
+
+
+def test_doctor_reports_overlaps_without_removing(isolated, monkeypatch, the_lock):
+    cdir = paths.claude_dir()
+    mine = _plugin_dir(isolated / "c-cache" / "jaix" / "hwp-agent", mcp=["hwp-agent"], skills=["hwp-agent"])
+    other = _plugin_dir(isolated / "c-cache" / "z0nam" / "hwp-agent", mcp=["hwp-agent"], skills=["hwp-agent"])
+    (cdir / "plugins").mkdir(parents=True)
+    (cdir / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {
+        "hwp-agent@jaix": [{"scope": "user", "installPath": str(mine)}],
+        "hwp-agent@hwp-agent": [{"scope": "user", "installPath": str(other)}],
+        "slack@claude-plugins-official": [{"scope": "user", "installPath": str(isolated / "none")}]}}), encoding="utf-8")
+    (cdir / "settings.json").write_text(json.dumps({"enabledPlugins": {
+        "hwp-agent@jaix": True, "hwp-agent@hwp-agent": True, "slack@claude-plugins-official": True}}), encoding="utf-8")
+    dev = _plugin_dir(isolated / "dev" / "hwp-agent", skills=[])
+    (dev / "SKILL.md").write_text("---\nname: hwp-agent\n---\n", encoding="utf-8")
+    (cdir / "skills").mkdir()
+    try:
+        (cdir / "skills" / "hwp-agent").symlink_to(dev, target_is_directory=True)
+        linked = True
+    except OSError:  # Windows 표준 사용자는 심링크를 못 만든다 → 폴더 그대로
+        dev.rename(cdir / "skills" / "hwp-agent")
+        linked = False
+    (cdir / ".claude.json").write_text(json.dumps({"mcpServers": {"hwp_agent": {}, "dayone": {}}}), encoding="utf-8")
+    # Codex: jaix가 쓴 hwp-agent MCP 는 겹침이 아니고, 사용자가 따로 넣은 korea_rio 는 겹침
+    xdir = paths.codex_home()
+    _plugin_dir(xdir / "plugins" / "cache" / "jaix" / "korea-rio-mcp" / "local", mcp=["korea-rio"])
+    _plugin_dir(xdir / "plugins" / "cache" / "jaix" / "hwp-agent" / "local", mcp=["hwp-agent"])
+    xdir.mkdir(exist_ok=True)
+    (xdir / "config.toml").write_text('[plugins."korea-rio-mcp@jaix"]\nenabled = true\n[plugins."hwp-agent@jaix"]\n'
+                                      'enabled = true\n[mcp_servers.korea_rio]\ncommand = "uv"\n'
+                                      '[mcp_servers.hwp-agent]\ncommand = "uvx"\n'
+                                      '[mcp_servers.korea-rio]\ncommand = "uvx"\n', encoding="utf-8")
+    paths.data_dir().mkdir(parents=True, exist_ok=True)
+    (paths.data_dir() / "codex-mcp.json").write_text(json.dumps({"hwp-agent": {}}), encoding="utf-8")
+    before = sorted(str(p) for p in isolated.rglob("*"))
+    checks = {c.area: c for c in doctor.check_overlaps(the_lock)}
+    c = checks["Claude 중복 hwp-agent"]
+    assert c.status == "warn" and "토큰이 두 배" in c.message
+    assert "hwp-agent@hwp-agent" in c.message and ("skills/hwp-agent →" if linked else "skills/hwp-agent") in c.message.replace("\\", "/")
+    assert "'hwp_agent'" in c.message and "dayone" not in c.message and "slack" not in c.message
+    x = checks["Codex 중복 korea-rio-mcp"]
+    assert "korea_rio" in x.message
+    assert "'korea-rio'" not in x.message  # 플러그인 서버와 같은 이름 = Codex가 플러그인 쪽을 건너뜀(덮어쓰기)
+    assert "Codex 중복 hwp-agent" not in checks
+    assert sorted(str(p) for p in isolated.rglob("*")) == before  # 아무것도 지우거나 쓰지 않는다
+
+
+def test_doctor_load_warns_over_budget(isolated, monkeypatch):
+    monkeypatch.setattr(overlap, "claude_load", lambda: (2, 10))
+    monkeypatch.setattr(overlap, "codex_load", lambda: (12, 40))
+    c, x = doctor.check_load()
+    assert c.status == "ok" and "MCP 서버 2개" in c.message
+    assert x.status == "warn" and "사용량 한도" in x.message
+    monkeypatch.setattr(overlap, "codex_load", lambda: (0, 0))
+    assert len(doctor.check_load()) == 1
+
+
+def test_overlap_name_normalization():
+    assert overlap.norm("korea_rio") == overlap.norm("korea-rio-mcp") == "korea-rio"
+    assert overlap.norm("HWP_Agent") == "hwp-agent"
