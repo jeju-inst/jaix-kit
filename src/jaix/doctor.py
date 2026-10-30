@@ -63,7 +63,8 @@ def check_mail_python(lock):
         return [Check("fail", area, "uv 없음 — mail 스크립트를 띄울 수 없음", FIX_SETUP if IS_WIN else "brew install uv")]
     found = uvpython.find(MAIL_PYTHON)
     if not found:
-        return [Check("fail", area, f"uv 관리 Python {MAIL_PYTHON} 없음 — mail 스크립트가 돌지 않음",
+        # 맥·리눅스는 uv run --python 이 처음 실행 때 받아도 되므로 주의로만(check_uv_python 과 같은 기준)
+        return [Check("fail" if IS_WIN else "warn", area, f"uv 관리 Python {MAIL_PYTHON} 없음 — mail 스크립트가 돌지 않음",
                       "jaix setup (다시 실행)" if IS_WIN else f"uv python install {MAIL_PYTHON}")]
     return [Check("ok", area, f"uv 관리 Python {MAIL_PYTHON} ({found})")]
 
@@ -335,12 +336,14 @@ def check_codex(lock):
     fix_taken = "단독 설치본의 MCP 등록을 끈 뒤 jaix update 로 되돌리기"
     for n, cmd in taken.items():
         out.append(Check("fail", "Codex MCP", f"다른 설치본({cmd})이 {n} MCP 항목을 차지함", fix_taken))
-    # jaix update 가 한 번 돈 뒤에는 그 항목을 사용자 것으로 보고 손을 뗀다(owned 에서 빠짐) → 주의로 계속 알린다
+    # jaix update 가 한 번 돈 뒤에는 그 항목을 사용자 것으로 보고 손을 뗀다(owned 에서 빠짐) → jaix가 썼던 항목만
+    # 주의로 계속 알린다. 처음부터 사용자가 정의한 항목(released 에 없음)은 예전처럼 조용히 둔다
+    released = codex.released_mcp()
     for n, spec in want.items():
         cur = codex._current(n)
-        if n not in owned and n not in taken and cur and _exe_stem(cur["command"]) != _exe_stem(spec["command"]):
-            out.append(Check("warn", "Codex MCP", f"다른 설치본·사용자 정의({cur['command']})가 {n} MCP 항목을 씀 "
-                                                  "— jaix 플러그인의 서버가 아님", fix_taken))
+        if n in released and n not in taken and cur and _exe_stem(cur["command"]) != _exe_stem(spec["command"]):
+            out.append(Check("warn", "Codex MCP", f"jaix가 쓴 {n} MCP 항목을 다른 실행파일({cur['command']})이 바꿔 씀",
+                             f"단독 설치본이면 {fix_taken} · 직접 바꾼 것이면 무시해도 됨"))
     rest = [n for n in stale if n not in taken]
     if rest:
         out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(rest)}",

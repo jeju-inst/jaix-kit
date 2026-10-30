@@ -189,6 +189,18 @@ def _mcp_record():
     return paths.data_dir() / "codex-mcp.json"
 
 
+def _released_record():
+    return paths.data_dir() / "codex-mcp-released.json"
+
+
+def released_mcp():
+    """jaix가 썼다가, 그 뒤 바뀌어 있어 손을 뗀 항목 이름(doctor 가 '다른 설치본' 주의를 낼 대상)."""
+    try:
+        return set(json.loads(_released_record().read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return set()
+
+
 def owned_mcp():
     try:
         return json.loads(_mcp_record().read_text(encoding="utf-8"))
@@ -212,7 +224,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
     cli = cli or find_cli()
     if not cli:
         return False
-    want, owned = mcp_servers(lock), owned_mcp()
+    want, owned, released = mcp_servers(lock), owned_mcp(), released_mcp()
     ok = True
     for name, spec in want.items():
         cur = _current(name)
@@ -225,6 +237,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
         if cur is not None and cur != owned[name]:  # jaix가 쓴 뒤 사용자가 고침 → 그 뒤로는 사용자 것
             log(f"    MCP {name}: jaix가 쓴 뒤 바뀌어 있어 그대로 둠(이제 사용자 정의로 봄)")
             owned.pop(name)
+            released.add(name)
             continue
         if dry_run:
             log(f"    MCP {name}: 절대경로로 쓸 예정")
@@ -233,6 +246,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
                 *spec["args"]]
         if _run(cli, args, log):
             owned[name] = spec
+            released.discard(name)
             log(f"    MCP {name}: 플러그인 위치의 절대경로로 씀")
         else:
             ok = False
@@ -246,6 +260,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
     if not dry_run:
         _mcp_record().parent.mkdir(parents=True, exist_ok=True)
         _mcp_record().write_text(json.dumps(owned, ensure_ascii=False, indent=2), encoding="utf-8")
+        _released_record().write_text(json.dumps(sorted(released & set(want)), ensure_ascii=False), encoding="utf-8")
     return ok
 
 

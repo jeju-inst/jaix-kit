@@ -1395,8 +1395,11 @@ def test_doctor_mail_python(the_lock, monkeypatch):
     lk = _with_mail(the_lock)
     monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found("/x/uv", "0.9"))
     monkeypatch.setattr(uvpython, "find", lambda v, uv=None: None)
+    monkeypatch.setattr(doctor, "IS_WIN", True)
     [c] = doctor.check_mail_python(lk)
     assert c.status == "fail" and "3.12" in c.message
+    monkeypatch.setattr(doctor, "IS_WIN", False)
+    assert doctor.check_mail_python(lk)[0].status == "warn"   # 맥·리눅스는 uv 가 처음 실행 때 받음
     monkeypatch.setattr(uvpython, "find", lambda v, uv=None: "/py/3.12/python")
     assert doctor.check_mail_python(lk)[0].status == "ok"
 
@@ -1416,7 +1419,19 @@ def test_doctor_codex_mcp_taken_by_standalone_installer(isolated, monkeypatch, t
     assert "0 tools" not in mcp[0].message and "단독 설치본의 MCP 등록을 끈 뒤" in mcp[0].fix
     codex.write_mcp(the_lock, print, cli="codex")          # update 가 돌면 손을 떼지만
     mcp = [c for c in doctor.check_codex(the_lock) if c.area == "Codex MCP"]
-    assert [c.status for c in mcp] == ["warn"] and "다른 설치본" in mcp[0].message   # 계속 알린다
+    assert [c.status for c in mcp] == ["warn"] and "hwp-agent.exe" in mcp[0].message   # 계속 알린다
+    assert "무시해도 됨" in mcp[0].fix
+
+
+def test_doctor_codex_mcp_user_definition_from_start_stays_quiet(isolated, monkeypatch, the_lock):
+    """처음부터 사용자가 정의한 항목(jaix가 쓴 적 없음)은 예전처럼 경고하지 않는다."""
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    monkeypatch.setattr(codex, "find_cli", lambda: "codex")
+    monkeypatch.setattr(codex, "marketplace_configured", lambda: True)
+    cfg = home / "config.toml"
+    cfg.write_text(cfg.read_text(encoding="utf-8") + '\n[mcp_servers."hwp-agent"]\ncommand = "python"\n', encoding="utf-8")
+    codex.write_mcp(the_lock, print, cli="codex")
+    assert [c.status for c in doctor.check_codex(the_lock) if c.area == "Codex MCP"] == ["ok"]
 
 
 def test_doctor_codex_mcp_missing_has_no_unmeasured_claim(isolated, monkeypatch, the_lock):
