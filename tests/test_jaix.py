@@ -1126,3 +1126,45 @@ def test_doctor_load_warns_over_budget(isolated, monkeypatch):
 def test_overlap_name_normalization():
     assert overlap.norm("korea_rio") == overlap.norm("korea-rio-mcp") == "korea-rio"
     assert overlap.norm("HWP_Agent") == "hwp-agent"
+
+
+def _codex_installed(isolated, the_lock, heads):
+    """Codex에 잠금 플러그인이 모두 켜진 상태. heads: {이름: 사본 .git HEAD 내용(없으면 .git 없음)}."""
+    home = paths.codex_home()
+    body = "[marketplaces.jaix]\nsource = \"x\"\n"
+    for p in the_lock.plugins:
+        root = home / "plugins" / "cache" / "jaix" / p.name / "local"
+        root.mkdir(parents=True)
+        if p.name in heads:
+            (root / ".git").mkdir()
+            (root / ".git" / "HEAD").write_text(heads[p.name] + "\n", encoding="utf-8")
+        body += f'[plugins."{p.id}"]\nenabled = true\n'
+    (home / "config.toml").write_text(body, encoding="utf-8")
+    paths.data_dir().mkdir(parents=True, exist_ok=True)
+    (paths.data_dir() / "codex-installed.json").write_text(  # 처음 설치 때의 옛 커밋(#48)
+        json.dumps({p.id: "0" * 40 for p in the_lock.plugins}), encoding="utf-8")
+
+
+def test_codex_setup_aligns_stale_record_when_copy_is_current(isolated, monkeypatch, the_lock):
+    """#48: 덮어 설치(setup) 뒤 사본은 최신인데 기록이 옛 커밋이라 doctor 가 '옛 버전' 실패를 냈다."""
+    first, *rest = the_lock.plugins
+    _codex_installed(isolated, the_lock, {p.name: p.sha for p in rest})  # first 는 .git 없음(git-subdir 사본)
+    git = paths.codex_home() / "plugins" / "cache" / "jaix" / rest[0].name / "local" / ".git"
+    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")  # 브랜치 HEAD + packed-refs 꼴도
+    (git / "packed-refs").write_text(f"# pack-refs\n{rest[0].sha} refs/heads/main\n", encoding="utf-8")
+    monkeypatch.setattr(codex, "find_cli", lambda: "codex")
+    monkeypatch.setattr(codex, "write_mcp", lambda lock, log, cli=None, dry_run=False: True)
+    added = []
+    monkeypatch.setattr(codex, "_run", lambda cli, args, log: added.append(args) or True)
+    snap = paths.codex_home() / ".tmp" / "marketplaces" / "jaix" / ".claude-plugin"
+    snap.mkdir(parents=True)
+    snap.joinpath("marketplace.json").write_text(json.dumps(the_lock.data), encoding="utf-8")
+    bad = [c for c in doctor.check_codex(the_lock) if c.status == "fail"]
+    assert [c.area for c in bad] == [f"Codex {first.name}"]  # 사본으로 확인되는 것은 기록이 낡아도 통과
+    res = codex.setup(the_lock, print)  # update=False(setup)
+    assert res["failed"] == []
+    assert [a for a in added if a[:2] == ["plugin", "add"]] == [["plugin", "add", first.id]]  # 실물 모르는 것만 다시 깜
+    rec = codex.recorded()
+    assert all(lock.same_commit(rec[p.id], p.sha) for p in the_lock.plugins)
+    assert not [c for c in doctor.check_codex(the_lock) if c.status == "fail"]
+
