@@ -111,8 +111,12 @@ def check_rhwp(lock):
 def check_hancom_consent():
     """한컴 PC에서만 한 줄. 답이 없으면 첫 변환이 보이지 않는 동의 창에서 멈춘다(약 2분 뒤 rhwp 근사 렌더)."""
     path = hancom.option_info()
-    if not hancom.applies() or path is None:
+    if not hancom.present() or path is None:
         return []
+    if not hancom.applies():
+        ver = hancom.installed_version() or "버전 미상"
+        return [Check("skip", hancom.AREA, f"한컴 {ver} — 미리 답하기는 확인된 2022({hancom.VERSION})만 "
+                                          "(첫 변환이 멈추면 한글을 한 번 열어 답하세요)")]
     if not path.exists():
         return [Check("warn", hancom.AREA, "답 없음 — 첫 변환이 보이지 않는 동의 창에서 멈출 수 있음", "jaix setup")]
     got = hancom.answers(path)

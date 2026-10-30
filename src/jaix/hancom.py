@@ -17,6 +17,8 @@ from jaix import runtimes
 from jaix.paths import IS_WIN
 
 AREA = "한컴 첫 실행 동의 창"
+#: 실측한 한컴오피스 2022 의 옵션 폴더(=COM 서버 경로의 HOffice120). 다른 버전은 키·창이 같은지 확인 전이라 건너뛴다
+VERSION = "120"
 KEYS = ("EnableUsabilityLog", "EnableUsabilityLogSending")
 MINIMAL = "\r\n".join([
     '<?xml version="1.0" encoding="utf-8"?>',
@@ -33,11 +35,46 @@ MINIMAL = "\r\n".join([
 
 def option_info():
     appdata = os.environ.get("APPDATA")
-    return Path(appdata) / "Hnc" / "User" / "Common" / "120" / "optionInfo.xml" if appdata else None
+    return Path(appdata) / "Hnc" / "User" / "Common" / VERSION / "optionInfo.xml" if appdata else None
+
+
+def installed_version():
+    """hwp2pdf 가 띄우는 COM 서버(HWPFrame.HwpObject)의 실행 파일 경로에서 HOfficeNNN 을 읽는다.
+    예: C:\\Program Files (x86)\\Hnc\\Office 2022\\HOffice120\\bin\\hwp.exe → "120" (namun-ji 실측). 모르면 None."""
+    if not IS_WIN:
+        return None
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"HWPFrame.HwpObject\CLSID") as k:
+            clsid = winreg.QueryValue(k, None)
+    except OSError:
+        return None
+    for root in (r"CLSID", r"WOW6432Node\CLSID"):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{root}\{clsid}\LocalServer32") as k:
+                server = winreg.QueryValue(k, None)
+        except OSError:
+            continue
+        ver = version_from_server(server)
+        if ver:
+            return ver
+    return None
+
+
+def version_from_server(server):
+    m = re.search(r"\\HOffice(\d+)\\", server, re.I)
+    return m.group(1) if m else None
+
+
+def present():
+    """한컴오피스가 깔린 Windows PC인가(HWPFrame.HwpObject 등록)."""
+    return IS_WIN and runtimes.hancom_installed()
 
 
 def applies():
-    return IS_WIN and runtimes.hancom_installed()
+    """미리 답할 PC인가 — 한컴 PC이고, 실측한 2022(120)일 때만."""
+    return present() and installed_version() == VERSION
 
 
 def answers(path):
@@ -65,15 +102,31 @@ def ensure(log, dry_run=False):
     if dry_run:
         log(f"  {AREA}: '동의 안 함' 기록 예정 ({path})")
         return True
-    tmp = path.with_name(path.name + ".tmp")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(MINIMAL.encode("utf-8-sig"))
-        os.replace(tmp, path)
+        created = _create_only(path, MINIMAL.encode("utf-8-sig"))
     except OSError as e:
         log(f"  {AREA}: 기록 실패 — {e} (첫 변환 때 한글 창에 답해야 할 수 있음)")
         return False
-    finally:
-        tmp.unlink(missing_ok=True)
+    if not created:
+        log(f"  {AREA}: 방금 한글이 설정을 만듦 — 그대로 둠 ({path})")
+        return True
     log(f"  {AREA}: '동의 안 함'으로 미리 기록 ({path})")
     return True
+
+
+def _create_only(path, data):
+    """path 가 없을 때만 data 로 만든다. 그사이 한글이 만든 파일은 덮어쓰지 않는다(False).
+
+    임시 파일에 다 쓴 뒤 하드 링크로 붙인다 — 링크는 대상이 있으면 실패하고, 반쪽 파일도 남기지 않는다.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(data)
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)

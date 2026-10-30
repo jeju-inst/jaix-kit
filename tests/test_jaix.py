@@ -1469,12 +1469,37 @@ def test_hancom_consent_written_only_when_missing(monkeypatch):
 
 
 def test_hancom_consent_skipped_without_hancom(monkeypatch):
-    monkeypatch.setattr(hancom, "applies", lambda: False)
+    monkeypatch.setattr(hancom, "present", lambda: False)
     assert hancom.ensure(print) and not hancom.option_info().exists()
     assert doctor.check_hancom_consent() == []
 
 
+def test_hancom_consent_only_for_measured_2022(monkeypatch):
+    # 다른 버전(예: 2024=HOffice130)은 키·창이 같은지 모른다 — 120 폴더에 효과 없는 파일을 쓰지 않는다
+    monkeypatch.setattr(hancom, "present", lambda: True)
+    monkeypatch.setattr(hancom, "installed_version", lambda: "130")
+    assert hancom.ensure(print) and not hancom.option_info().exists()
+    [c] = doctor.check_hancom_consent()
+    assert c.status == "skip" and "한컴 130" in c.message
+
+
+def test_hancom_consent_never_replaces_a_file_made_meanwhile(monkeypatch):
+    # 존재 확인 뒤에 한글이 파일을 만들었으면(경합) 그 파일을 그대로 둔다
+    monkeypatch.setattr(hancom, "applies", lambda: True)
+    path = hancom.option_info()
+    real_link = hancom.os.link
+
+    def link_after_hangul(src, dst):
+        Path(dst).write_bytes(b"hangul wrote this")
+        return real_link(src, dst)
+
+    monkeypatch.setattr(hancom.os, "link", link_after_hangul)
+    assert hancom.ensure(print) and path.read_bytes() == b"hangul wrote this"
+    assert not path.with_name("optionInfo.xml.tmp").exists()
+
+
 def test_doctor_hancom_consent_line(monkeypatch):
+    monkeypatch.setattr(hancom, "present", lambda: True)
     monkeypatch.setattr(hancom, "applies", lambda: True)
     path = hancom.option_info()
     [c] = doctor.check_hancom_consent()
@@ -1490,3 +1515,10 @@ def test_doctor_hancom_consent_line(monkeypatch):
                     encoding="utf-8-sig")
     [c] = doctor.check_hancom_consent()
     assert c.status == "warn" and "한글을 한 번 직접 열어" in c.fix
+
+
+def test_hancom_version_from_com_server_path():
+    # namun-ji 실측(HKCR\\WOW6432Node\\CLSID\\{2291CF00-…}\\LocalServer32)
+    assert hancom.version_from_server(r"C:\Program Files (x86)\Hnc\Office 2022\HOffice120\bin\hwp.exe -Automation") == "120"
+    assert hancom.version_from_server(r"C:\Program Files (x86)\Hnc\Office 2024\HOffice130\Bin\Hwp.exe") == "130"
+    assert hancom.version_from_server(r"C:\Hwp\hwp.exe") is None
