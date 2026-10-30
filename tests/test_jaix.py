@@ -1399,3 +1399,29 @@ def test_doctor_mail_python(the_lock, monkeypatch):
     assert c.status == "fail" and "3.12" in c.message
     monkeypatch.setattr(uvpython, "find", lambda v, uv=None: "/py/3.12/python")
     assert doctor.check_mail_python(lk)[0].status == "ok"
+
+
+def test_doctor_codex_mcp_taken_by_standalone_installer(isolated, monkeypatch, the_lock):
+    """hwp-agent 단독 설치본(Inno)이 jaix가 쓴 [mcp_servers.hwp-agent] 를 자기 exe 로 덮어쓴 경우(jaix-win v30.2 3-(a))."""
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    codex.write_mcp(the_lock, print, cli="codex")
+    monkeypatch.setattr(codex, "find_cli", lambda: "codex")
+    monkeypatch.setattr(codex, "marketplace_configured", lambda: True)
+    cfg = home / "config.toml"
+    exe = r"C:\\Users\\u\\AppData\\Local\\Programs\\hwp-agent\\hwp-agent.exe"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace('command = "uvx"', f'command = {json.dumps(exe)}'),
+                   encoding="utf-8")
+    mcp = [c for c in doctor.check_codex(the_lock) if c.area == "Codex MCP"]
+    assert len(mcp) == 1 and mcp[0].status == "fail" and "다른 설치본" in mcp[0].message and "hwp-agent.exe" in mcp[0].message
+    assert "0 tools" not in mcp[0].message and "단독 설치본의 MCP 등록을 끈 뒤" in mcp[0].fix
+    codex.write_mcp(the_lock, print, cli="codex")          # update 가 돌면 손을 떼지만
+    mcp = [c for c in doctor.check_codex(the_lock) if c.area == "Codex MCP"]
+    assert [c.status for c in mcp] == ["warn"] and "다른 설치본" in mcp[0].message   # 계속 알린다
+
+
+def test_doctor_codex_mcp_missing_has_no_unmeasured_claim(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    monkeypatch.setattr(codex, "find_cli", lambda: "codex")
+    monkeypatch.setattr(codex, "marketplace_configured", lambda: True)
+    [c] = [c for c in doctor.check_codex(the_lock) if c.area == "Codex MCP"]
+    assert c.status == "fail" and "없음/옛것" in c.message and "0 tools" not in c.message

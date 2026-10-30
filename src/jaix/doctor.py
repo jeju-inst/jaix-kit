@@ -6,7 +6,7 @@ import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from jaix import claude, codex, gw, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
@@ -301,6 +301,10 @@ def check_claude(lock):
     return out
 
 
+def _exe_stem(command):
+    return PureWindowsPath(str(command)).stem.lower()
+
+
 def check_codex(lock):
     if not codex.find_cli():
         return [Check("skip", "Codex", "설치 안 됨")]
@@ -325,10 +329,23 @@ def check_codex(lock):
     # 사용자가 같은 이름을 직접 정의한 것(jaix가 맡지 않은 것)은 그대로 둔다
     stale = [n for n, spec in want.items()
              if codex._current(n) != spec and (codex._current(n) is None or n in owned)]
-    if stale:
-        out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(stale)} (0 tools로 실패함)",
+    # jaix가 쓴 항목을 다른 실행파일(예: hwp-agent 단독 설치본 exe)이 덮어쓴 것과, 항목이 없거나 옛 경로인 것을 가른다
+    taken = {n: codex._current(n)["command"] for n in stale
+             if codex._current(n) and _exe_stem(codex._current(n)["command"]) != _exe_stem(want[n]["command"])}
+    fix_taken = "단독 설치본의 MCP 등록을 끈 뒤 jaix update 로 되돌리기"
+    for n, cmd in taken.items():
+        out.append(Check("fail", "Codex MCP", f"다른 설치본({cmd})이 {n} MCP 항목을 차지함", fix_taken))
+    # jaix update 가 한 번 돈 뒤에는 그 항목을 사용자 것으로 보고 손을 뗀다(owned 에서 빠짐) → 주의로 계속 알린다
+    for n, spec in want.items():
+        cur = codex._current(n)
+        if n not in owned and n not in taken and cur and _exe_stem(cur["command"]) != _exe_stem(spec["command"]):
+            out.append(Check("warn", "Codex MCP", f"다른 설치본·사용자 정의({cur['command']})가 {n} MCP 항목을 씀 "
+                                                  "— jaix 플러그인의 서버가 아님", fix_taken))
+    rest = [n for n in stale if n not in taken]
+    if rest:
+        out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(rest)}",
                          "jaix update"))
-    elif want:
+    elif want and not taken and not any(c.status == "warn" and c.area == "Codex MCP" for c in out):
         out.append(Check("ok", "Codex MCP", ", ".join(want)))
     return out
 
