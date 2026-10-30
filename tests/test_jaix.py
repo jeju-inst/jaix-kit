@@ -1591,3 +1591,33 @@ def test_ask_secret_retries_and_shows_only_length():
 def test_masked_input_falls_back_to_getpass_without_tty(monkeypatch):
     monkeypatch.setattr(secret.getpass, "getpass", lambda prompt: "from-getpass")
     assert secret.masked_input("x: ") == "from-getpass"   # pytest 의 stdin 은 터미널이 아니다
+
+
+def _connected_before(isolated, monkeypatch):
+    _fake_windows(monkeypatch, isolated, [])
+    hermesbot._save_record({"status": "connected", "slack": {"id": "jitest", "connected": "t0"}})
+    hermes_home = hermesbot.paths.hermes_home()
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    (hermes_home / ".env").write_text("SLACK_BOT_TOKEN=x\nSLACK_APP_TOKEN=y\n", encoding="utf-8")
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
+
+
+def test_hermes_rerun_without_code_keeps_connection(isolated, monkeypatch, the_lock):
+    """jaix-win 2차: 연결된 PC 에서 새 판을 덮어 설치(코드 칸 비움)해도 '연결 안 됨'으로 바뀌지 않는다."""
+    _connected_before(isolated, monkeypatch)
+    res = REAL_HERMES_SETUP(the_lock, print)
+    assert res["status"] == "connected" and res["id"] == "jitest"
+    assert [c.status for c in doctor.check_hermes_bot()] == ["ok"]
+
+
+def test_hermes_rerun_with_used_code_fails_but_keeps_connection(isolated, monkeypatch, the_lock, handoff_server):
+    _connected_before(isolated, monkeypatch)
+    handoff_server["used"] = True
+    code_file = isolated / "code"
+    code_file.write_text(handoff_server["code"], encoding="utf-8")
+    res = REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file))
+    assert res["status"] == "failed" and "이미 사용" in res["error"]          # 이번 실행은 실패(종료 코드 10)
+    assert "그대로 동작" in "\n".join(cli._hermes_guide(res))
+    rec = hermesbot.recorded()
+    assert rec["status"] == "connected" and rec["slack"]["id"] == "jitest" and "이미 사용" in rec["last_error"]
+    assert [c.status for c in doctor.check_hermes_bot()] == ["ok", "warn"]   # 봇은 그대로, 주의만

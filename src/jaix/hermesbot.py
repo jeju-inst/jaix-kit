@@ -353,6 +353,8 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
         log("    Hermes 무인 설치는 Windows 만 합니다(맥은 hermes-slackbot 안내대로)")
         return {"status": "unsupported"}
     rec = recorded()
+    # 이미 연결된 PC 에서 다시 설치(새 판 덮어 설치·같은 코드 재입력)해도 연결 기록을 잃지 않게 기억해 둔다(jaix-win 2차 12)
+    linked = (rec.get("slack") or {}).get("id") if rec.get("status") == "connected" else None
     rec.update({"model": model, "status": "installing"})
     if not dry_run:
         _save_record(rec)
@@ -373,8 +375,11 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
     skills.install(lock, log, dry_run)
     if code_error:
         log(f"    {code_error}")
-        return _done({"status": "failed", "error": code_error}, dry_run)
+        return _done({"status": "failed", "error": code_error}, dry_run, linked, log)
     if not code:
+        if linked:
+            log(f"    슬랙: 이미 Hermes-{linked} 로 연결돼 있어 그대로 둠")
+            return _done({"status": "connected", "id": linked, "login": PROVIDERS[model]["login"]}, dry_run)
         log("    슬랙 연결 코드가 없어 슬랙 연결은 건너뜀 — AI센터에서 코드를 받아 jaix-setup 을 다시 실행하세요")
         return _done({"status": "no-code", "login": PROVIDERS[model]["login"]}, dry_run)
     if dry_run:
@@ -383,17 +388,25 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
         bundle = claim(code)
     except HandoffError as e:
         log(f"    {e}")
-        return _done({"status": "failed", "error": str(e)}, dry_run)
+        return _done({"status": "failed", "error": str(e)}, dry_run, linked, log)
     if not connect_slack(bundle, log):
-        return _done({"status": "failed", "error": "슬랙 연결 실패(gateway)"}, dry_run)
+        return _done({"status": "failed", "error": "슬랙 연결 실패(gateway)"}, dry_run, linked, log)
     return _done({"status": "connected", "id": bundle["id"], "login": PROVIDERS[model]["login"]}, dry_run)
 
 
-def _done(result, dry_run):
+def _done(result, dry_run, linked=None, log=None):
+    """기록에 남긴다. 이미 연결돼 있던 PC 에서 이번 시도가 실패하면(코드 재사용·원외망 등) 이번 실행은 실패로
+    돌려주되(설치기 종료 코드 10), 기록은 connected 로 두고 last_error 만 남긴다 — 봇은 그대로 돌기 때문이다."""
     if not dry_run:
         rec = recorded()
-        rec["status"] = result["status"]
-        rec["error"] = result.get("error")
+        if linked and result["status"] == "failed":
+            rec["status"], rec["error"], rec["last_error"] = "connected", None, result.get("error")
+            result["kept"] = linked
+            if log:
+                log(f"    기존 연결 Hermes-{linked} 는 그대로 둡니다")
+        else:
+            rec["status"], rec["error"] = result["status"], result.get("error")
+            rec.pop("last_error", None)
         _save_record(rec)
     return result
 
