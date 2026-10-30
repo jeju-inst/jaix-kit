@@ -267,7 +267,9 @@ def check_codex(lock):
     for p in lock.plugins:
         if p.id not in enabled:
             out.append(Check("fail", f"Codex {p.name}", "설치 안 됨", "jaix setup --channels codex"))
-        elif same_commit(rec.get(p.id), p.sha) or (p.id not in rec and same_commit(snap_sha.get(p.name), p.sha)):
+        # 기록이 낡아도 깔린 사본이 잠금과 같으면 통과(#48: marketplace upgrade 가 사본만 새로 받는 일이 있다)
+        elif (same_commit(rec.get(p.id), p.sha) or same_commit(codex.cache_head(p.name), p.sha)
+              or (p.id not in rec and same_commit(snap_sha.get(p.name), p.sha))):
             out.append(Check("ok", f"Codex {p.name}", p.label))
         else:
             out.append(Check("fail", f"Codex {p.name}", f"잠금 {p.label}보다 옛 버전", "jaix update"))
