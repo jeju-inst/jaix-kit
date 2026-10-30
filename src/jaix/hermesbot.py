@@ -248,9 +248,11 @@ def backup_config():
 
 
 def _yaml_has_key(text, section, name):
-    """config.yaml 의 section 바로 아래(2칸 들여쓰기)에 name 이 있는지. YAML 파서 없이 jaix가 덮어쓸지만 가린다."""
-    m = re.search(rf"^{re.escape(section)}:\s*$(.*?)(?=^\S)", text + "\n_", re.M | re.S)
-    return bool(m and re.search(rf"^  {re.escape(name)}:", m.group(1), re.M))
+    """config.yaml 에 name 이라는 키가 있을 수 있는지. YAML 파서가 없으니 보수적으로 본다: section 이 있고
+    파일 어디든 name 이 (들여쓰기·따옴표와 상관없이) 키로 나오면 있다고 본다 — 사용자 항목을 덮어쓰지 않는 쪽으로 틀린다."""
+    if not re.search(rf"^\s*{re.escape(section)}\s*:", text, re.M):
+        return False
+    return bool(re.search(rf"""^\s*(?:-\s*)?["']?{re.escape(name)}["']?\s*:""", text, re.M))
 
 
 def configure(hermes, model, log, dry_run=False):

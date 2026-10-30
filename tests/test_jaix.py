@@ -1353,7 +1353,10 @@ def test_hermes_mcp_only_jaix_entries(isolated, monkeypatch):
     assert names == ["mcp_servers.hwp-agent"]           # 사용자 것(korea-rio)은 그대로
     assert json.loads(calls[0][4])["args"][:2] == ["--python", "3.12"]
     assert hermesbot._yaml_has_key(cfg.read_text(encoding="utf-8"), "mcp_servers", "korea-rio")
-    assert not hermesbot._yaml_has_key("mcp_servers:\n  a:\nother:\n  korea-rio: 1\n", "mcp_servers", "korea-rio")
+    assert not hermesbot._yaml_has_key("model:\n  korea-rio: 1\n", "mcp_servers", "korea-rio")
+    for text in ("mcp_servers: # custom\n  hwp-agent:\n", "mcp_servers:\n    hwp-agent:\n",
+                 "mcp_servers:\n  'hwp-agent':\n", "mcp_servers:\n  \"hwp-agent\": {}\n"):
+        assert hermesbot._yaml_has_key(text, "mcp_servers", "hwp-agent"), text
 
 
 def test_no_slack_secrets_in_repo():
