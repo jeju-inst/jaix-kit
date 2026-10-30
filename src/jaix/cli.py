@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hermes, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
+from jaix import __version__, claude, codex, doctor, gw, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -96,7 +96,7 @@ def guide(channels, result):
         else:
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
     if "hermes" in channels:
-        out += ["■ 슬랙으로도 쓰기 (Hermes)", f"  {hermes.NOT_YET}"]
+        out += ["■ 슬랙으로도 쓰기 (Hermes)", *_hermes_guide(result.get("hermes") or {})]
     if (result.get("gw") or {}).get("status") in ("installed", "current"):
         out += ["■ 그룹웨어 (gw)",
                 "  gw 를 처음 쓰기 전에 한 번 로그인하세요. 아이디·비밀번호는 이 PC에 안전하게 저장됩니다.",
@@ -105,6 +105,23 @@ def guide(channels, result):
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
             "문제가 있으면 새 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
     return "\n".join(out)
+
+
+def _hermes_guide(res):
+    status = res.get("status")
+    if status == "unsupported":
+        return ["  이 OS에서는 jaix가 Hermes를 깔지 않습니다. hermes-slackbot 안내대로 설치하세요."]
+    if status == "failed":
+        return [f"  설치하지 못했습니다: {res.get('error')}", "  새 명령창에서 `jaix doctor` 결과를 AI센터에 보내 주세요."]
+    login = " ".join(["hermes", *(res.get("login") or [])])
+    lines = []
+    if status == "connected":
+        lines.append(f"  슬랙 봇 Hermes-{res.get('id')} 가 연결됐습니다. 이 PC가 켜져 있어야 봇이 답합니다.")
+    elif status == "no-code":
+        lines.append("  Hermes는 깔았지만 슬랙 연결 코드가 없어 연결하지 않았습니다. AI센터에서 코드를 받아 다시 설치하세요.")
+    lines += ["  처음 한 번 AI 구독에 로그인하세요: 마지막 화면의 'AI 로그인 창 열기'를 켜 두거나,",
+              f"  새 명령창에서 `{login}` 을 실행합니다(브라우저에서 승인)."]
+    return lines
 
 
 def _channels(value):
@@ -195,7 +212,10 @@ def cmd_setup(args, log):
         if res is not None:
             result["codex"] = res
     if "hermes" in chosen:
-        log(f"  {hermes.NOT_YET}")
+        res = steps.run("Hermes", hermesbot.setup, lock, log, code_file=args.hermes_code_file, model=args.hermes_model,
+                        dry_run=args.dry_run)
+        if res is not None:
+            result["hermes"] = res
     if not args.no_autoupdate:
         result["autoupdate"] = steps.run("로그온 자동 갱신", schedule.register, log, dry_run=args.dry_run)
     elif not args.dry_run and schedule.unregister():  # 끄라고 했으니 예전에 등록한 것도 지운다
@@ -215,7 +235,8 @@ def cmd_setup(args, log):
 
 def _setup_problems(result):
     codex_res = result.get("codex") or {}
-    return bool(result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
+    return bool((result.get("hermes") or {}).get("status") == "failed"
+                or result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
                 or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed")
 
@@ -324,6 +345,9 @@ def build_parser():
                                        "update도 씀, none이면 끔). 원내망이 아니면 gw만 건너뜀")
     s.add_argument("--no-autoupdate", action="store_true", help="로그온 자동 갱신(jaix update --quiet)을 등록하지 않음")
     s.add_argument("--guide-out", help="마지막 안내문을 이 파일에 씀(설치 프로그램용)")
+    s.add_argument("--hermes-code-file", help="슬랙 연결 코드(JX-…)가 든 파일. 읽자마자 지움(코드는 명령줄에 싣지 않음)")
+    s.add_argument("--hermes-model", choices=sorted(hermesbot.PROVIDERS), default="chatgpt",
+                   help="Hermes가 쓸 AI 구독(기본 chatgpt)")
     s.add_argument("--via-task", action="store_true",
                    help=argparse.SUPPRESS)  # 설치본용: 작업 스케줄러로 돌려 설치본의 프로세스 정책을 물려받지 않음(#27)
     s.add_argument("--status-out", help=argparse.SUPPRESS)  # --via-task 가 기다리는 종료 코드 파일
@@ -338,6 +362,15 @@ def build_parser():
     u.add_argument("--quiet", action="store_true",
                    help="화면에 쓰지 않고 update.log·update-status.json에만 남김(로그온 자동 갱신용)")
     u.set_defaults(func=cmd_update)
+
+    h = sub.add_parser("hermes", help="Hermes 관리자 명령")
+    hsub = h.add_subparsers(dest="hermes_cmd", required=True)
+    ho = hsub.add_parser("handoff", help="관리자(studio): 사람별 슬랙 토큰을 1회용 연결 코드로 내보냄")
+    ho.add_argument("id", help="앱 Hermes-<아이디> 의 아이디")
+    ho.add_argument("--user", required=True, help="구성원 슬랙 멤버 ID(U…) — 봇이 답할 유일한 사람")
+    ho.add_argument("--ttl", type=float, default=hermesbot.TTL_HOURS, help="유효 시간(기본 72)")
+    ho.add_argument("--spool", help=f"묶음 폴더(기본 {hermesbot.HANDOFF_SPOOL}, ji-gw-ai 배포처와 같게)")
+    ho.set_defaults(func=hermesbot.cmd_handoff)
 
     c = sub.add_parser("cleanup", parents=[common], help=argparse.SUPPRESS)
     c.set_defaults(func=cmd_cleanup)
