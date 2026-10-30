@@ -121,6 +121,25 @@
         }
       },
       "version": "2026.10.28.1"
+    },
+    {
+      "name": "jaix-works",
+      "displayName": "웍스 (NAVER WORKS)",
+      "description": "본인 웍스 계정 권한으로 드라이브·캘린더·메일을 다룬다(nworks CLI, 기관 User OAuth 앱).",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jeju-inst/jaix-works.git",
+        "ref": "v2026.10.30.1",
+        "sha": "492280f47de436cf936892cfd0ff50080b1d22d4"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-works",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.10.30.1"
     }
   ]
 }
