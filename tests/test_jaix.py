@@ -1369,3 +1369,33 @@ def test_no_slack_secrets_in_repo():
             for m in pat.finditer(f.read_text(encoding="utf-8", errors="replace")):
                 hits.append(f"{f.relative_to(root)}: {m.group(0)[:12]}…")
     assert not hits, hits
+# --- mail 플러그인이 잠금에 들어가면: himalaya·age 필수, uv 관리 Python 3.12 점검 -----------------------
+def _with_mail(the_lock):
+    data = json.loads(json.dumps(the_lock.data))
+    data["plugins"].append({**data["plugins"][0], "name": "mail"})
+    return lock.Lock(data, the_lock.source)
+
+
+def test_mail_runtimes_required_only_when_mail_in_lock(the_lock):
+    keys = lambda lk: {rt.key for rt in runtimes.select([], lk)}
+    assert not {"himalaya", "age"} & keys(the_lock)
+    assert {"himalaya", "age"} <= keys(_with_mail(the_lock))
+    assert not runtimes.required(runtimes.BY_KEY["age"], None)
+
+
+def test_doctor_mail_runtime_missing_fails_only_with_mail(the_lock, monkeypatch):
+    monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found(None, None))
+    by = lambda lk: {c.area: c.status for c in doctor.check_runtimes(lk)}
+    assert by(the_lock)["himalaya"] == "skip"
+    assert by(_with_mail(the_lock))["himalaya"] == "fail"
+
+
+def test_doctor_mail_python(the_lock, monkeypatch):
+    assert doctor.check_mail_python(the_lock) == []
+    lk = _with_mail(the_lock)
+    monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found("/x/uv", "0.9"))
+    monkeypatch.setattr(uvpython, "find", lambda v, uv=None: None)
+    [c] = doctor.check_mail_python(lk)
+    assert c.status == "fail" and "3.12" in c.message
+    monkeypatch.setattr(uvpython, "find", lambda v, uv=None: "/py/3.12/python")
+    assert doctor.check_mail_python(lk)[0].status == "ok"

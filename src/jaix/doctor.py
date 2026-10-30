@@ -24,7 +24,7 @@ class Check:
     fix: str = ""
 
 
-def check_runtimes():
+def check_runtimes(lock=None):
     out = []
     for rt in runtimes.RUNTIMES:
         if not rt.applies:
@@ -37,7 +37,7 @@ def check_runtimes():
                              "jaix update (직접 설치했으면 새 설치기로)"))
         elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
-        elif not rt.required:
+        elif not runtimes.required(rt, lock):
             out.append(Check("skip", rt.label, f"없음 — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
         elif found.path:
             out.append(Check("fail", rt.label, f"{found.version} — {rt.min_major} 이상 필요 ({rt.purpose})",
@@ -48,6 +48,24 @@ def check_runtimes():
             out.append(Check("warn", "한컴오피스", "없음 → HWP 렌더는 rhwp 근사 렌더로 대체 (hwp2pdf는 설치돼 있음)",
                              "정확한 렌더가 필요하면 한컴오피스 설치"))
     return out
+
+
+MAIL_PLUGIN = "mail"
+MAIL_PYTHON = uvpython.DEFAULT  # mail 스크립트는 PATH 의 python3 대신 uv 관리 Python 3.12 로 돈다(mail-skill-dev 설계)
+
+
+def check_mail_python(lock):
+    """mail 플러그인이 잠금에 있으면 그 스크립트가 쓸 uv 관리 Python 이 있는지. PATH 의 python3 는 세지 않는다."""
+    if not any(p.name == MAIL_PLUGIN for p in lock.plugins):
+        return []
+    area = "mail Python"
+    if not runtimes.find(runtimes.BY_KEY["uv"]).path:
+        return [Check("fail", area, "uv 없음 — mail 스크립트를 띄울 수 없음", FIX_SETUP if IS_WIN else "brew install uv")]
+    found = uvpython.find(MAIL_PYTHON)
+    if not found:
+        return [Check("fail", area, f"uv 관리 Python {MAIL_PYTHON} 없음 — mail 스크립트가 돌지 않음",
+                      "jaix setup (다시 실행)" if IS_WIN else f"uv python install {MAIL_PYTHON}")]
+    return [Check("ok", area, f"uv 관리 Python {MAIL_PYTHON} ({found})")]
 
 
 def check_uv_python():
@@ -371,7 +389,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
