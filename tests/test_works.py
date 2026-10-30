@@ -18,6 +18,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setattr(works.winenv, "add_to_path", lambda dirs, dry_run=False: None)
     monkeypatch.setattr(works.winenv, "in_user_path", lambda p: True)
+    monkeypatch.setattr(works, "on_path", lambda: True)
     # Node 는 있는 것으로, 진짜로 깔지 않는다
     found = runtimes.Found("/usr/bin/node", "22.11.0", 22)
     monkeypatch.setattr(runtimes, "ensure", lambda rt, log, dry_run=False, upgrade=False: found)
@@ -118,3 +119,21 @@ def test_doctor_states(monkeypatch):
 def test_cli_works_login_parses():
     args = cli.build_parser().parse_args(["works", "login"])
     assert args.func is cli.cmd_works and args.works_cmd == "login"
+
+
+def test_npm_launch_failure_is_a_failed_status(monkeypatch):
+    def boom(cli, args, timeout=600):
+        raise works.subprocess.TimeoutExpired("npm", 900)
+    monkeypatch.setattr(works, "_npm", lambda: "/x/npm")
+    monkeypatch.setattr(works.proc, "run", boom)
+    monkeypatch.setattr(works, "fetch_client", lambda url, timeout=8: None)
+    assert works.ensure(_lock(), print, offline=True)["status"] == "failed"
+
+
+@pytest.mark.skipif(paths.IS_WIN, reason="맥·리눅스 바로가기")
+def test_expose_links_into_local_bin(monkeypatch):
+    _fake_npm(monkeypatch)
+    monkeypatch.setattr(works, "fetch_client", lambda url, timeout=8: None)
+    works.ensure(_lock(), print, offline=True)
+    link = works.link_dir() / "nworks"
+    assert link.is_symlink() and os.readlink(link) == str(works.bin_dir() / "nworks")

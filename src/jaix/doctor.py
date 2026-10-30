@@ -153,6 +153,9 @@ def check_works(lock):
     out = [Check("ok", area, f"{have} (잠금과 같음, {works.home()})")]
     if IS_WIN and not winenv.in_user_path(works.bin_dir()):
         out.append(Check("warn", area, "실행 폴더가 사용자 PATH에 없음", "jaix setup"))
+    elif not IS_WIN and not works.on_path():
+        out.append(Check("warn", area, "PATH에서 jaix 가 깐 nworks 가 안 보임 — 스킬이 부르지 못함",
+                         f"{works.link_dir()} 를 PATH에 추가하고 jaix setup"))
     if not works.saved_client():
         out.append(Check("warn", "웍스 기관 앱 정보", "없음 — 원내망에서 받아야 함", "원내망(사무실·VPN)에서 jaix setup"))
     elif not works.logged_in():

@@ -76,6 +76,37 @@ def exe():
     return shutil.which(PACKAGE, path=str(bin_dir())) if bin_dir().is_dir() else None
 
 
+def link_dir():
+    """맥·리눅스: nworks 바로가기를 두는 곳(흔히 PATH에 있는 ~/.local/bin). Windows는 실행 폴더를 PATH에 올린다."""
+    return Path.home() / ".local" / "bin"
+
+
+def expose(log):
+    """스킬이 PATH의 `nworks` 를 부르므로 실행파일을 PATH에서 보이게 한다."""
+    if IS_WIN:
+        winenv.add_to_path([bin_dir()])
+        return
+    target = bin_dir() / PACKAGE
+    link = link_dir() / PACKAGE
+    try:
+        link_dir().mkdir(parents=True, exist_ok=True)
+        if link.is_symlink() and Path(os.readlink(link)) != target:
+            link.unlink()
+        if not link.exists() and not link.is_symlink():
+            link.symlink_to(target)
+        elif not link.is_symlink():
+            log(f"  웍스: {link} 에 다른 파일이 있어 바로가기를 만들지 않음")
+    except OSError as e:
+        log(f"  웍스: 바로가기({link})를 만들지 못함 — {e}")
+
+
+def on_path():
+    """PATH에서 찾히는 nworks 가 jaix 가 깐 것인가."""
+    found = shutil.which(PACKAGE)
+    mine = exe()
+    return bool(found and mine and Path(found).resolve() == Path(mine).resolve())
+
+
 def client_file():
     return home() / "client.json"
 
@@ -116,8 +147,11 @@ def _npm_install(version):
     npm = _npm()
     if not npm:
         return False, "npm 을 찾지 못함"
-    code, out = proc.run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", str(home())],
-                         timeout=900)
+    try:
+        code, out = proc.run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", str(home())],
+                             timeout=900)
+    except (OSError, subprocess.TimeoutExpired) as e:  # update 가 다른 단계까지 멈추지 않게 실패로 돌려준다
+        return False, f"npm 실행 실패: {e}"
     return code == 0, (out.strip().splitlines() or [""])[-1][:200]
 
 
@@ -176,8 +210,7 @@ def ensure(lock, log, dry_run=False, offline=False):
             return {"status": "failed"}
         status = "installed"
     _write_private(saved_spec_file(), json.dumps(sp, ensure_ascii=False, indent=2))
-    if IS_WIN:
-        winenv.add_to_path([bin_dir()])
+    expose(log)
     log(f"  웍스: nworks {have} ({'설치함' if status == 'installed' else '최신'})")
     client = fetch_client(sp["client_source"])
     if client:
