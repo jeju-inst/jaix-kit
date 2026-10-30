@@ -32,7 +32,10 @@ def check_runtimes():
                 out.append(Check("skip", rt.label, "Windows 전용(한컴오피스) — 이 OS에서는 rhwp 근사 렌더를 씀"))
             continue
         found = runtimes.find(rt)
-        if runtimes.ok(rt, found):
+        if runtimes.ok(rt, found) and runtimes.outdated(rt, found):
+            out.append(Check("warn", rt.label, f"{found.version} — 업데이트 필요: {rt.min_version} 이상({rt.min_reason})",
+                             "jaix update (직접 설치했으면 새 설치기로)"))
+        elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
         elif not rt.required:
             out.append(Check("skip", rt.label, f"없음 — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))

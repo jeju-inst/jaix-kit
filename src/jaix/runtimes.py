@@ -40,6 +40,8 @@ class Runtime:
     path_subdir: str = ""           # tree 안에서 PATH에 넣을 하위 폴더
     winget: str | None = None
     min_major: int | None = None
+    min_version: str | None = None  # 이보다 낮으면 doctor가 "업데이트 필요"(동작은 함 → 주의)
+    min_reason: str = ""            # 그 버전이 필요한 이유(doctor 메시지)
     windows_only: bool = False
     hint: str = ""                  # 맥·리눅스 설치 안내
     purpose: str = ""
@@ -65,6 +67,9 @@ RUNTIMES = [
             purpose="hwp → hwpx 변환"),
     Runtime("hwp2pdf", "hwp2pdf-cli", "hwp2pdf-cli", ["--version"], True,
             _github("z0nam/hwp2pdf", r"^hwp2pdf-cli-[\d.]+\.exe$"), windows_only=True,
+            # hwp-agent가 HWP2PDF_LOCAL=1(저장된 서버 무시, 이 PC 한컴으로 변환)을 넘긴다. 이 첫 지원판보다
+            # 낮으면 그 값을 몰라 서버 설정이 있는 PC에서 로컬 렌더가 원격으로 샌다(z0nam/hwp2pdf#5)
+            min_version="2026.10.30.1", min_reason="HWP2PDF_LOCAL 지원",
             purpose="한컴오피스로 HWP 렌더(PDF)"),
     Runtime("himalaya", "himalaya", "himalaya", ["--version"], False,
             _github("pimalaya/himalaya", r"^himalaya\.x86_64-windows\.zip$"), hint="brew install himalaya",
@@ -101,6 +106,17 @@ def find(rt):
     m = re.search(r"(\d+)(?:\.\d+)+", raw)
     return Found(path, m.group(0) if m else None, int(m.group(1)) if m else None,
                  raw.splitlines()[0] if raw else "", managed=bool(own))
+
+
+def _vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or ""))
+
+
+def outdated(rt, found):
+    """min_version이 있고 찾은 버전이 그보다 낮으면 True. 버전을 못 읽으면 판정하지 않는다(False)."""
+    if not (rt.min_version and found.path and found.version):
+        return False
+    return _vtuple(found.version) < _vtuple(rt.min_version)
 
 
 def ok(rt, found):
