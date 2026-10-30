@@ -329,7 +329,7 @@ def quiet(hermes, log):
         ok &= _run([hermes, "config", "set", "slack.user_allowed_commands", json.dumps(allow)], log)[0]
         owned["slash"] = True
         log(f"    슬래시 명령: /{', /'.join(SLASH_DENIED)} 막음")
-    if _yaml_has_key(text, "skills", "disabled") and not owned.get("skills"):
+    if _yaml_has_key(text, "skills", "disabled") and "skills" not in owned:  # 빈 목록도 jaix 것이다
         log("    기본 스킬: 사용자 설정(skills.disabled)이 있어 그대로 둠")
     else:
         off = builtin_skills()
