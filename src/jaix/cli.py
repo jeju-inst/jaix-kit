@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -194,6 +194,8 @@ def cmd_setup(args, log):
     # 한글이 열려 있으면 hwp2pdf-cli가 건너뛴다 — 서버 없는 PC의 미리보기 폴백
     result["rhwp"] = steps.run("HWP 미리보기 엔진(rhwp)", hwprhwp.ensure, lock, log, dry_run=args.dry_run,
                                offline=args.offline)
+    # 한컴 첫 실행 동의 창이 보이지 않는 한글을 막지 않게 — 한컴 PC이고 답(파일)이 없을 때만
+    result["hancom_consent"] = steps.run(hancom.AREA, hancom.ensure, log, dry_run=args.dry_run)
     if args.gw_source and not args.dry_run:
         gw.save_source(args.gw_source)
     gw_res = steps.run("gw", gw.setup, log, dry_run=args.dry_run)
@@ -243,6 +245,7 @@ def _setup_problems(result):
     codex_res = result.get("codex") or {}
     return bool((result.get("hermes") or {}).get("status") == "failed"
                 or result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
+                or result.get("hancom_consent") is False
                 or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed"
                 or (result.get("works") or {}).get("status") == "failed")

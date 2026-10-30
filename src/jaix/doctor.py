@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path, PureWindowsPath
 
-from jaix import claude, codex, gw, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
+from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -106,6 +106,22 @@ def check_rhwp(lock):
         return [Check("ok", "HWP 미리보기 엔진(rhwp)", f"{hwprhwp.installed_version() or '버전 미상'} · {hwprhwp.exe()}")]
     return [Check("warn", "HWP 미리보기 엔진(rhwp)",
                   "없음 — 한글이 열려 있으면 미리보기 렌더가 안 됨(한글을 닫으면 한컴으로 렌더)", "jaix setup")]
+
+
+def check_hancom_consent():
+    """한컴 PC에서만 한 줄. 답이 없으면 첫 변환이 보이지 않는 동의 창에서 멈춘다(약 2분 뒤 rhwp 근사 렌더)."""
+    path = hancom.option_info()
+    if not hancom.applies() or path is None:
+        return []
+    if not path.exists():
+        return [Check("warn", hancom.AREA, "답 없음 — 첫 변환이 보이지 않는 동의 창에서 멈출 수 있음", "jaix setup")]
+    got = hancom.answers(path)
+    if all(got.get(k) == "0" for k in hancom.KEYS):
+        return [Check("ok", hancom.AREA, "'동의 안 함'으로 답해 둠")]
+    if all(got.get(k) in ("0", "1") for k in hancom.KEYS):
+        return [Check("ok", hancom.AREA, "답해 둠")]
+    return [Check("warn", hancom.AREA, "답 없음(한글 설정 파일은 있음) — 첫 변환이 동의 창에서 멈출 수 있음",
+                  "한글을 한 번 직접 열어 동의 창에 답하세요")]
 
 
 def _same(a, b):
@@ -409,7 +425,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
