@@ -394,6 +394,9 @@ def check_hermes_bot():
     else:
         slack = rec.get("slack") or {}
         out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}"))
+    if rec.get("last_error"):
+        out.append(Check("warn", area, f"마지막 다시 설치에서 실패(기존 연결은 그대로): {rec['last_error']}",
+                         "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림"))
     return out
 
 

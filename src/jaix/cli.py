@@ -112,7 +112,9 @@ def _hermes_guide(res):
     if status == "unsupported":
         return ["  이 OS에서는 jaix가 Hermes를 깔지 않습니다. hermes-slackbot 안내대로 설치하세요."]
     if status == "failed":
-        return [f"  설치하지 못했습니다: {res.get('error')}", "  새 명령창에서 `jaix doctor` 결과를 AI센터에 보내 주세요."]
+        kept = [f"  기존 슬랙 봇 Hermes-{res['kept']} 연결은 그대로 동작합니다."] if res.get("kept") else []
+        return [f"  이번 설치에서 실패했습니다: {res.get('error')}", *kept,
+                "  새 명령창에서 `jaix doctor` 결과를 AI센터에 보내 주세요."]
     login = " ".join(["hermes", *(res.get("login") or [])])
     lines = []
     if status == "connected":
