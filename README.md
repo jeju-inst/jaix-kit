@@ -53,7 +53,8 @@
 ## `jaix` CLI — 설치·점검·갱신 (`src/jaix/`)
 연구원 PC에서는 설치 프로그램 **`jaix-setup.exe`**(https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe, 관리자 권한 불필요)가 이것을 부른다.
 ### 처음 실행할 때 "Windows의 PC 보호" 창이 뜨면
-설치 파일에 아직 코드 서명이 없어서 SmartScreen이 막을 수 있다. 창에서 **추가 정보** → **실행**을 누른다.
+설치 파일에 코드 서명을 하지 않는다(비용 대비 효과가 낮아 하지 않기로 함). 그래서 SmartScreen이 막을 수 있다. 창에서 **추가 정보** → **실행**을 누른다. Windows 보안(Defender) 알림이 뜨면 허용하지 말고 AI센터로 연락한다.
+연구원용 단계별 안내(그림 자리 포함)는 [`docs/install-guide.md`](docs/install-guide.md).
 
 <!-- 스크린샷 자리: jaix-win 실기(namun-ji) 때 ① 첫 경고 창 ② "추가 정보"를 누른 뒤 "실행" 버튼이 보이는 창 두 장을 docs/img/ 에 넣고 여기 링크한다 -->
 _(화면 예시는 실기 시험 뒤 추가)_
