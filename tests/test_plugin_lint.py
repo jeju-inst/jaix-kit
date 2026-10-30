@@ -133,7 +133,7 @@ def test_lint_plugin_violations_repo(make_local_repo, tmp_path, monkeypatch, cap
             }
         }
     })
-    # ④ 'path/to' 문자열 포함 및 ⑤ 10,000 토큰 초과 (30,001 바이트 이상)
+    # ④ 'path/to' 문자열 포함 및 ⑤ 10,000 토큰 초과 (ASCII 25,001 바이트 이상)
     big_skill_text = "# Bad Skill\n" + "path/to/something\n" + ("x" * 30050)
 
     sha = _commit(repo, {
@@ -243,3 +243,20 @@ def test_lint_plugin_subdir_and_unit_checks():
     files_no_skill = {f for f in files if "SKILL.md" not in f}
     issues, _ = plugin_lint.lint_plugin(entry, files_no_skill, dummy_read)
     assert any("TS-FORMAT-3" in i and "SKILL.md 없음" in i for i in issues)
+
+
+def test_approx_tokens_matches_ts_token3_measurements():
+    """TS-TOKEN-2 근사가 실측(TS-TOKEN-3, 2026-10-30)에서 ±10% 안 — 바이트/3 은 한국어를 26〜28% 적게 셌다."""
+
+    def doc(hangul, other):  # 실측 문서와 같은 한글 자 수·나머지 바이트 수
+        return "가" * hangul + "x" * other
+
+    measured = {"mail": (2072, 11255 - 3 * 2072, 5240), "gw": (1286, 5732 - 3 * 1286, 2652),
+                "korea-rio": (13, 3186 - 39, 1204), "hwp-agent": (729, 35413 - 3 * 729, 14237),
+                "calendar-worklog": (1918, 9037 - 3 * 1918, 4081)}
+    for name, (h, o, real) in measured.items():
+        est = plugin_lint.approx_tokens(doc(h, o))
+        assert abs(est - real) / real < 0.10, (name, est, real)
+    # 한국어 문서가 10k 를 넘으면 경고해야 한다: 한글 5,000자(15,000B) + 기호 3,000B ≈ 8,700 → 경고 없음,
+    # 한글 6,000자 + 3,000B ≈ 10,200 → 경고. 예전 바이트/3 은 둘 다 7,000 안팎이라 놓쳤다
+    assert plugin_lint.approx_tokens(doc(5000, 3000)) < 10000 < plugin_lint.approx_tokens(doc(6000, 3000))
