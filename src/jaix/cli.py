@@ -328,6 +328,10 @@ def _update(args, log):
     log("\n[3/3] Hermes 스킬")
     changed = hermes.sync(lock, log, dry_run=args.dry_run)
     log(f"  {len(changed)}개 맞춤" if changed else "  맞출 것 없음")
+    # Hermes 업데이트가 새 기본 스킬·명령을 들여왔을 수 있어 jaix가 깐 Hermes 면 소음 정리를 다시 건다
+    if hermesbot.recorded().get("quiet") and hermesbot.find_hermes() and not args.dry_run:
+        if not hermesbot.quiet(hermesbot.find_hermes(), log):
+            problems.append("Hermes 소음 정리 실패")
     return problems
 
 

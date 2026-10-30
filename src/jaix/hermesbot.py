@@ -42,6 +42,23 @@ PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal
                "login": ["auth", "add", "anthropic", "--type", "oauth"]},
 }
 OFF_TOOLSETS = ["browser", "computer_use"]
+# 비개발자에게 소음·혼선이면 설치 때 막는다(jaix-kit-dev 10-30, jaix-win 2차 실측 관찰)
+QUIET = {"compression.codex_gpt55_autoraise_notice": "false"}  # 첫 대화의 영어 "Codex … caps context at 500K" 안내
+# 슬래시 명령 제한(Hermes gateway/slash_access): allow_admin_from 에 아무도 아닌 ID 를 두면 사용자는 아래 목록만 쓸 수
+# 있고 /help 에도 이것만 보인다. 뺀 것: /login·/topup(쓰지 않는 Nous 계정·결제), /yolo(위험 명령 승인을 이 세션에서
+# 통째로 건너뜀). 목록은 Hermes v0.21.5 GATEWAY_KNOWN_COMMANDS 에서 셋을 뺀 것 — 새 판의 새 명령은 jaix가 올릴 때까지 막힌다
+SLASH_NOBODY = "U00JAIXNONE"
+SLASH_DENIED = ("login", "topup", "yolo")
+SLASH_ALLOWED = [
+    "agents", "approvals", "approve", "bg", "blueprint", "bp", "branch", "btw", "bundles", "busy", "codex-runtime",
+    "codex_runtime", "commands", "compact", "compress", "context", "ctx", "curator", "debug", "deny", "diff",
+    "egress", "fast", "footer", "fork", "goal", "hb", "heartbeat", "help", "init", "insights", "kanban", "learn",
+    "loop", "memory", "moa", "model", "new", "pause", "personality", "plan", "platform", "proactive", "profile",
+    "q", "queue", "reasoning", "refine", "reload-mcp", "reload-skills", "reload_mcp", "reload_skills", "reset",
+    "restart", "resume", "retry", "review", "rollback", "s", "save", "sessions", "set-home", "sethome", "skills",
+    "start", "status", "steer", "stop", "subgoal", "suggest", "suggestions", "tasks", "title", "topic", "undo",
+    "update", "usage", "v", "verbose", "version", "voice", "whoami",
+]
 INSTALL_TIMEOUT = 3600  # 첫 설치 실측 14분·3GB(namun-ji). 느린 망을 넉넉히
 
 
@@ -277,6 +294,54 @@ def configure(hermes, model, log, dry_run=False):
     return ok
 
 
+def builtin_skills():
+    """Hermes 스킬 폴더의 스킬 이름(jaix가 복사한 skills/jaix/ 아래는 뺀다). SKILL.md 의 name, 없으면 폴더 이름."""
+    root = paths.hermes_home() / "skills"
+    names = set()
+    for md in root.rglob("SKILL.md") if root.is_dir() else []:
+        if skills.skills_dir() in md.parents:
+            continue
+        try:
+            m = re.search(r"^name:\s*[\"']?([^\"'\n]+)", md.read_text(encoding="utf-8", errors="replace"), re.M)
+        except OSError:
+            m = None
+        names.add(m.group(1).strip() if m else md.parent.name)
+    return sorted(names - set(skills.installed()))  # 같은 이름이면 jaix 스킬까지 꺼지므로 뺀다
+
+
+def quiet(hermes, log):
+    """첫 대화의 영어 안내, 쓰지 않는/위험한 슬래시 명령, Hermes 기본 스킬(상시 분량)을 끈다.
+    사용자가 이미 정한 값(jaix 기록에 없는 slack.allow_admin_from·skills.disabled)은 덮지 않는다."""
+    rec = recorded()
+    owned = rec.get("quiet") or {}
+    try:
+        text = config_path().read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    ok = True
+    for key, value in QUIET.items():
+        ok &= _run([hermes, "config", "set", key, value], log)[0]
+    if _yaml_has_key(text, "slack", "allow_admin_from") and not owned.get("slash"):
+        log("    슬래시 명령 제한: 사용자 설정(slack.allow_admin_from)이 있어 그대로 둠")
+    else:
+        allow = sorted(set(SLASH_ALLOWED) | set(skills.installed()))  # jaix 스킬의 슬래시 명령은 열어 둔다
+        ok &= _run([hermes, "config", "set", "slack.allow_admin_from", json.dumps([SLASH_NOBODY])], log)[0]
+        ok &= _run([hermes, "config", "set", "slack.user_allowed_commands", json.dumps(allow)], log)[0]
+        owned["slash"] = True
+        log(f"    슬래시 명령: /{', /'.join(SLASH_DENIED)} 막음")
+    if _yaml_has_key(text, "skills", "disabled") and not owned.get("skills"):
+        log("    기본 스킬: 사용자 설정(skills.disabled)이 있어 그대로 둠")
+    else:
+        off = builtin_skills()
+        ok &= _run([hermes, "config", "set", "skills.disabled", json.dumps(off, ensure_ascii=False)], log)[0]
+        owned["skills"] = off
+        log(f"    기본 스킬 {len(off)}개 끔(jaix 스킬만 켬)")
+    rec = recorded()
+    rec["quiet"] = owned
+    _save_record(rec)
+    return ok
+
+
 def write_mcp(hermes, log):
     """jaix가 Codex에 쓴 MCP 항목(codex-mcp.json)만 Hermes 에 넣는다. import-agent 는 항목을 고를 수 없어 쓰지 않는다
     (jaix-win Q9). 이미 같은 이름이 있으면 jaix가 넣은 것(기록)일 때만 바꾼다."""
@@ -373,6 +438,10 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
         log("    Hermes 설정이 다 들어가지 않아 슬랙 연결을 멈춥니다(위 기록). 연결 코드는 아직 쓰지 않았습니다.")
         return _done({"status": "failed", "error": "Hermes 설정 실패(모델·도구·MCP)"}, dry_run)
     skills.install(lock, log, dry_run)
+    # 스킬을 복사한 뒤에 한다(jaix 스킬 이름을 열어 두고 기본 스킬만 끄려면 jaix 스킬이 먼저 있어야 함)
+    if not dry_run and not quiet(hermes, log):
+        log("    Hermes 소음 정리가 다 들어가지 않아 슬랙 연결을 멈춥니다(위 기록). 연결 코드는 아직 쓰지 않았습니다.")
+        return _done({"status": "failed", "error": "Hermes 설정 실패(명령 제한·기본 스킬)"}, dry_run, linked, log)
     if code_error:
         log(f"    {code_error}")
         return _done({"status": "failed", "error": code_error}, dry_run, linked, log)

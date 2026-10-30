@@ -37,6 +37,7 @@ https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe
 
 ## 4. 설치 뒤 꼭 할 것 — 앱 다시 시작
 - **Hermes(슬랙)**: 마지막 화면의 **Hermes AI 로그인 창 열기**를 켜 둔 채 [마침]을 누른다. 창에 나온 안내대로 브라우저에서 로그인·승인한다(ChatGPT는 코드 입력). 그다음 슬랙에서 봇 `Hermes-<아이디>`에게 DM "안녕"을 보내 본다. **PC가 켜져 있어야 봇이 답한다.**
+  - 슬래시 명령은 `/hermes-<아이디>` 뒤에 붙인다. 예: 새 대화는 `/hermes-<아이디> new`, 도움말은 `/hermes-<아이디> help`. 도움말 목록에 `/new`처럼 보여도 그대로 치면 다른 앱의 명령이 된다.
 - **Claude**: 앱을 **완전히** 종료했다가 다시 연다. 창의 X로 닫는 것만으로는 꺼지지 않는다 — 화면 오른쪽 아래 알림 영역(^)의 Claude 아이콘을 오른쪽 클릭 → **Exit**.
   - Code 탭에서 도구를 쓸 수 있다. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려온다.
 - **Codex**: Codex를 다시 시작한다.
