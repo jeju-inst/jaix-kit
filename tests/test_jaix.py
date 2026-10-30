@@ -1621,3 +1621,68 @@ def test_hermes_rerun_with_used_code_fails_but_keeps_connection(isolated, monkey
     rec = hermesbot.recorded()
     assert rec["status"] == "connected" and rec["slack"]["id"] == "jitest" and "이미 사용" in rec["last_error"]
     assert [c.status for c in doctor.check_hermes_bot()] == ["ok", "warn"]   # 봇은 그대로, 주의만
+
+
+# --- Hermes 소음 정리(jaix-win 2차 관찰, jaix-kit-dev 10-30) --------------------------------------
+def _hermes_skills(names_builtin, names_jaix):
+    root = hermesbot.paths.hermes_home() / "skills"
+    for n in names_builtin:
+        d = root / "creative" / n
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: {n}\n---\n", encoding="utf-8")
+    for n in names_jaix:
+        d = hermes.skills_dir() / n
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: {n}\n---\n", encoding="utf-8")
+        (d / hermes.MARKER).write_text('{"plugin": "p"}', encoding="utf-8")
+
+
+def test_hermes_quiet_sets_notice_slash_and_skills(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    _hermes_skills(["p5js", "humanizer", "hwp-agent"], ["hwp-agent", "gw"])
+    assert hermesbot.quiet("hermes", print)
+    sets = {c[3]: c[4] for c in calls if c[1:3] == ["config", "set"]}
+    assert sets["compression.codex_gpt55_autoraise_notice"] == "false"
+    allowed = json.loads(sets["slack.user_allowed_commands"])
+    assert json.loads(sets["slack.allow_admin_from"]) == [hermesbot.SLASH_NOBODY]
+    assert not {"login", "topup", "yolo"} & set(allowed) and {"new", "help", "approvals", "gw", "hwp-agent"} <= set(allowed)
+    assert json.loads(sets["skills.disabled"]) == ["humanizer", "p5js"]   # jaix 와 같은 이름(hwp-agent)은 끄지 않음
+    assert hermesbot.recorded()["quiet"]["slash"] is True
+
+
+def test_hermes_quiet_keeps_user_settings(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("slack:\n  allow_admin_from:\n    - U0ADMIN\nskills:\n  disabled: [x]\n", encoding="utf-8")
+    lines = []
+    assert hermesbot.quiet("hermes", lines.append)
+    keys = [c[3] for c in calls if c[1:3] == ["config", "set"]]
+    assert keys == ["compression.codex_gpt55_autoraise_notice"]
+    assert any("사용자 설정" in l for l in lines)
+
+
+def test_hermes_setup_runs_quiet_after_skills(isolated, monkeypatch, the_lock):
+    order = []
+    _fake_windows(monkeypatch, isolated, [])
+    monkeypatch.setattr(hermes, "install", lambda lock, log, dry_run=False: order.append("skills") or [])
+    monkeypatch.setattr(hermesbot, "quiet", lambda h, log: order.append("quiet") or True)
+    REAL_HERMES_SETUP(the_lock, print)
+    assert order == ["skills", "quiet"]
+
+
+
+def test_hermes_quiet_refreshes_empty_managed_skill_list(isolated, monkeypatch):
+    """처음에 기본 스킬이 없어 jaix가 skills.disabled: [] 를 썼어도, 다음 실행에서 새 기본 스킬을 끈다."""
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    hermesbot._save_record({"quiet": {"slash": True, "skills": []}})
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("skills:\n  disabled: []\n", encoding="utf-8")
+    _hermes_skills(["new-default"], [])
+    hermesbot.quiet("hermes", print)
+    sets = {c[3]: c[4] for c in calls if c[1:3] == ["config", "set"]}
+    assert json.loads(sets["skills.disabled"]) == ["new-default"]
