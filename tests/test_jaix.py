@@ -1168,3 +1168,16 @@ def test_codex_setup_aligns_stale_record_when_copy_is_current(isolated, monkeypa
     assert all(lock.same_commit(rec[p.id], p.sha) for p in the_lock.plugins)
     assert not [c for c in doctor.check_codex(the_lock) if c.status == "fail"]
 
+
+
+def test_doctor_warns_outdated_hwp2pdf(monkeypatch):
+    """HWP2PDF_LOCAL을 모르는 옛 hwp2pdf-cli는 동작은 하므로 실패가 아니라 주의 + 업데이트 안내."""
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    monkeypatch.setattr(runtimes, "RUNTIMES", [dataclasses.replace(rt, windows_only=False)])
+    monkeypatch.setattr(runtimes, "hancom_installed", lambda: True)
+    for version, status in (("2026.09.28.1", "warn"), (rt.min_version, "ok"), ("2026.11.2.1", "ok"), (None, "ok")):
+        monkeypatch.setattr(runtimes, "find", lambda r, v=version: runtimes.Found("C:/bin/hwp2pdf-cli.exe", v))
+        [c] = doctor.check_runtimes()
+        assert c.status == status, version
+        if status == "warn":
+            assert "업데이트 필요" in c.message and rt.min_version in c.message and "jaix update" in c.fix
