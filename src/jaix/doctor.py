@@ -6,7 +6,7 @@ import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from jaix import claude, codex, gw, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
@@ -24,7 +24,7 @@ class Check:
     fix: str = ""
 
 
-def check_runtimes():
+def check_runtimes(lock=None):
     out = []
     for rt in runtimes.RUNTIMES:
         if not rt.applies:
@@ -37,7 +37,7 @@ def check_runtimes():
                              "jaix update (직접 설치했으면 새 설치기로)"))
         elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
-        elif not rt.required:
+        elif not runtimes.required(rt, lock):
             out.append(Check("skip", rt.label, f"없음 — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
         elif found.path:
             out.append(Check("fail", rt.label, f"{found.version} — {rt.min_major} 이상 필요 ({rt.purpose})",
@@ -48,6 +48,25 @@ def check_runtimes():
             out.append(Check("warn", "한컴오피스", "없음 → HWP 렌더는 rhwp 근사 렌더로 대체 (hwp2pdf는 설치돼 있음)",
                              "정확한 렌더가 필요하면 한컴오피스 설치"))
     return out
+
+
+MAIL_PLUGIN = "mail"
+MAIL_PYTHON = uvpython.DEFAULT  # mail 스크립트는 PATH 의 python3 대신 uv 관리 Python 3.12 로 돈다(mail-skill-dev 설계)
+
+
+def check_mail_python(lock):
+    """mail 플러그인이 잠금에 있으면 그 스크립트가 쓸 uv 관리 Python 이 있는지. PATH 의 python3 는 세지 않는다."""
+    if not any(p.name == MAIL_PLUGIN for p in lock.plugins):
+        return []
+    area = "mail Python"
+    if not runtimes.find(runtimes.BY_KEY["uv"]).path:
+        return [Check("fail", area, "uv 없음 — mail 스크립트를 띄울 수 없음", FIX_SETUP if IS_WIN else "brew install uv")]
+    found = uvpython.find(MAIL_PYTHON)
+    if not found:
+        # 맥·리눅스는 uv run --python 이 처음 실행 때 받아도 되므로 주의로만(check_uv_python 과 같은 기준)
+        return [Check("fail" if IS_WIN else "warn", area, f"uv 관리 Python {MAIL_PYTHON} 없음 — mail 스크립트가 돌지 않음",
+                      "jaix setup (다시 실행)" if IS_WIN else f"uv python install {MAIL_PYTHON}")]
+    return [Check("ok", area, f"uv 관리 Python {MAIL_PYTHON} ({found})")]
 
 
 def check_uv_python():
@@ -283,6 +302,10 @@ def check_claude(lock):
     return out
 
 
+def _exe_stem(command):
+    return PureWindowsPath(str(command)).stem.lower()
+
+
 def check_codex(lock):
     if not codex.find_cli():
         return [Check("skip", "Codex", "설치 안 됨")]
@@ -307,10 +330,25 @@ def check_codex(lock):
     # 사용자가 같은 이름을 직접 정의한 것(jaix가 맡지 않은 것)은 그대로 둔다
     stale = [n for n, spec in want.items()
              if codex._current(n) != spec and (codex._current(n) is None or n in owned)]
-    if stale:
-        out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(stale)} (0 tools로 실패함)",
+    # jaix가 쓴 항목을 다른 실행파일(예: hwp-agent 단독 설치본 exe)이 덮어쓴 것과, 항목이 없거나 옛 경로인 것을 가른다
+    taken = {n: codex._current(n)["command"] for n in stale
+             if codex._current(n) and _exe_stem(codex._current(n)["command"]) != _exe_stem(want[n]["command"])}
+    fix_taken = "단독 설치본의 MCP 등록을 끈 뒤 jaix update 로 되돌리기"
+    for n, cmd in taken.items():
+        out.append(Check("fail", "Codex MCP", f"다른 설치본({cmd})이 {n} MCP 항목을 차지함", fix_taken))
+    # jaix update 가 한 번 돈 뒤에는 그 항목을 사용자 것으로 보고 손을 뗀다(owned 에서 빠짐) → jaix가 썼던 항목만
+    # 주의로 계속 알린다. 처음부터 사용자가 정의한 항목(released 에 없음)은 예전처럼 조용히 둔다
+    released = codex.released_mcp()
+    for n, spec in want.items():
+        cur = codex._current(n)
+        if n in released and n not in taken and cur and _exe_stem(cur["command"]) != _exe_stem(spec["command"]):
+            out.append(Check("warn", "Codex MCP", f"jaix가 쓴 {n} MCP 항목을 다른 실행파일({cur['command']})이 바꿔 씀",
+                             f"단독 설치본이면 {fix_taken} · 직접 바꾼 것이면 무시해도 됨"))
+    rest = [n for n in stale if n not in taken]
+    if rest:
+        out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(rest)}",
                          "jaix update"))
-    elif want:
+    elif want and not taken and not any(c.status == "warn" and c.area == "Codex MCP" for c in out):
         out.append(Check("ok", "Codex MCP", ", ".join(want)))
     return out
 
@@ -371,7 +409,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 

@@ -132,9 +132,9 @@ def _channels(value):
     return chosen
 
 
-def _runtimes(value):
+def _runtimes(value, lock=None):
     if value in (None, ""):
-        return runtimes.select([])
+        return runtimes.select([], lock)
     if value == "none":
         return []
     if value == "all":
@@ -182,7 +182,7 @@ def cmd_setup(args, log):
         for old in steps.run("PATH 정리", winenv.drop_old_exe_dir) or []:
             log(f"  PATH에서 뺌(예전 설치 위치): {old}")
     log("\n[1/3] 런타임")
-    for rt in _runtimes(args.runtimes):
+    for rt in _runtimes(args.runtimes, lock):
         steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
     # Claude 앱(MSIX) 안에서 uvx가 Python을 처음 받으면 가상화로 깨진다(jaix-kit#14) → 앱 밖인 지금 깐다
     result = {}
@@ -292,9 +292,10 @@ def _update(args, log):
     log(f"jaix {__version__} · 잠금: {lock.source}")
     log("\n[1/3] 런타임 갱신")
     for rt in runtimes.RUNTIMES:
-        if rt.applies and (rt.required or runtimes.find(rt).path):
+        must = runtimes.required(rt, lock)
+        if rt.applies and (must or runtimes.find(rt).path):
             found = runtimes.ensure(rt, log, dry_run=args.dry_run, upgrade=True)
-            if rt.required and not runtimes.ok(rt, found):
+            if must and not runtimes.ok(rt, found):
                 problems.append(f"{rt.label} 없음")
     if not uvpython.ensure(uvpython.needed(lock, args.offline), log, dry_run=args.dry_run):  # 플러그인이 버전 고정을 바꿨으면 보충
         problems.append("uv 관리 Python 설치 실패")
