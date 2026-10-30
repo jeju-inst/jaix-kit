@@ -35,7 +35,7 @@ TTL_HOURS = 72
 CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
-SLACKBOT_SHA = "c721c7b3a92a34b9289ba800b38dda1d6636023b"
+SLACKBOT_SHA = "945e715d6df11bda90c1b65787896012e7d26cbf"
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
     "chatgpt": {"provider": "openai-codex", "default": "gpt-6.1-sol",
                 "base_url": "https://chatgpt.com/backend-api/codex", "login": ["auth", "add", "openai-codex"]},
