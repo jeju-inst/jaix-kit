@@ -216,6 +216,9 @@ def cmd_setup(args, log):
                         dry_run=args.dry_run)
         if res is not None:
             result["hermes"] = res
+            if res.get("status") == "failed":  # 실패는 설치 실패다(사용자 결정 ③) — 설치기가 종료 코드 10을 내게
+                steps.failed.append("Hermes")
+                steps.code = max(steps.code, 1)
     if not args.no_autoupdate:
         result["autoupdate"] = steps.run("로그온 자동 갱신", schedule.register, log, dry_run=args.dry_run)
     elif not args.dry_run and schedule.unregister():  # 끄라고 했으니 예전에 등록한 것도 지운다

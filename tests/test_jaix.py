@@ -1318,6 +1318,24 @@ def test_hermes_setup_failure_makes_setup_fail(isolated, monkeypatch, the_lock):
     monkeypatch.setattr(hermesbot, "setup", lambda lock, log, **kw: {"status": "failed", "error": "x"})
     monkeypatch.setattr(claude, "find_cli", lambda: None)
     assert cli._setup_problems({"hermes": {"status": "failed"}})
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "hermes", "--no-autoupdate"]) != 0
+
+
+def test_hermes_config_failure_stops_before_claim(isolated, monkeypatch, the_lock):
+    _fake_windows(monkeypatch, isolated, [])
+    monkeypatch.setattr(hermesbot, "configure", lambda *a, **kw: False)
+    monkeypatch.setattr(hermesbot, "claim", lambda code: pytest.fail("코드를 쓰면 안 됨"))
+    code_file = isolated / "code"
+    code_file.write_text("JX-" + "A" * 26, encoding="utf-8")
+    assert REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file))["status"] == "failed"
+
+
+def test_hermes_dry_run_keeps_code_file(isolated, monkeypatch, the_lock):
+    _fake_windows(monkeypatch, isolated, [])
+    code_file = isolated / "code"
+    code_file.write_text("JX-" + "A" * 26, encoding="utf-8")
+    assert REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file), dry_run=True)["status"] == "dry-run"
+    assert code_file.exists()
 
 
 def test_hermes_mcp_only_jaix_entries(isolated, monkeypatch):

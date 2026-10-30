@@ -127,13 +127,14 @@ def handoff_url():
     return os.environ.get("JAIX_HANDOFF_URL") or HANDOFF_URL
 
 
-def read_code_file(path):
-    """설치기가 남긴 코드 파일을 읽고 바로 지운다(형식이 틀려도 지운다)."""
+def read_code_file(path, keep=False):
+    """설치기가 남긴 코드 파일을 읽고 바로 지운다(형식이 틀려도 지운다). keep(--dry-run)이면 남긴다."""
     path = Path(path)
     try:
         code = path.read_text(encoding="utf-8-sig").strip().upper()
     finally:
-        path.unlink(missing_ok=True)
+        if not keep:
+            path.unlink(missing_ok=True)
     if not CODE_RE.match(code):
         raise HandoffError("슬랙 연결 코드 형식이 다릅니다(JX-로 시작하는 29자). AI센터에서 받은 코드를 그대로 붙여 넣으세요.")
     return code
@@ -354,14 +355,16 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
     code, code_error = None, None
     if code_file:
         try:
-            code = read_code_file(code_file)
+            code = read_code_file(code_file, keep=dry_run)
         except HandoffError as e:
             code_error = str(e)
     if not install_hermes(log, dry_run):
         return _done({"status": "failed", "error": "Hermes 설치 실패"}, dry_run)
     hermes = find_hermes() or "hermes"
     if not configure(hermes, model, log, dry_run):
-        log("    설정 일부가 들어가지 않았습니다(위 기록)")
+        # 코드는 아직 쓰지 않았다(서버에 그대로) — 고친 뒤 같은 코드로 다시 하면 된다
+        log("    Hermes 설정이 다 들어가지 않아 슬랙 연결을 멈춥니다(위 기록). 연결 코드는 아직 쓰지 않았습니다.")
+        return _done({"status": "failed", "error": "Hermes 설정 실패(모델·도구·MCP)"}, dry_run)
     skills.install(lock, log, dry_run)
     if code_error:
         log(f"    {code_error}")
