@@ -67,6 +67,7 @@ _(화면 예시는 실기 시험 뒤 추가)_
 | `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, 선택 himalaya·age)을 사용자 범위로 설치(winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
 | `jaix doctor [--json]` | 런타임 버전·사용자 PATH·마켓플레이스 등록·플러그인 버전이 잠금과 맞는지. 어긋나면 고치는 방법 한 줄. 실패가 있으면 종료 코드 1 |
 | `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
+| `jaix works login` | 웍스(NAVER WORKS) 브라우저 로그인, 처음 한 번. 잠금에 jaix-works 가 있으면 `jaix setup` 이 Node.js·nworks(버전·무결성 고정)를 깔고 기관 앱 정보를 원내 위치에서 받아 둔다(`docs/works.md`) |
 | `jaix setup --channels hermes --hermes-code-file <f> [--hermes-model chatgpt\|claude]` | (Windows) Hermes 무인 설치 + 슬랙 연결. 아래 "Hermes" |
 | `jaix hermes handoff <아이디> --user U…` | 관리자(studio): 사람별 슬랙 토큰을 1회용 연결 코드로 내보냄 |
 | `jaix update --quiet` | 같은 일을 화면 없이. `jaix setup` 이 등록한 **로그온 자동 갱신**이 부르고, 결과는 `update.log`·`update-status.json` 에 남아 `jaix doctor` 가 보여 준다. Windows 에선 창 없는 `jaixw.exe` 로 돌아 콘솔 창이 뜨지 않는다 |

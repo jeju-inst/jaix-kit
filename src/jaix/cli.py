@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv
+from jaix import __version__, claude, codex, doctor, gw, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -199,6 +199,9 @@ def cmd_setup(args, log):
     gw_res = steps.run("gw", gw.setup, log, dry_run=args.dry_run)
     if gw_res is not None:
         result["gw"] = gw_res
+    works_res = steps.run("웍스(nworks)", works.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
+    if works_res is not None:
+        result["works"] = works_res
     log("\n[2/3] Claude")
     if "claude" in chosen:
         res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run)
@@ -241,7 +244,8 @@ def _setup_problems(result):
     return bool((result.get("hermes") or {}).get("status") == "failed"
                 or result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
                 or codex_res.get("error") or codex_res.get("failed")
-                or (result.get("gw") or {}).get("status") == "failed")
+                or (result.get("gw") or {}).get("status") == "failed"
+                or (result.get("works") or {}).get("status") == "failed")
 
 
 def cmd_doctor(args, log):
@@ -300,6 +304,8 @@ def _update(args, log):
         problems.append("HWP 미리보기 엔진(rhwp) 받기 실패")
     if gw.setup(log, dry_run=args.dry_run)["status"] == "failed":
         problems.append("gw 설치 실패")
+    if works.ensure(lock, log, dry_run=args.dry_run, offline=args.offline)["status"] == "failed":
+        problems.append("웍스(nworks) 설치 실패")
     log("\n[2/3] Claude · Codex 플러그인")
     claude.setup(lock, log, dry_run=args.dry_run, update=True)
     if claude.find_cli() and not args.dry_run:
@@ -327,6 +333,12 @@ def cmd_cleanup(args, log):
     for p in winenv.remove_from_path(paths.jaix_home()):
         log(f"PATH에서 뺌: {p}")
     return 0
+
+
+def cmd_works(args, log):
+    if args.works_cmd == "login":
+        return works.login(log)
+    return 2
 
 
 def build_parser():
@@ -374,6 +386,11 @@ def build_parser():
     ho.add_argument("--ttl", type=float, default=hermesbot.TTL_HOURS, help="유효 시간(기본 72)")
     ho.add_argument("--spool", help=f"묶음 폴더(기본 {hermesbot.HANDOFF_SPOOL}, ji-gw-ai 배포처와 같게)")
     ho.set_defaults(func=hermesbot.cmd_handoff)
+
+    w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
+    wsub = w.add_subparsers(dest="works_cmd", required=True)
+    wsub.add_parser("login", help="브라우저로 웍스 로그인(처음 한 번, 본인 계정 권한)")
+    w.set_defaults(func=cmd_works)
 
     c = sub.add_parser("cleanup", parents=[common], help=argparse.SUPPRESS)
     c.set_defaults(func=cmd_cleanup)

@@ -1,6 +1,6 @@
 # 웍스(NAVER WORKS) — nworks 설정 안내와 편입안
 
-> 상태: **편입안. 아직 구현하지 않았다.** 관리자 작업(기관 OAuth 앱)과 아래 결정이 끝나면 구현 PR을 올린다.
+> 상태: **승인(2026-10-30, Q1-Q5 권고안 그대로).** jaix 쪽 구현은 `src/jaix/works.py`(`jaix setup`·`update`·`doctor`·`jaix works login`). 플러그인은 `jeju-inst/jaix-works`. 잠금 편입은 그 저장소에 첫 태그가 생긴 뒤 별도 PR로 한다.
 > 배경: `docs/design.md` 도구별 판정 6번(기성 `nworks` + 기관 User-OAuth 앱 1개), 2026-10-30 사용자 결정(11/10 1차 배포에 포함).
 
 ## 먼저 정할 것 (사용자 결정)
