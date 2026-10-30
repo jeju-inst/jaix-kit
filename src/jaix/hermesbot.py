@@ -69,7 +69,10 @@ def slack_call(method, token, timeout=20):
 
 
 def bot_name_matches(auth, ident):
-    return (auth.get("user") or "").lower().replace("_", "-") == f"hermes-{ident}"
+    """슬랙 auth.test 의 user 는 봇 표시 이름을 사용자 이름 규칙으로 바꾼 것이라 구분자가 빠진다
+    (Hermes-jitest → 'hermesjitest', jaix-kit#69). 하이픈·밑줄·점을 지우고 비교한다."""
+    squash = lambda v: re.sub(r"[-_.\s]", "", v.lower())
+    return squash(auth.get("user") or "") == squash(f"hermes-{ident}")
 
 
 def write_bundle(spool, ident, user, bot, app, ttl_hours=TTL_HOURS, code=None):

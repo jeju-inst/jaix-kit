@@ -1533,3 +1533,11 @@ def test_cli_hermes_handoff_runs_without_log_option(tmp_path, monkeypatch, capsy
     assert re.search(r"JX-[A-Z2-7]{26}", capsys.readouterr().out)
     with pytest.raises(SystemExit):  # 연결 코드가 기록 파일에 남지 않게 --log 는 받지 않는다
         cli.build_parser().parse_args(["hermes", "handoff", "demo", "--user", "U0TEST", "--log", "x"])
+
+
+def test_bot_name_matches_ignores_separators():
+    """jaix-kit#69: 슬랙이 Hermes-jitest 봇의 user 를 'hermesjitest' 로 돌려준다."""
+    for user in ("hermesjitest", "hermes-jitest", "Hermes_jitest", "hermes.jitest"):
+        assert hermesbot.bot_name_matches({"user": user}, "jitest"), user
+    assert not hermesbot.bot_name_matches({"user": "hermesbob"}, "jitest")
+    assert not hermesbot.bot_name_matches({}, "jitest")
