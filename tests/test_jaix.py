@@ -1522,3 +1522,14 @@ def test_hancom_version_from_com_server_path():
     assert hancom.version_from_server(r"C:\Program Files (x86)\Hnc\Office 2022\HOffice120\bin\hwp.exe -Automation") == "120"
     assert hancom.version_from_server(r"C:\Program Files (x86)\Hnc\Office 2024\HOffice130\Bin\Hwp.exe") == "130"
     assert hancom.version_from_server(r"C:\Hwp\hwp.exe") is None
+
+
+def test_cli_hermes_handoff_runs_without_log_option(tmp_path, monkeypatch, capsys):
+    """jaix-kit#67: hermes 하위 명령은 공통 옵션(--log)이 없어 main 이 AttributeError 로 죽었다."""
+    tokens = iter(["xoxb-TEST-1", "xapp-TEST-1"])
+    monkeypatch.setattr(hermesbot.getpass, "getpass", lambda prompt: next(tokens))
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
+    assert cli.main(["hermes", "handoff", "demo", "--user", "U0TEST", "--spool", str(tmp_path / "spool")]) == 0
+    assert re.search(r"JX-[A-Z2-7]{26}", capsys.readouterr().out)
+    with pytest.raises(SystemExit):  # 연결 코드가 기록 파일에 남지 않게 --log 는 받지 않는다
+        cli.build_parser().parse_args(["hermes", "handoff", "demo", "--user", "U0TEST", "--log", "x"])

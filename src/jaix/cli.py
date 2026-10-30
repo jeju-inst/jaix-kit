@@ -407,7 +407,8 @@ def main(argv=None):
     args.raw_argv = raw[1:]  # 하위 명령 뒤의 인자(--via-task 가 그대로 다시 넘김)
     paths.migrate_data()  # 예전 설치본이 프로그램 폴더에 둔 기록·상태를 데이터 폴더로
     # --via-task 는 진행 줄을 setup.log 에서 읽어 흘리므로 같은 파일에 또 쓰지 않는다
-    log = Log(None if getattr(args, "via_task", False) and paths.IS_WIN else args.log)
+    # hermes handoff 에는 --log 가 없다(연결 코드가 기록 파일에 남지 않게) → 없는 하위 명령도 있다(#67)
+    log = Log(None if getattr(args, "via_task", False) and paths.IS_WIN else getattr(args, "log", None))
     code = 1
     try:
         code = args.func(args, log)
