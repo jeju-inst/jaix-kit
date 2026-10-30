@@ -11,7 +11,6 @@
 """
 import base64
 import datetime
-import getpass
 import hashlib
 import json
 import os
@@ -25,7 +24,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from jaix import codex, hermes as skills, net, paths, uvpython
+from jaix import codex, hermes as skills, net, paths, secret, uvpython
 from jaix.paths import IS_WIN
 
 INSTALL_PS1 = "https://hermes-agent.nousresearch.com/install.ps1"
@@ -100,10 +99,11 @@ def cmd_handoff(args, log):
     if not args.user.startswith("U"):
         log("--user 는 U로 시작하는 슬랙 멤버 ID")
         return 2
-    bot = getpass.getpass("Bot User OAuth Token (xoxb-…, 입력은 보이지 않음): ").strip()
-    app = getpass.getpass("App-Level Token (xapp-…, 입력은 보이지 않음): ").strip()
-    if not bot.startswith("xoxb-") or not app.startswith("xapp-"):
-        log("토큰 형식이 다름(xoxb- / xapp-)")
+    log("토큰을 붙여 넣으세요. 글자 대신 *가 찍힙니다.")
+    bot = secret.ask_secret("Bot User OAuth Token (xoxb-…)", secret.slack_token("xoxb-"), "xoxb-로 시작", log=log)
+    app = bot and secret.ask_secret("App-Level Token (xapp-…)", secret.slack_token("xapp-"), "xapp-로 시작", log=log)
+    if not (bot and app):
+        log("토큰을 받지 못해 멈춥니다(세 번 모두 형식이 맞지 않음).")
         return 2
     auth = slack_call("auth.test", bot)
     if not auth.get("ok"):

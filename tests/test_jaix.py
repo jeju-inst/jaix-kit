@@ -1204,13 +1204,13 @@ def test_handoff_code_and_bundle_0600(tmp_path):
 
 
 def test_cmd_handoff_checks_tokens_before_writing(tmp_path, monkeypatch, capsys):
-    tokens = iter(["xoxb-TEST-1", "xapp-TEST-1"])
-    monkeypatch.setattr(hermesbot.getpass, "getpass", lambda prompt: next(tokens))
+    tokens = iter(["xoxb-TEST-1" + "x" * 40, "xapp-TEST-1" + "x" * 40])
+    monkeypatch.setattr(hermesbot.secret, "masked_input", lambda prompt, out=None: next(tokens))
     monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-bob", "team": "T"})
     args = type("A", (), {"id": "demo", "user": "U0TEST", "ttl": 72, "spool": str(tmp_path / "spool")})()
     assert hermesbot.cmd_handoff(args, print) == 1          # 다른 사람 봇 → 멈춤, 묶음 없음
     assert not (tmp_path / "spool").exists()
-    tokens = iter(["xoxb-TEST-1", "xapp-TEST-1"])
+    tokens = iter(["xoxb-TEST-1" + "x" * 40, "xapp-TEST-1" + "x" * 40])
     monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
     assert hermesbot.cmd_handoff(args, print) == 0
     out = capsys.readouterr().out
@@ -1526,8 +1526,8 @@ def test_hancom_version_from_com_server_path():
 
 def test_cli_hermes_handoff_runs_without_log_option(tmp_path, monkeypatch, capsys):
     """jaix-kit#67: hermes 하위 명령은 공통 옵션(--log)이 없어 main 이 AttributeError 로 죽었다."""
-    tokens = iter(["xoxb-TEST-1", "xapp-TEST-1"])
-    monkeypatch.setattr(hermesbot.getpass, "getpass", lambda prompt: next(tokens))
+    tokens = iter(["xoxb-TEST-1" + "x" * 40, "xapp-TEST-1" + "x" * 40])
+    monkeypatch.setattr(hermesbot.secret, "masked_input", lambda prompt, out=None: next(tokens))
     monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
     assert cli.main(["hermes", "handoff", "demo", "--user", "U0TEST", "--spool", str(tmp_path / "spool")]) == 0
     assert re.search(r"JX-[A-Z2-7]{26}", capsys.readouterr().out)
@@ -1541,3 +1541,53 @@ def test_bot_name_matches_ignores_separators():
         assert hermesbot.bot_name_matches({"user": user}, "jitest"), user
     assert not hermesbot.bot_name_matches({"user": "hermesbob"}, "jitest")
     assert not hermesbot.bot_name_matches({}, "jitest")
+
+
+
+# --- 숨김 입력(*) — 사용자 피드백 2026-10-30 -------------------------------------------------------
+from jaix import secret  # noqa: E402
+
+
+class _Out:
+    def __init__(self):
+        self.text = ""
+
+    def write(self, s):
+        self.text += s
+
+    def flush(self):
+        pass
+
+
+def test_masked_feed_stars_backspace_and_paste():
+    out = _Out()
+    assert secret._feed(iter("abc\x7fd\r"), out) == "abd"
+    assert out.text == "***\b \b*"                      # 글자마다 *, 백스페이스는 지움
+    out = _Out()
+    pasted = "xoxb-" + "1" * 52
+    assert secret._feed(iter(pasted + "\n"), out) == pasted and out.text == "*" * len(pasted)
+    assert secret._feed(iter("\xe0Ka\r"), _Out()) == "a"  # Windows 기능키(화살표)는 버림
+    with pytest.raises(secret.Cancelled):
+        secret._feed(iter("ab\x03"), _Out())
+    with pytest.raises(EOFError):                          # 빈 상태의 Ctrl+D 는 취소
+        secret._feed(iter("\x04"), _Out())
+    assert secret._feed(iter("a\x04\x1bb\r"), _Out()) == "ab"
+    out = _Out()
+    assert secret._feed(iter("typo\x15ok\r"), out) == "ok"  # Ctrl+U 는 줄 전체를 지움(getpass 와 같게)
+    assert out.text == "****" + "\b \b" * 4 + "**"  # 입력 중 Ctrl+D·그 밖의 제어문자는 무시
+
+
+def test_ask_secret_retries_and_shows_only_length():
+    good = "xoxb-" + "9" * 52
+    answers, lines = iter(["oops", "xoxb-short", good]), []
+    got = secret.ask_secret("Bot", secret.slack_token("xoxb-"), "xoxb-로 시작", reader=lambda p: next(answers),
+                            log=lines.append)
+    assert got == good
+    assert lines[:2] == ["  형식이 맞지 않음 — 다시 붙여 넣으세요 (xoxb-로 시작)"] * 2 and lines[2] == f"  받음 ({len(good)}자)"
+    assert all("oops" not in l and "9999" not in l for l in lines)
+    assert secret.ask_secret("Bot", secret.slack_token("xoxb-"), "h", reader=lambda p: "bad", log=lines.append) is None
+
+
+def test_masked_input_falls_back_to_getpass_without_tty(monkeypatch):
+    monkeypatch.setattr(secret.getpass, "getpass", lambda prompt: "from-getpass")
+    assert secret.masked_input("x: ") == "from-getpass"   # pytest 의 stdin 은 터미널이 아니다
