@@ -50,6 +50,7 @@ class Runtime:
     min_version: str | None = None  # 이보다 낮으면 doctor가 "업데이트 필요"(동작은 함 → 주의)
     min_reason: str = ""            # 그 버전이 필요한 이유(doctor 메시지)
     windows_only: bool = False
+    needed_by: str = ""             # 이 플러그인이 잠금에 있으면 필수(없으면 선택). 잠금이 곧 켜진 플러그인 목록이다
     hint: str = ""                  # 맥·리눅스 설치 안내
     purpose: str = ""
 
@@ -83,9 +84,10 @@ RUNTIMES = [
             winget="OpenJS.NodeJS.LTS", min_major=18, hint="brew install node", purpose="웍스 도구(nworks)"),
     Runtime("himalaya", "himalaya", "himalaya", ["--version"], False,
             _github("pimalaya/himalaya", r"^himalaya\.x86_64-windows\.zip$"), hint="brew install himalaya",
-            purpose="메일 도구(선택)"),
+            needed_by="mail", purpose="메일 도구(mail 플러그인)"),
     Runtime("age", "age", "age", ["--version"], False, _github("FiloSottile/age", r"-windows-amd64\.zip$"),
-            winget="FiloSottile.age", hint="brew install age", purpose="메일 도구 비밀 암호화(선택)"),
+            winget="FiloSottile.age", hint="brew install age", needed_by="mail",
+            purpose="메일 도구 비밀 암호화(mail 플러그인)"),
 ]
 BY_KEY = {rt.key: rt for rt in RUNTIMES}
 
@@ -248,10 +250,15 @@ def hancom_installed():
         return False
 
 
-def select(keys):
-    """--runtimes 값(쉼표 구분)을 Runtime 목록으로. 비우면 필수 + 맥에서 안 쓰는 것 제외."""
+def required(rt, lock=None):
+    """필수인지: 늘 필수이거나, 이 런타임을 쓰는 플러그인(needed_by)이 잠금에 있을 때."""
+    return rt.required or bool(rt.needed_by and lock and any(p.name == rt.needed_by for p in lock.plugins))
+
+
+def select(keys, lock=None):
+    """--runtimes 값(쉼표 구분)을 Runtime 목록으로. 비우면 필수(잠금의 플러그인이 쓰는 것 포함) + 맥에서 안 쓰는 것 제외."""
     if not keys:
-        return [rt for rt in RUNTIMES if rt.required and rt.applies]
+        return [rt for rt in RUNTIMES if required(rt, lock) and rt.applies]
     unknown = [k for k in keys if k not in BY_KEY]
     if unknown:
         raise SystemExit(f"모르는 런타임: {', '.join(unknown)} (가능: {', '.join(BY_KEY)})")
