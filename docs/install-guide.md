@@ -50,6 +50,9 @@ https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe
 ## 6. 문제가 있으면
 시작 메뉴의 **JAIX 점검**(`jaix doctor`)을 눌러 나온 결과를 AI센터에 보낸다.
 
+### HWP 미리보기가 "근사 렌더(rhwp)"로만 나올 때
+한글을 닫은 상태인데도 그렇다면, 이 PC 계정에서 한글을 **한 번 직접 열어** 첫 실행 "사용성 데이터 수집 동의" 창에 답한 뒤 닫는다. 보이지 않게 띄운 한글이 그 창에서 멈췄기 때문이다. jaix 설치가 "동의 안 함"을 미리 기록하지만, 한글을 이미 연 적 있는 계정은 건드리지 않는다.
+
 ### jaix보다 먼저 Hermes를 따로 설치한 경우(AI센터 등)
 Hermes 설정(config.yaml)의 hwp-agent 항목 args 맨 앞에 `--python`, `3.12`를 넣은 뒤 PC를 다시 시작하세요(또는 Hermes gateway 재시작).
 
