@@ -45,13 +45,16 @@ def _feed(chars, out):
     return "".join(buf)
 
 
-def _read_posix(fd, out):
+def _read_posix(fd, out, prompt):
     """raw 모드로 바꿔 읽고 반드시 되돌린다(제너레이터로 두면 되돌림이 늦어질 수 있어 함수 하나로)."""
     import termios
     import tty
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd, termios.TCSANOW)  # 기본값 TCSAFLUSH 는 프롬프트 직후 미리 붙여 넣은 글자를 버린다
+        # 프롬프트는 에코를 끈 뒤에 띄운다 — 먼저 띄우면 그 사이 붙여 넣은 토큰이 평문으로 찍힌다(getpass 와 같은 순서)
+        out.write(prompt)
+        out.flush()
 
         def chars():
             while True:
@@ -64,8 +67,10 @@ def _read_posix(fd, out):
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def _read_windows(out):
+def _read_windows(out, prompt):
     import msvcrt
+    out.write(prompt)  # getwch 는 에코하지 않는다
+    out.flush()
 
     def chars():
         while True:
@@ -87,10 +92,8 @@ def masked_input(prompt, out=None):
             termios.tcgetattr(stdin.fileno())
     except (ImportError, OSError, ValueError):
         return getpass.getpass(prompt)
-    out.write(prompt)
-    out.flush()
     try:
-        return _read_windows(out) if IS_WIN else _read_posix(stdin.fileno(), out)
+        return _read_windows(out, prompt) if IS_WIN else _read_posix(stdin.fileno(), out, prompt)
     finally:
         out.write("\n")
         out.flush()
