@@ -1,6 +1,6 @@
 name: jaix-setup
 
-# jaix.exe(PyInstaller 단일 exe)와 설치 프로그램 jaix-setup.exe(Inno, 사용자 범위)를 만들고,
+# jaix\ (PyInstaller onedir: jaix.exe·jaixw.exe·_internal, installer/jaix.spec)와 설치 프로그램 jaix-setup.exe(Inno, 사용자 범위)를 만들고,
 # 새 Windows 러너에서 무인 설치 → jaix doctor → 제거까지 시험한다.
 # 묶음 태그(vYYYY.MM.DD.N)로 실행될 때만 버전을 찍고 그 태그의 릴리스로 올린다.
 # bundle-tag.yml 이 태그를 단 뒤 `gh workflow run jaix-setup.yml --ref <tag>` 로 부른다
@@ -50,24 +50,36 @@ jobs:
           Stamp installer/jaix-setup.iss '^#define AppVer ".*"' "#define AppVer `"$v`"" $true
           Write-Host "version $v"
 
-      - name: Build jaix.exe
+      # onedir(jaix-kit#46): onefile 이 Defender 기계학습 판정에 걸려 바꿨다. UPX 끔·버전 리소스는 spec 에서
+      - name: Build jaix (onedir)
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip install . pyinstaller
-          # 잠금 사본을 묶어 네트워크가 막혀도 doctor가 돈다(평소엔 GitHub의 최신 잠금을 먼저 본다)
-          # hide-early: 콘솔을 혼자 가진 때(로그온 예약 작업)만 창을 숨긴다. 명령창·바로가기(cmd /K)에선 그대로 보인다
-          pyinstaller --onefile --name jaix --paths src `
-            --add-data ".claude-plugin/marketplace.json;." `
-            --hide-console hide-early `
-            src/jaix/__main__.py
-          .\dist\jaix.exe --version
-          # 창 없는 빌드: 예약 작업이 부른다. hide-early 는 콘솔이 생긴 뒤 숨겨 깜빡임이 남는다(jaix-win v.8 실측)
-          pyinstaller --onefile --noconsole --name jaixw --paths src `
-            --add-data ".claude-plugin/marketplace.json;." `
-            src/jaix/__main__.py
-          $p = Start-Process dist\jaixw.exe -ArgumentList '--version' -Wait -PassThru
+          if ("${{ github.ref }}".StartsWith('refs/tags/v')) { $env:JAIX_VERSION = "${{ github.ref_name }}".Substring(1) }
+          pyinstaller --noconfirm installer\jaix.spec
+          .\dist\jaix\jaix.exe --version
+          $p = Start-Process dist\jaix\jaixw.exe -ArgumentList '--version' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "jaixw.exe --version 종료 코드 $($p.ExitCode)" }
+          if (Test-Path dist\jaix.exe) { throw "onefile jaix.exe 가 생김" }
+          foreach ($exe in 'jaix.exe','jaixw.exe') {
+            $vi = (Get-Item "dist\jaix\$exe").VersionInfo
+            Write-Host "$exe : $($vi.CompanyName) · $($vi.ProductName) · $($vi.FileVersion) · $($vi.ProductVersion)"
+            if ($vi.CompanyName -ne '제주연구원' -or $vi.ProductName -ne 'JAIX' -or -not $vi.FileVersion) { throw "$exe 버전 리소스 없음" }
+          }
+          # UPX 를 안 썼는지(UPX 로 싼 파일엔 UPX! 표식이 남는다)
+          $upx = Get-ChildItem -Recurse dist\jaix -Include *.exe,*.dll,*.pyd | Where-Object { Select-String -Path $_.FullName -Pattern 'UPX!' -SimpleMatch -Quiet }
+          if ($upx) { throw "UPX 로 싼 파일: $($upx.Name -join ', ')" }
+
+      # 코드 서명 자리(jaix-kit#46). 인증서가 생기면 시크릿을 넣고 이 단계를 켠다. 순서: 이 단계에서
+      # dist\jaix\jaix.exe·jaixw.exe 를 서명 → 설치본을 만든 뒤 installer\Output\jaix-setup.exe 도 서명(아래 Build installer 끝).
+      # Inno 의 [Setup] SignTool= 로 제거기(unins000.exe)까지 서명하려면 ISCC 에 /S 로 도구를 넘긴다.
+      - name: Sign binaries (자리만 — 인증서 준비 뒤 켬)
+        if: ${{ false }}
+        shell: pwsh
+        run: |
+          # signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /f cert.pfx /p $env:SIGN_PASSWORD dist\jaix\jaix.exe dist\jaix\jaixw.exe
+          throw "서명 단계 미구현"
 
       - name: Install Inno Setup
         shell: pwsh
@@ -77,8 +89,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force installer\payload | Out-Null
-          Copy-Item dist\jaix.exe installer\payload\jaix.exe
-          Copy-Item dist\jaixw.exe installer\payload\jaixw.exe
+          Copy-Item -Recurse dist\jaix installer\payload\jaix
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\jaix-setup.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC 실패 $LASTEXITCODE" }
           Get-ChildItem installer\Output
@@ -87,8 +98,7 @@ jobs:
         with:
           name: jaix-windows
           path: |
-            dist/jaix.exe
-            dist/jaixw.exe
+            dist/jaix/
             installer/Output/jaix-setup.exe
 
       # --- 새 러너에서 설치 → 점검 → 제거 (인수 시험 0-1·0-3을 CI에서 흉내) ---
@@ -104,13 +114,25 @@ jobs:
       - name: Silent install (per-user, no admin)
         shell: pwsh
         run: |
+          # 예전(onefile) 설치본 흉내: {app} 바로 아래 실행파일과 그 PATH 항목. 덮어 설치가 둘 다 정리해야 한다
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Content "$app\jaix.exe" 'old' ; Set-Content "$app\jaixw.exe" 'old'
+          $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+          [Environment]::SetEnvironmentVariable('Path', "$user;$app", 'User')
           $p = Start-Process installer\Output\jaix-setup.exe -Wait -PassThru -ArgumentList `
             '/VERYSILENT','/CURRENTUSER','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log','/CHANNELS=claude,codex','/GWSOURCE=none'
           Get-Content install.log -Tail 60
           if ($p.ExitCode -ne 0) { throw "설치 종료 코드 $($p.ExitCode)" }
-          $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix'
-          if (-not (Test-Path "$app\jaix.exe")) { throw "jaix.exe 가 $app 에 없음" }
-          if (-not (Test-Path "$app\jaixw.exe")) { throw "jaixw.exe 가 $app 에 없음" }
+          foreach ($f in 'jaix\jaix.exe','jaix\jaixw.exe','jaix\_internal') {
+            if (-not (Test-Path "$app\$f")) { throw "$f 가 $app 에 없음" }
+          }
+          foreach ($f in 'jaix.exe','jaixw.exe') {
+            if (Test-Path "$app\$f") { throw "예전 설치본의 $f 가 $app 에 남음" }
+          }
+          $entries = [Environment]::GetEnvironmentVariable('Path', 'User').Split(';') | ForEach-Object { $_.TrimEnd('\') }
+          if ($entries -contains $app) { throw "예전 PATH 항목 $app 이 남음" }
+          if ($entries -notcontains "$app\jaix") { throw "PATH 에 $app\jaix 가 없음" }
           $data = Join-Path $env:LOCALAPPDATA 'jaix'   # 기록·상태는 데이터 폴더(프로그램 폴더와 나눔)
           Get-Content "$data\setup.log"
           # #27: jaix setup 본 실행이 작업 스케줄러(--via-task)로 돌았는지 — 그 길만 setup-status.json 을 남긴다
@@ -132,7 +154,9 @@ jobs:
           $user = [Environment]::GetEnvironmentVariable('Path', 'User')
           $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
           $env:Path = "$user;$machine"
-          (Get-Command jaix).Source
+          $src = (Get-Command jaix).Source
+          Write-Host $src
+          if ($src -notlike '*\Programs\jaix\jaix\jaix.exe') { throw "PATH 의 jaix 가 onedir 폴더 것이 아님: $src" }
           jaix --version
           jaix doctor
           if ($LASTEXITCODE -ne 0) { throw "jaix doctor 실패" }
@@ -150,7 +174,7 @@ jobs:
           $task = ([xml]$raw).Task
           $exec = $task.Actions.Exec
           Write-Host "명령: $($exec.Command) $($exec.Arguments)"
-          if ($exec.Command -notlike '*jaixw.exe*') { throw "작업이 창 없는 jaixw.exe 를 부르지 않음: $($exec.Command)" }
+          if ($exec.Command -notlike '*\jaix\jaixw.exe*') { throw "작업이 창 없는 jaixw.exe 를 부르지 않음: $($exec.Command)" }
           $pr = $task.Principals.Principal
           Write-Host "로그온 트리거 사용자: $($task.Triggers.LogonTrigger.UserId) · 실행: $($pr.LogonType) · 권한: $($pr.RunLevel)"
           # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
@@ -206,6 +230,7 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           gh release delete $tag --yes 2>$null
-          gh release create $tag ".\installer\Output\jaix-setup.exe" ".\dist\jaix.exe" --latest `
+          Compress-Archive -Path dist\jaix -DestinationPath jaix-windows.zip -Force
+          gh release create $tag ".\installer\Output\jaix-setup.exe" ".\jaix-windows.zip" --latest `
             --title "JAIX $tag" `
-            --notes "연구원 PC 설치: **jaix-setup.exe** 를 받아 실행하세요(관리자 권한 필요 없음).`n- jaix-setup.exe — 설치 프로그램. 런타임(uv·Git·Java·hwp2pdf)과 Claude·Codex 도구 등록까지 한 번에.`n- jaix.exe — 같은 CLI 단독 실행파일(jaix setup · doctor · update).`n고정 주소: https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe`nBuilt by .github/workflows/jaix-setup.yml."
+            --notes "연구원 PC 설치: **jaix-setup.exe** 를 받아 실행하세요(관리자 권한 필요 없음).`n- jaix-setup.exe — 설치 프로그램. 런타임(uv·Git·Java·hwp2pdf)과 Claude·Codex 도구 등록까지 한 번에.`n- jaix-windows.zip — 같은 CLI(jaix setup · doctor · update)를 설치 없이 쓰는 폴더. 풀어서 jaix\jaix.exe 를 실행.`n고정 주소: https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe`nBuilt by .github/workflows/jaix-setup.yml."

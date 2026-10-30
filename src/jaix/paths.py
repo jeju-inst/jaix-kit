@@ -71,6 +71,11 @@ def migrate_data():
     return moved
 
 
+def exe_dir():
+    """설치본(PyInstaller)이면 jaix.exe 가 있는 폴더({app}\\jaix), 아니면 None."""
+    return Path(sys.executable).parent if getattr(sys, "frozen", False) else None
+
+
 def self_command(windowless=False):
     """jaix 자신을 다시 부르는 명령. 설치본이면 jaix.exe, windowless면 옆의 창 없는 jaixw.exe(있으면)."""
     if not getattr(sys, "frozen", False):

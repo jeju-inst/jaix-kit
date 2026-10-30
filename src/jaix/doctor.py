@@ -2,10 +2,13 @@
 
 판정: ok 통과 · warn 주의(동작은 함, 손볼 것 있음) · fail 실패(종료 코드 1) · skip 해당 없음.
 """
+import os
+import re
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, gw, hermes, hwpjar, hwprhwp, paths, runtimes, schedule, uvpython, winenv
+from jaix import claude, codex, gw, hermes, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -83,12 +86,20 @@ def check_rhwp(lock):
                   "없음 — 한글이 열려 있으면 미리보기 렌더가 안 됨(한글을 닫으면 한컴으로 렌더)", "jaix setup")]
 
 
+def _same(a, b):
+    return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
+
+
 def check_path():
     if not IS_WIN:
         return []
     out = []
     # jaix가 깐 폴더와 winget 바로가기 폴더는 사용자 PATH에 있어야 새 창·다시 연 앱이 찾는다
     dirs = {paths.bin_dir()}
+    # 설치본(Inno 가 {app}\\jaix 에 깔고 PATH 에 넣음)만: 새 명령창이 jaix 를 찾으려면 그 폴더가 있어야 한다.
+    # 풀어서 쓰는 jaix-windows.zip 은 PATH 에 넣지 않으므로 묻지 않는다
+    if paths.exe_dir() and _same(paths.exe_dir(), paths.jaix_home() / "jaix"):
+        dirs.add(paths.exe_dir())
     for rt in runtimes.RUNTIMES:
         found = runtimes.find(rt)
         if found.managed:
@@ -109,6 +120,9 @@ def check_gw():
     area = "gw(그룹웨어)"
     if not gw.source():
         return [Check("skip", area, "끔 (--gw-source none)")]
+    other = gw.foreign()
+    if other:  # 개발용 gw를 지키려고 jaix가 일부러 건너뛴 것 — 실패가 아니다
+        return [Check("skip", area, f"개발용 gw가 있어 jaix가 설치·갱신하지 않음: {'; '.join(other)}")]
     have, info = gw.installed_version(), gw.latest()
     if not info:
         if have:
@@ -129,6 +143,65 @@ def _gw_base_url():
         return [Check("ok", "gw 그룹웨어 주소", "설정됨")]
     return [Check("warn", "gw 그룹웨어 주소", f"없음 — gw 가 그룹웨어에 접속하지 못함 ({gw.share_toml()})",
                   "원내망(사무실·VPN)에서 jaix setup")]
+
+
+# 플러그인 도구 중 셸 명령으로도 부르는 것: {플러그인 이름: 실행파일 이름}. 스킬이 PATH에서 찾으므로
+# 따로 깐 옛 실행파일(단독 Inno 설치본 등)이 먼저 잡히면 잠금과 다른 판이 돈다
+PATH_TOOLS = {"hwp-agent": "hwp-agent"}
+
+
+def _tool_version(exe):
+    try:
+        code, out = proc.run(exe, ["--version"], timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"\d+(?:\.\d+)+(?:\+\S+)?", out) if code == 0 else None
+    return m.group(0) if m else None
+
+
+def check_path_tools(lock):
+    out = []
+    for p in lock.plugins:
+        name = PATH_TOOLS.get(p.name)
+        exe = paths.which(name) if name and p.version else None
+        if not exe:
+            continue
+        have = _tool_version(exe)
+        area = f"PATH의 {name}"
+        if have and gw.same(have, p.version) and "+" not in have:
+            out.append(Check("ok", area, f"{have} (잠금과 같음 · {exe})"))
+            continue
+        what = "버전을 읽지 못함" if not have else f"개발판 {have}" if "+" in have or have.startswith("0.") else have
+        out.append(Check("warn", area, f"{what} ≠ 잠금 {p.version} — 스킬이 셸 명령으로 부르면 이것이 잡힘 ({exe})",
+                         "따로 깐 것이면 지우거나(설정 → 앱) 잠금 버전으로 올리기. 개발용이면 그대로 둬도 됨"))
+    return out
+
+
+def check_overlaps(lock):
+    """같은 도구가 한 호스트에 두 벌 — 알리기만 한다. 지울 것은 사용자가 고른다."""
+    out = []
+    for host, found in (("Claude", overlap.claude_overlaps(lock)), ("Codex", overlap.codex_overlaps(lock))):
+        for name, hits in found.items():
+            out.append(Check("warn", f"{host} 중복 {name}",
+                             f"jaix 것 말고도 있음: {'; '.join(hits)} — 같은 도구가 두 번 실려 토큰이 두 배로 듦",
+                             "하나만 남기세요(jaix는 지우지 않음). jaix 것을 쓰려면 위 플러그인을 끄거나 스킬 링크·MCP 항목을 지우기"))
+    return out
+
+
+def check_load():
+    """켜진 MCP 서버·스킬이 많으면 매 요청에 실리는 분량이 커져 사용량 한도에 빨리 닿는다(TS-TOKEN)."""
+    out = []
+    for host, (mcp, skills) in (("Claude", overlap.claude_load()), ("Codex", overlap.codex_load())):
+        if not mcp and not skills:
+            continue
+        est = overlap.estimate(mcp, skills)
+        msg = f"MCP 서버 {mcp}개 · 스킬 {skills}개 (상시 약 {est // 1000}k 토큰 어림)"
+        if est > overlap.BUDGET:
+            out.append(Check("warn", f"{host} 도구 수", msg + f" — {overlap.BUDGET // 1000}k를 넘어 사용량 한도에 빨리 닿을 수 있음",
+                             "안 쓰는 MCP 서버·플러그인을 끄기"))
+        else:
+            out.append(Check("ok", f"{host} 도구 수", msg))
+    return out
 
 
 def check_claude(lock):
@@ -245,7 +318,7 @@ def check_autoupdate():
 
 def run(lock):
     return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
-            *check_hermes(lock), *check_autoupdate()]
+            *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
 def render(checks):

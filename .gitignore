@@ -7,3 +7,4 @@ build/
 installer/Output/
 installer/payload/
 uv.lock
+!installer/jaix.spec

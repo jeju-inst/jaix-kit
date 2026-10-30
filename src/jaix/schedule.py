@@ -151,7 +151,17 @@ def run_mode():
         root = ET.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text.lstrip("\ufeff")))
     except (OSError, subprocess.TimeoutExpired, ET.ParseError, UnicodeError) as e:
         return f"작업 정의를 읽지 못함: {e}"
-    return mode_problem(root)
+    return mode_problem(root) or missing_command(root)
+
+
+def missing_command(root):
+    """작업이 부르는 실행파일이 없으면 그 문제. 설치 위치가 바뀌었는데(jaix-kit#46 onedir) jaix setup 을
+    다시 돌리지 않으면 작업이 예전 자리의 jaixw.exe 를 불러 아무 일도 하지 못한다."""
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    cmd = (root.findtext("t:Actions/t:Exec/t:Command", default="", namespaces=ns) or "").strip().strip('"')
+    if cmd and Path(os.path.expandvars(cmd)).is_absolute() and not Path(os.path.expandvars(cmd)).exists():
+        return f"작업이 부르는 {cmd} 가 없음(설치 위치가 바뀜)"
+    return None
 
 
 def mode_problem(root):

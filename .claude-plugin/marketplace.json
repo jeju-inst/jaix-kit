@@ -111,8 +111,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/jaix-gw.git",
-        "ref": "v2026.10.28.1",
-        "sha": "f82fe3273d010b34fd66ff4d159a5570d9026f87"
+        "ref": "v2026.10.29.2",
+        "sha": "612f2a442564397b63c5921af784d0f93d5e5187"
       },
       "homepage": "https://github.com/jeju-inst/jaix-gw",
       "metadata": {
@@ -120,7 +120,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.28.1"
+      "version": "2026.10.29.2"
     }
   ]
 }

@@ -1,9 +1,10 @@
 ﻿; Inno Setup — JAIX 설치 프로그램 (jaix-setup.exe).
-; 얇은 껍데기다: jaix.exe를 깔고, 채널 체크박스만 받아 `jaix setup --channels …`에 넘긴다
+; 얇은 껍데기다: jaix(onedir 폴더)를 깔고, 채널 체크박스만 받아 `jaix setup --channels …`에 넘긴다
 ; (ji-deploy-standards 3.2). 런타임 설치·마켓플레이스 등록·안내문은 전부 jaix CLI가 한다.
 ; 사용자 범위 설치(관리자 권한·재부팅 없음).
 ;
-; CI(jaix-setup.yml)가 installer\payload\jaix.exe 를 놓고  ISCC.exe installer\jaix-setup.iss  를 돌린다.
+; CI(jaix-setup.yml)가 installer\payload\jaix\ (PyInstaller onedir: jaix.exe·jaixw.exe·_internal) 를 놓고
+;   ISCC.exe installer\jaix-setup.iss  를 돌린다. {app} 은 런타임(bin·git·jre)도 두는 곳이라 실행파일은 {app}\jaix\ 에 둔다.
 ; 무인 설치:  jaix-setup.exe /VERYSILENT /CURRENTUSER /CHANNELS=claude,codex [/GWSOURCE=<원내 URL>]
 ; jaix setup이 실패하면 설치기는 종료 코드 10으로 끝난다(설치 자체는 남아 jaix doctor로 볼 수 있다).
 
@@ -34,27 +35,35 @@ ChangesEnvironment=yes
 RestartIfNeededByRun=no
 UninstallDisplayName={#AppName}
 SetupLogging=yes
+; 코드 서명 자리(jaix-kit#46): 인증서가 생기면 ISCC /Sjaixsign="signtool sign /fd sha256 ... $f" 로 넘기고 아래를 켠다
+; SignTool=jaixsign
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
+[InstallDelete]
+; 예전(onefile) 설치본이 {app} 바로 아래 둔 실행파일. 남으면 옛 PATH 항목으로 옛 jaix 가 불린다(jaix-kit#46)
+Type: files; Name: "{app}\jaix.exe"
+Type: files; Name: "{app}\jaixw.exe"
+; onedir 폴더는 판마다 통째로 바꾼다 — 빠진 모듈의 옛 파일이 _internal 에 남지 않게
+Type: filesandordirs; Name: "{app}\jaix"
+
 [Files]
-Source: "payload\jaix.exe"; DestDir: "{app}"; Flags: ignoreversion
-; 창 없는 빌드(--noconsole): 예약 작업(로그온 갱신·설치 중 setup)이 이것을 불러 콘솔 창이 뜨지 않는다
-Source: "payload\jaixw.exe"; DestDir: "{app}"; Flags: ignoreversion
+; jaix.exe(콘솔)·jaixw.exe(창 없음, 예약 작업이 부름)·_internal(둘이 함께 씀)
+Source: "payload\jaix\*"; DestDir: "{app}\jaix"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\JAIX 점검 (jaix doctor)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix.exe"" doctor"; Comment: "도구 설치 상태 점검"
-Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix.exe"" update"; Comment: "런타임·도구를 잠금 버전에 맞춤"
+Name: "{autoprograms}\JAIX 점검 (jaix doctor)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" doctor"; Comment: "도구 설치 상태 점검"
+Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" update"; Comment: "런타임·도구를 잠금 버전에 맞춤"
 
 [Registry]
-; jaix.exe 자체를 사용자 PATH에. 런타임 폴더(bin·git·jre)는 jaix setup이 넣는다
+; jaix.exe 자체를 사용자 PATH에. 런타임 폴더(bin·git·jre)는 jaix setup이 넣고, 예전 설치본이 넣은 {app} 항목도 뺀다
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
-  ValueData: "{olddata};{app}"; Check: NeedsAddPath(ExpandConstant('{app}'))
+  ValueData: "{olddata};{app}\jaix"; Check: NeedsAddPath(ExpandConstant('{app}\jaix'))
 
 [UninstallRun]
 ; 사용자 PATH에서 jaix 폴더들을 뺀다. Claude·Codex 설정과 설치된 플러그인은 그대로 둔다
-Filename: "{app}\jaix.exe"; Parameters: "cleanup"; Flags: runhidden; RunOnceId: "JaixCleanup"
+Filename: "{app}\jaix\jaix.exe"; Parameters: "cleanup"; Flags: runhidden; RunOnceId: "JaixCleanup"
 
 [UninstallDelete]
 ; jaix setup이 받은 포터블 런타임(bin·git·jre). 기록·상태는 %LOCALAPPDATA%\jaix 에 있어 남긴다
@@ -170,7 +179,7 @@ begin
       '나중에 명령창에서 다음을 실행하면 됩니다:' + #13#10 + '  jaix setup';
     exit;
   end;
-  ExePath := ExpandConstant('{app}\jaix.exe');
+  ExePath := ExpandConstant('{app}\jaix\jaix.exe');
   GuideFile := ExpandConstant('{localappdata}\jaix\guide.txt');
   LogFile := ExpandConstant('{localappdata}\jaix\setup.log');
   // --via-task: jaix setup 본 실행을 작업 스케줄러로 돌린다. 설치본의 자식으로 돌면 Windows 11 프로세스 완화

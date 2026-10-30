@@ -10,8 +10,9 @@ import os
 import re
 import subprocess
 import tomllib
+from pathlib import PureWindowsPath
 
-from jaix import paths, proc
+from jaix import paths, proc, uvpython
 from jaix.paths import IS_WIN
 from jaix.lock import GIT_URL, MARKETPLACE, same_commit
 
@@ -146,9 +147,19 @@ def mcp_servers(lock):
             continue
         for name, spec in servers.items():
             if "command" in spec and "cwd" not in spec:  # codex mcp add 가 cwd를 받지 않는다
-                out[name] = _subst({"command": spec["command"], "args": list(spec.get("args") or []),
+                out[name] = _subst({"command": spec["command"], "args": _pin_python(spec),
                                     "env": dict(spec.get("env") or {})}, root)
     return out
+
+
+def _pin_python(spec):
+    """uvx 서버에 --python 고정이 없으면 미리 깐 기본 버전을 붙인다. Hermes가 이 항목을 그대로 가져가 자기
+    VIRTUAL_ENV(Python 3.14) 아래에서 띄우면 uvx가 3.14를 골라 lxml 5.4.0 을 소스 빌드하다 실패한다(jaix-kit#45).
+    --python 을 주면 uv는 VIRTUAL_ENV 보다 그것을 따른다(uv 0.11 실측)."""
+    args = list(spec.get("args") or [])
+    if PureWindowsPath(str(spec["command"])).stem.lower() == "uvx" and not uvpython.pins({"mcpServers": {"x": spec}}):
+        args = ["--python", uvpython.DEFAULT, *args]
+    return args
 
 
 def _mcp_record():
