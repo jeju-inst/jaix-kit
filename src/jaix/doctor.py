@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, gw, hermes, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv
+from jaix import claude, codex, gw, hermes, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -138,6 +138,28 @@ def check_gw():
     if not gw.same(have, info["version"]):
         return [Check("warn", area, f"{have} 설치됨 — 배포 버전은 {info['version']}", "jaix update"), *_gw_base_url()]
     return [Check("ok", area, f"{have} (배포 버전과 같음)"), *_gw_base_url()]
+
+
+def check_works(lock):
+    area = "웍스(nworks)"
+    if not works.plugin(lock):
+        return []
+    want = works.spec(lock)["nworks"]
+    have, integrity = works.installed()
+    if not have:
+        return [Check("fail", area, "설치 안 됨", "jaix setup")]
+    if have != want["version"] or integrity != want["integrity"]:
+        return [Check("warn", area, f"{have} 설치됨 — 잠금은 {want['version']}", "jaix update")]
+    out = [Check("ok", area, f"{have} (잠금과 같음, {works.home()})")]
+    if IS_WIN and not winenv.in_user_path(works.bin_dir()):
+        out.append(Check("warn", area, "실행 폴더가 사용자 PATH에 없음", "jaix setup"))
+    if not works.saved_client():
+        out.append(Check("warn", "웍스 기관 앱 정보", "없음 — 원내망에서 받아야 함", "원내망(사무실·VPN)에서 jaix setup"))
+    elif not works.logged_in():
+        out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix works login"))
+    else:
+        out.append(Check("ok", "웍스 로그인", "됨"))
+    return out
 
 
 def _gw_base_url():
@@ -322,7 +344,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 

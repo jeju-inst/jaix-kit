@@ -22,6 +22,13 @@ def _github(repo, pattern):
     return lambda: net.latest_release_asset(repo, pattern)
 
 
+def _nodejs():
+    """nodejs.org 의 최신 LTS Windows x64 zip. (jaix-works 의 nworks 가 쓴다)"""
+    rel = next(r for r in net.get_json("https://nodejs.org/dist/index.json") if r.get("lts") and "win-x64-zip" in r["files"])
+    name = f"node-{rel['version']}-win-x64.zip"
+    return name, f"https://nodejs.org/dist/{rel['version']}/{name}"
+
+
 def _adoptium():
     rel = net.get_json(ADOPTIUM_API)[0]
     pkg = rel["binary"]["package"]
@@ -71,6 +78,9 @@ RUNTIMES = [
             # 낮으면 그 값을 몰라 서버 설정이 있는 PC에서 로컬 렌더가 원격으로 샌다(z0nam/hwp2pdf#5)
             min_version="2026.10.30.1", min_reason="HWP2PDF_LOCAL 지원",
             purpose="한컴오피스로 HWP 렌더(PDF)"),
+    # 웍스 도구(nworks, npm 패키지)만 쓴다. 잠금에 jaix-works 가 있으면 works.ensure 가 부른다
+    Runtime("node", "Node.js (LTS)", "node", ["--version"], False, _nodejs, tree="node",
+            winget="OpenJS.NodeJS.LTS", min_major=18, hint="brew install node", purpose="웍스 도구(nworks)"),
     Runtime("himalaya", "himalaya", "himalaya", ["--version"], False,
             _github("pimalaya/himalaya", r"^himalaya\.x86_64-windows\.zip$"), hint="brew install himalaya",
             purpose="메일 도구(선택)"),
