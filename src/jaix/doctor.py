@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from jaix import claude, codex, gw, hermes, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
+from jaix import claude, codex, gw, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -315,15 +315,39 @@ def check_codex(lock):
     return out
 
 
+def check_hermes_bot():
+    """jaix가 깐 Hermes 슬랙 봇. jaix가 손댄 적이 없으면 보지 않는다."""
+    rec = hermesbot.recorded()
+    if not rec.get("status"):
+        return []
+    area = "Hermes 슬랙"
+    if rec["status"] == "failed":
+        return [Check("fail", area, rec.get("error") or "설치 실패", "jaix setup --channels hermes (AI센터 연결 코드 필요)")]
+    if not hermesbot.find_hermes():
+        return [Check("fail", area, "hermes 실행 파일이 없음", "jaix setup --channels hermes")]
+    if rec["status"] == "no-code":
+        return [Check("warn", area, "Hermes는 있으나 슬랙 연결 안 됨(연결 코드 없음)", "AI센터에서 연결 코드를 받아 jaix-setup 다시")]
+    out = []
+    if not (hermesbot.env_has("SLACK_BOT_TOKEN") and hermesbot.env_has("SLACK_APP_TOKEN")):
+        out.append(Check("fail", area, "Hermes .env 에 슬랙 토큰이 없음", "AI센터에 새 연결 코드 요청"))
+    elif IS_WIN and not hermesbot.startup_entries():
+        out.append(Check("fail", area, "gateway 시작프로그램 항목이 없음 — 로그온 때 봇이 뜨지 않음",
+                         "hermes gateway install"))
+    else:
+        slack = rec.get("slack") or {}
+        out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}"))
+    return out
+
+
 def check_hermes(lock):
     have = hermes.installed()
     if not have:
-        return [Check("skip", "Hermes", "다음 버전에서 켬")]
+        return [*check_hermes_bot()] or [Check("skip", "Hermes", "고르지 않음(설치기의 '슬랙으로도 쓰기')")]
     sha = {p.name: p.sha for p in lock.plugins}
     stale = sorted(n for n, m in have.items() if m.get("plugin") in sha and m.get("sha") != sha[m["plugin"]])
     if stale:
         return [Check("fail", "Hermes 스킬", f"잠금과 다름: {', '.join(stale)}", "jaix update")]
-    return [Check("ok", "Hermes 스킬", f"{len(have)}개 잠금과 같음")]
+    return [*check_hermes_bot(), Check("ok", "Hermes 스킬", f"{len(have)}개 잠금과 같음")]
 
 
 def check_autoupdate():

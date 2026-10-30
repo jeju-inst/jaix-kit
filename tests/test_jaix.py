@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, codex, doctor, gw, hermes, hwpjar, hwprhwp, lock, overlap, runtimes, schedule, uvpython, winenv
+from jaix import claude, cli, codex, doctor, gw, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
 REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
@@ -16,6 +16,7 @@ REAL_GW_FOREIGN = gw.foreign  # isolated 픽스처가 막기 전의 진짜 함�
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
+REAL_HERMES_SETUP = hermesbot.setup
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
@@ -41,7 +42,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("JI_GW_CONFIG_DIR", str(tmp_path / "gwconf"))
     monkeypatch.delenv("GW_BASE_URL", raising=False)  # 기본 원내 주소로 나가지 않게(gw 시험이 저마다 바꾼다)
     monkeypatch.setattr(gw, "foreign", lambda uv=None: [])  # 개발 PC의 진짜 uv tool·gw 를 보지 않게
-    monkeypatch.setattr(doctor, "PATH_TOOLS", {})  # 개발 PC의 진짜 hwp-agent 를 부르지 않게(시험이 저마다 켠다)
+    monkeypatch.setattr(doctor, "PATH_TOOLS", {})
+    # Hermes 무인 설치(Windows CI 에서 install.ps1 3GB 를 진짜로 받지 않게). 시험은 REAL_HERMES_SETUP 을 부른다
+    monkeypatch.setattr(hermesbot, "setup", lambda lock, log, **kw: {"status": "unsupported"})  # 개발 PC의 진짜 hwp-agent 를 부르지 않게(시험이 저마다 켠다)
     return tmp_path
 
 
@@ -1181,3 +1184,188 @@ def test_doctor_warns_outdated_hwp2pdf(monkeypatch):
         assert c.status == status, version
         if status == "warn":
             assert "업데이트 필요" in c.message and rt.min_version in c.message and "jaix update" in c.fix
+
+
+# --- Hermes 무인 설치 · 슬랙 토큰 1회 전달 (hermesbot) ---------------------------------------------
+
+
+def test_handoff_code_and_bundle_0600(tmp_path):
+    codes = {hermesbot.new_code() for _ in range(50)}
+    assert len(codes) == 50 and all(hermesbot.CODE_RE.match(c) for c in codes)
+    code, _ = hermesbot.write_bundle(tmp_path / "spool", "demo", "U0TEST", "xoxb-TEST-1", "xapp-TEST-1")
+    f = tmp_path / "spool" / f"{hermesbot.code_key(code)}.json"
+    data = json.loads(f.read_text(encoding="utf-8"))
+    assert data["bot_token"] == "xoxb-TEST-1" and "expires_at" in data and code not in f.read_text(encoding="utf-8")
+    if not paths.IS_WIN:
+        assert oct(f.stat().st_mode & 0o777) == "0o600"
+    with pytest.raises(FileExistsError):  # 같은 코드로 덮어쓰지 않는다
+        hermesbot.write_bundle(tmp_path / "spool", "demo", "U0TEST", "xoxb-TEST-2", "xapp-TEST-2", code=code)
+
+
+def test_cmd_handoff_checks_tokens_before_writing(tmp_path, monkeypatch, capsys):
+    tokens = iter(["xoxb-TEST-1", "xapp-TEST-1"])
+    monkeypatch.setattr(hermesbot.getpass, "getpass", lambda prompt: next(tokens))
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-bob", "team": "T"})
+    args = type("A", (), {"id": "demo", "user": "U0TEST", "ttl": 72, "spool": str(tmp_path / "spool")})()
+    assert hermesbot.cmd_handoff(args, print) == 1          # 다른 사람 봇 → 멈춤, 묶음 없음
+    assert not (tmp_path / "spool").exists()
+    tokens = iter(["xoxb-TEST-1", "xapp-TEST-1"])
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
+    assert hermesbot.cmd_handoff(args, print) == 0
+    out = capsys.readouterr().out
+    assert len(list((tmp_path / "spool").glob("*.json"))) == 1
+    assert "xoxb-TEST" not in out and "xapp-TEST" not in out and re.search(r"JX-[A-Z2-7]{26}", out)
+
+
+def test_read_code_file_deletes_even_bad(tmp_path):
+    f = tmp_path / "code"
+    f.write_text("jx-" + "a" * 26 + "\n", encoding="utf-8")
+    assert hermesbot.read_code_file(f) == "JX-" + "A" * 26 and not f.exists()
+    f.write_text("nope", encoding="utf-8")
+    with pytest.raises(hermesbot.HandoffError):
+        hermesbot.read_code_file(f)
+    assert not f.exists()
+
+
+@pytest.fixture
+def handoff_server(monkeypatch):
+    """배포처 흉내: 코드 하나를 한 번만 준다(본문으로 받는지도 본다)."""
+    import http.server
+    import threading
+    state = {"code": "JX-" + "A" * 26, "used": False, "paths": []}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            state["paths"].append(self.path)
+            body = self.rfile.read(int(self.headers["Content-Length"])).decode()
+            if body != state["code"]:
+                status, data = 404, {"error": "unknown"}
+            elif state["used"]:
+                status, data = 410, {"error": "used"}
+            else:
+                state["used"] = True
+                status, data = 200, {"id": "demo", "user": "U0TEST", "bot_token": "xoxb-TEST-1", "app_token": "xapp-TEST-1"}
+            raw = json.dumps(data).encode()
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("JAIX_HANDOFF_URL", f"http://127.0.0.1:{srv.server_address[1]}/hermes/handoff")
+    yield state
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_claim_once_then_used(handoff_server):
+    code = handoff_server["code"]
+    assert hermesbot.claim(code)["bot_token"] == "xoxb-TEST-1"
+    with pytest.raises(hermesbot.HandoffError, match="이미 사용"):
+        hermesbot.claim(code)
+    with pytest.raises(hermesbot.HandoffError, match="만료"):
+        hermesbot.claim("JX-" + "B" * 26)
+    assert all(code not in p for p in handoff_server["paths"])  # 코드는 URL에 싣지 않는다
+
+
+def _fake_windows(monkeypatch, isolated, calls):
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "install_hermes", lambda log, dry_run=False: True)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    monkeypatch.setattr(hermes, "install", lambda lock, log, dry_run=False: [])
+
+
+def test_hermes_setup_connects_and_never_logs_secrets(isolated, monkeypatch, handoff_server, the_lock):
+    calls, lines = [], []
+    _fake_windows(monkeypatch, isolated, calls)
+    seen = {}
+    monkeypatch.setattr(hermesbot, "connect_slack", lambda bundle, log: seen.update(bundle) or True)
+    code_file = isolated / "pending" / "hermes-code"
+    code_file.parent.mkdir()
+    code_file.write_text(handoff_server["code"], encoding="utf-8")
+    res = REAL_HERMES_SETUP(the_lock, lines.append, code_file=str(code_file), model="claude")
+    assert res["status"] == "connected" and res["id"] == "demo" and seen["app_token"] == "xapp-TEST-1"
+    assert not code_file.exists()
+    assert ["hermes", "config", "set", "model.provider", "anthropic"] in calls
+    assert ["hermes", "tools", "disable", "browser", "computer_use", "--platform", "slack"] in calls
+    text = "\n".join(lines)
+    assert "xoxb-TEST" not in text and "xapp-TEST" not in text and handoff_server["code"] not in text
+    assert hermesbot.recorded()["status"] == "connected"
+
+
+def test_hermes_setup_bad_code_fails_and_doctor_shows_it(isolated, monkeypatch, the_lock):
+    _fake_windows(monkeypatch, isolated, [])
+    code_file = isolated / "code"
+    code_file.write_text("wrong", encoding="utf-8")
+    res = REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file))
+    assert res["status"] == "failed" and not code_file.exists()
+    checks = doctor.check_hermes(the_lock)
+    assert checks[0].status == "fail" and checks[0].area == "Hermes 슬랙"
+
+
+def test_hermes_setup_without_code_installs_but_warns(isolated, monkeypatch, the_lock):
+    _fake_windows(monkeypatch, isolated, [])
+    assert REAL_HERMES_SETUP(the_lock, print)["status"] == "no-code"
+    assert doctor.check_hermes(the_lock)[0].status == "warn"
+
+
+def test_hermes_setup_failure_makes_setup_fail(isolated, monkeypatch, the_lock):
+    monkeypatch.setattr(hermesbot, "setup", lambda lock, log, **kw: {"status": "failed", "error": "x"})
+    monkeypatch.setattr(claude, "find_cli", lambda: None)
+    assert cli._setup_problems({"hermes": {"status": "failed"}})
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "hermes", "--no-autoupdate"]) != 0
+
+
+def test_hermes_config_failure_stops_before_claim(isolated, monkeypatch, the_lock):
+    _fake_windows(monkeypatch, isolated, [])
+    monkeypatch.setattr(hermesbot, "configure", lambda *a, **kw: False)
+    monkeypatch.setattr(hermesbot, "claim", lambda code: pytest.fail("코드를 쓰면 안 됨"))
+    code_file = isolated / "code"
+    code_file.write_text("JX-" + "A" * 26, encoding="utf-8")
+    assert REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file))["status"] == "failed"
+
+
+def test_hermes_dry_run_keeps_code_file(isolated, monkeypatch, the_lock):
+    _fake_windows(monkeypatch, isolated, [])
+    code_file = isolated / "code"
+    code_file.write_text("JX-" + "A" * 26, encoding="utf-8")
+    assert REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file), dry_run=True)["status"] == "dry-run"
+    assert code_file.exists()
+
+
+def test_hermes_mcp_only_jaix_entries(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    rec = codex._mcp_record()
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(json.dumps({"hwp-agent": {"command": "uvx", "args": ["--python", "3.12", "x"], "env": {}},
+                               "korea-rio": {"command": "uvx", "args": ["y"], "env": {}}}), encoding="utf-8")
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("model:\n  provider: x\nmcp_servers:\n  korea-rio:\n    command: mine\n", encoding="utf-8")
+    assert hermesbot.write_mcp("hermes", print)
+    names = [c[3] for c in calls]
+    assert names == ["mcp_servers.hwp-agent"]           # 사용자 것(korea-rio)은 그대로
+    assert json.loads(calls[0][4])["args"][:2] == ["--python", "3.12"]
+    assert hermesbot._yaml_has_key(cfg.read_text(encoding="utf-8"), "mcp_servers", "korea-rio")
+    assert not hermesbot._yaml_has_key("model:\n  korea-rio: 1\n", "mcp_servers", "korea-rio")
+    for text in ("mcp_servers: # custom\n  hwp-agent:\n", "mcp_servers:\n    hwp-agent:\n",
+                 "mcp_servers:\n  'hwp-agent':\n", "mcp_servers:\n  \"hwp-agent\": {}\n"):
+        assert hermesbot._yaml_has_key(text, "mcp_servers", "hwp-agent"), text
+
+
+def test_no_slack_secrets_in_repo():
+    """공개 저장소에 진짜 슬랙 토큰·연결 코드가 들어가지 않게(시험용 TEST 값만 허용, 설계 §5)."""
+    root = Path(__file__).resolve().parent.parent
+    pat = re.compile(r"(xox[abpe]-|xapp-)(?!TEST|OLD|…)[0-9A-Za-z-]{8,}|JX-(?![A]{26}|[B]{26})[A-Z2-7]{26}")
+    hits = []
+    for f in root.rglob("*"):
+        if f.is_file() and ".git" not in f.parts and ".venv" not in f.parts and f.suffix in {".py", ".md", ".iss", ".yml", ".json", ".toml"}:
+            for m in pat.finditer(f.read_text(encoding="utf-8", errors="replace")):
+                hits.append(f"{f.relative_to(root)}: {m.group(0)[:12]}…")
+    assert not hits, hits
