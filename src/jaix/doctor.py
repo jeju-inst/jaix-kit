@@ -6,9 +6,9 @@ import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
-from jaix import claude, codex, gw, hermes, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv
+from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -24,7 +24,7 @@ class Check:
     fix: str = ""
 
 
-def check_runtimes():
+def check_runtimes(lock=None):
     out = []
     for rt in runtimes.RUNTIMES:
         if not rt.applies:
@@ -32,9 +32,12 @@ def check_runtimes():
                 out.append(Check("skip", rt.label, "Windows 전용(한컴오피스) — 이 OS에서는 rhwp 근사 렌더를 씀"))
             continue
         found = runtimes.find(rt)
-        if runtimes.ok(rt, found):
+        if runtimes.ok(rt, found) and runtimes.outdated(rt, found):
+            out.append(Check("warn", rt.label, f"{found.version} — 업데이트 필요: {rt.min_version} 이상({rt.min_reason})",
+                             "jaix update (직접 설치했으면 새 설치기로)"))
+        elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
-        elif not rt.required:
+        elif not runtimes.required(rt, lock):
             out.append(Check("skip", rt.label, f"없음 — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
         elif found.path:
             out.append(Check("fail", rt.label, f"{found.version} — {rt.min_major} 이상 필요 ({rt.purpose})",
@@ -45,6 +48,25 @@ def check_runtimes():
             out.append(Check("warn", "한컴오피스", "없음 → HWP 렌더는 rhwp 근사 렌더로 대체 (hwp2pdf는 설치돼 있음)",
                              "정확한 렌더가 필요하면 한컴오피스 설치"))
     return out
+
+
+MAIL_PLUGIN = "mail"
+MAIL_PYTHON = uvpython.DEFAULT  # mail 스크립트는 PATH 의 python3 대신 uv 관리 Python 3.12 로 돈다(mail-skill-dev 설계)
+
+
+def check_mail_python(lock):
+    """mail 플러그인이 잠금에 있으면 그 스크립트가 쓸 uv 관리 Python 이 있는지. PATH 의 python3 는 세지 않는다."""
+    if not any(p.name == MAIL_PLUGIN for p in lock.plugins):
+        return []
+    area = "mail Python"
+    if not runtimes.find(runtimes.BY_KEY["uv"]).path:
+        return [Check("fail", area, "uv 없음 — mail 스크립트를 띄울 수 없음", FIX_SETUP if IS_WIN else "brew install uv")]
+    found = uvpython.find(MAIL_PYTHON)
+    if not found:
+        # 맥·리눅스는 uv run --python 이 처음 실행 때 받아도 되므로 주의로만(check_uv_python 과 같은 기준)
+        return [Check("fail" if IS_WIN else "warn", area, f"uv 관리 Python {MAIL_PYTHON} 없음 — mail 스크립트가 돌지 않음",
+                      "jaix setup (다시 실행)" if IS_WIN else f"uv python install {MAIL_PYTHON}")]
+    return [Check("ok", area, f"uv 관리 Python {MAIL_PYTHON} ({found})")]
 
 
 def check_uv_python():
@@ -84,6 +106,26 @@ def check_rhwp(lock):
         return [Check("ok", "HWP 미리보기 엔진(rhwp)", f"{hwprhwp.installed_version() or '버전 미상'} · {hwprhwp.exe()}")]
     return [Check("warn", "HWP 미리보기 엔진(rhwp)",
                   "없음 — 한글이 열려 있으면 미리보기 렌더가 안 됨(한글을 닫으면 한컴으로 렌더)", "jaix setup")]
+
+
+def check_hancom_consent():
+    """한컴 PC에서만 한 줄. 답이 없으면 첫 변환이 보이지 않는 동의 창에서 멈춘다(약 2분 뒤 rhwp 근사 렌더)."""
+    path = hancom.option_info()
+    if not hancom.present() or path is None:
+        return []
+    if not hancom.applies():
+        ver = hancom.installed_version() or "버전 미상"
+        return [Check("skip", hancom.AREA, f"한컴 {ver} — 미리 답하기는 확인된 2022({hancom.VERSION})만 "
+                                          "(첫 변환이 멈추면 한글을 한 번 열어 답하세요)")]
+    if not path.exists():
+        return [Check("warn", hancom.AREA, "답 없음 — 첫 변환이 보이지 않는 동의 창에서 멈출 수 있음", "jaix setup")]
+    got = hancom.answers(path)
+    if all(got.get(k) == "0" for k in hancom.KEYS):
+        return [Check("ok", hancom.AREA, "'동의 안 함'으로 답해 둠")]
+    if all(got.get(k) in ("0", "1") for k in hancom.KEYS):
+        return [Check("ok", hancom.AREA, "답해 둠")]
+    return [Check("warn", hancom.AREA, "답 없음(한글 설정 파일은 있음) — 첫 변환이 동의 창에서 멈출 수 있음",
+                  "한글을 한 번 직접 열어 동의 창에 답하세요")]
 
 
 def _same(a, b):
@@ -135,6 +177,31 @@ def check_gw():
     if not gw.same(have, info["version"]):
         return [Check("warn", area, f"{have} 설치됨 — 배포 버전은 {info['version']}", "jaix update"), *_gw_base_url()]
     return [Check("ok", area, f"{have} (배포 버전과 같음)"), *_gw_base_url()]
+
+
+def check_works(lock):
+    area = "웍스(nworks)"
+    if not works.plugin(lock):
+        return []
+    want = works.spec(lock)["nworks"]
+    have, integrity = works.installed()
+    if not have:
+        return [Check("fail", area, "설치 안 됨", "jaix setup")]
+    if have != want["version"] or integrity != want["integrity"]:
+        return [Check("warn", area, f"{have} 설치됨 — 잠금은 {want['version']}", "jaix update")]
+    out = [Check("ok", area, f"{have} (잠금과 같음, {works.home()})")]
+    if IS_WIN and not winenv.in_user_path(works.bin_dir()):
+        out.append(Check("warn", area, "실행 폴더가 사용자 PATH에 없음", "jaix setup"))
+    elif not IS_WIN and not works.on_path():
+        out.append(Check("warn", area, "PATH에서 jaix 가 깐 nworks 가 안 보임 — 스킬이 부르지 못함",
+                         f"{works.link_dir()} 를 PATH에 추가하고 jaix setup"))
+    if not works.saved_client():
+        out.append(Check("warn", "웍스 기관 앱 정보", "없음 — 원내망에서 받아야 함", "원내망(사무실·VPN)에서 jaix setup"))
+    elif not works.logged_in():
+        out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix works login"))
+    else:
+        out.append(Check("ok", "웍스 로그인", "됨"))
+    return out
 
 
 def _gw_base_url():
@@ -255,6 +322,10 @@ def check_claude(lock):
     return out
 
 
+def _exe_stem(command):
+    return PureWindowsPath(str(command)).stem.lower()
+
+
 def check_codex(lock):
     if not codex.find_cli():
         return [Check("skip", "Codex", "설치 안 됨")]
@@ -267,7 +338,9 @@ def check_codex(lock):
     for p in lock.plugins:
         if p.id not in enabled:
             out.append(Check("fail", f"Codex {p.name}", "설치 안 됨", "jaix setup --channels codex"))
-        elif same_commit(rec.get(p.id), p.sha) or (p.id not in rec and same_commit(snap_sha.get(p.name), p.sha)):
+        # 기록이 낡아도 깔린 사본이 잠금과 같으면 통과(#48: marketplace upgrade 가 사본만 새로 받는 일이 있다)
+        elif (same_commit(rec.get(p.id), p.sha) or same_commit(codex.cache_head(p.name), p.sha)
+              or (p.id not in rec and same_commit(snap_sha.get(p.name), p.sha))):
             out.append(Check("ok", f"Codex {p.name}", p.label))
         else:
             out.append(Check("fail", f"Codex {p.name}", f"잠금 {p.label}보다 옛 버전", "jaix update"))
@@ -277,23 +350,65 @@ def check_codex(lock):
     # 사용자가 같은 이름을 직접 정의한 것(jaix가 맡지 않은 것)은 그대로 둔다
     stale = [n for n, spec in want.items()
              if codex._current(n) != spec and (codex._current(n) is None or n in owned)]
-    if stale:
-        out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(stale)} (0 tools로 실패함)",
+    # jaix가 쓴 항목을 다른 실행파일(예: hwp-agent 단독 설치본 exe)이 덮어쓴 것과, 항목이 없거나 옛 경로인 것을 가른다
+    taken = {n: codex._current(n)["command"] for n in stale
+             if codex._current(n) and _exe_stem(codex._current(n)["command"]) != _exe_stem(want[n]["command"])}
+    fix_taken = "단독 설치본의 MCP 등록을 끈 뒤 jaix update 로 되돌리기"
+    for n, cmd in taken.items():
+        out.append(Check("fail", "Codex MCP", f"다른 설치본({cmd})이 {n} MCP 항목을 차지함", fix_taken))
+    # jaix update 가 한 번 돈 뒤에는 그 항목을 사용자 것으로 보고 손을 뗀다(owned 에서 빠짐) → jaix가 썼던 항목만
+    # 주의로 계속 알린다. 처음부터 사용자가 정의한 항목(released 에 없음)은 예전처럼 조용히 둔다
+    released = codex.released_mcp()
+    for n, spec in want.items():
+        cur = codex._current(n)
+        if n in released and n not in taken and cur and _exe_stem(cur["command"]) != _exe_stem(spec["command"]):
+            out.append(Check("warn", "Codex MCP", f"jaix가 쓴 {n} MCP 항목을 다른 실행파일({cur['command']})이 바꿔 씀",
+                             f"단독 설치본이면 {fix_taken} · 직접 바꾼 것이면 무시해도 됨"))
+    rest = [n for n in stale if n not in taken]
+    if rest:
+        out.append(Check("fail", "Codex MCP", f"플러그인 MCP 경로가 config.toml에 없음/옛것: {', '.join(rest)}",
                          "jaix update"))
-    elif want:
+    elif want and not taken and not any(c.status == "warn" and c.area == "Codex MCP" for c in out):
         out.append(Check("ok", "Codex MCP", ", ".join(want)))
+    return out
+
+
+def check_hermes_bot():
+    """jaix가 깐 Hermes 슬랙 봇. jaix가 손댄 적이 없으면 보지 않는다."""
+    rec = hermesbot.recorded()
+    if not rec.get("status"):
+        return []
+    area = "Hermes 슬랙"
+    if rec["status"] == "failed":
+        return [Check("fail", area, rec.get("error") or "설치 실패", "jaix setup --channels hermes (AI센터 연결 코드 필요)")]
+    if not hermesbot.find_hermes():
+        return [Check("fail", area, "hermes 실행 파일이 없음", "jaix setup --channels hermes")]
+    if rec["status"] == "no-code":
+        return [Check("warn", area, "Hermes는 있으나 슬랙 연결 안 됨(연결 코드 없음)", "AI센터에서 연결 코드를 받아 jaix-setup 다시")]
+    out = []
+    if not (hermesbot.env_has("SLACK_BOT_TOKEN") and hermesbot.env_has("SLACK_APP_TOKEN")):
+        out.append(Check("fail", area, "Hermes .env 에 슬랙 토큰이 없음", "AI센터에 새 연결 코드 요청"))
+    elif IS_WIN and not hermesbot.startup_entries():
+        out.append(Check("fail", area, "gateway 시작프로그램 항목이 없음 — 로그온 때 봇이 뜨지 않음",
+                         "hermes gateway install"))
+    else:
+        slack = rec.get("slack") or {}
+        out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}"))
+    if rec.get("last_error"):
+        out.append(Check("warn", area, f"마지막 다시 설치에서 실패(기존 연결은 그대로): {rec['last_error']}",
+                         "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림"))
     return out
 
 
 def check_hermes(lock):
     have = hermes.installed()
     if not have:
-        return [Check("skip", "Hermes", "다음 버전에서 켬")]
+        return [*check_hermes_bot()] or [Check("skip", "Hermes", "고르지 않음(설치기의 '슬랙으로도 쓰기')")]
     sha = {p.name: p.sha for p in lock.plugins}
     stale = sorted(n for n, m in have.items() if m.get("plugin") in sha and m.get("sha") != sha[m["plugin"]])
     if stale:
         return [Check("fail", "Hermes 스킬", f"잠금과 다름: {', '.join(stale)}", "jaix update")]
-    return [Check("ok", "Hermes 스킬", f"{len(have)}개 잠금과 같음")]
+    return [*check_hermes_bot(), Check("ok", "Hermes 스킬", f"{len(have)}개 잠금과 같음")]
 
 
 def check_autoupdate():
@@ -317,7 +432,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(), *check_uv_python(), *check_hwp_jar(lock), *check_rhwp(lock), *check_gw(), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
