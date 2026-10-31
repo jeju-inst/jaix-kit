@@ -5,7 +5,9 @@
 ;
 ; CI(jaix-setup.yml)가 installer\payload\jaix\ (PyInstaller onedir: jaix.exe·jaixw.exe·_internal) 를 놓고
 ;   ISCC.exe installer\jaix-setup.iss  를 돌린다. {app} 은 런타임(bin·git·jre)도 두는 곳이라 실행파일은 {app}\jaix\ 에 둔다.
-; 무인 설치:  jaix-setup.exe /VERYSILENT /CURRENTUSER /CHANNELS=claude,codex [/GWSOURCE=<원내 URL>]
+; 무인 설치:  jaix-setup.exe /VERYSILENT /CURRENTUSER /CHANNELS=claude,codex[,hermes] [/GWSOURCE=<원내 URL>]
+;             Hermes: /HERMESCODEFILE=<연결 코드 파일, jaix가 읽고 지움> [/HERMESMODEL=chatgpt|claude]
+; 슬랙 연결 코드는 명령줄·설치 기록에 싣지 않는다 — 사용자 폴더의 파일로 넘기고 jaix가 읽자마자 지운다(docs/design-hermes-unattended.md §3.2)
 ; jaix setup이 실패하면 설치기는 종료 코드 10으로 끝난다(설치 자체는 남아 jaix doctor로 볼 수 있다).
 
 #define AppName "JAIX 원내 AI 도구"
@@ -61,6 +63,13 @@ Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Param
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
   ValueData: "{olddata};{app}\jaix"; Check: NeedsAddPath(ExpandConstant('{app}\jaix'))
 
+[Run]
+; Hermes 를 깔았으면 마지막 화면에서 AI 구독 로그인 창을 연다(브라우저 승인 한 번은 사람이 한다)
+Filename: "{cmd}"; Parameters: "/K ""{localappdata}\hermes\bin\hermes.exe"" auth add openai-codex"; \
+  Description: "Hermes AI 로그인 창 열기 (ChatGPT)"; Flags: postinstall nowait skipifsilent; Check: HermesLogin('chatgpt')
+Filename: "{cmd}"; Parameters: "/K ""{localappdata}\hermes\bin\hermes.exe"" auth add anthropic --type oauth"; \
+  Description: "Hermes AI 로그인 창 열기 (Claude)"; Flags: postinstall nowait skipifsilent; Check: HermesLogin('claude')
+
 [UninstallRun]
 ; 사용자 PATH에서 jaix 폴더들을 뺀다. Claude·Codex 설정과 설치된 플러그인은 그대로 둔다
 Filename: "{app}\jaix\jaix.exe"; Parameters: "cleanup"; Flags: runhidden; RunOnceId: "JaixCleanup"
@@ -73,6 +82,8 @@ Type: filesandordirs; Name: "{app}"
 [Code]
 var
   ChannelPage: TInputOptionWizardPage;
+  HermesPage: TInputQueryWizardPage;
+  ModelPage: TInputOptionWizardPage;
   GuidePage: TOutputMsgMemoWizardPage;
   ProgressPage: TOutputProgressWizardPage;
   SetupLines: Integer;
@@ -108,11 +119,28 @@ begin
     False, False);
   ChannelPage.Add('Claude (데스크톱 앱 · Claude Code) — 권장');
   ChannelPage.Add('Codex (데스크톱 앱 · CLI)');
-  ChannelPage.Add('슬랙으로도 쓰기 (Hermes) — 다음 버전');
+  ChannelPage.Add('슬랙으로도 쓰기 (Hermes) — AI센터에서 받은 연결 코드 필요');
   ChannelPage.Values[0] := True;
   ChannelPage.Values[1] := IsCodexInstalled();
   ChannelPage.Values[2] := False;
-  ChannelPage.CheckListBox.ItemEnabled[2] := False;
+
+  HermesPage := CreateInputQueryPage(
+    ChannelPage.ID,
+    '슬랙 연결 코드',
+    'AI센터에서 받은 연결 코드를 붙여 넣으세요.',
+    '코드는 한 번만 쓸 수 있고 72시간 뒤 만료됩니다. 원내망에서 설치해야 합니다. ' +
+    '코드가 없으면 비워 두세요(Hermes만 깔고 슬랙 연결은 나중에 합니다).');
+  HermesPage.Add('연결 코드 (JX-로 시작):', False);
+
+  ModelPage := CreateInputOptionPage(
+    HermesPage.ID,
+    'Hermes가 쓸 AI',
+    '이미 쓰고 있는 구독을 고르세요.',
+    '설치가 끝나면 로그인 창이 열립니다. 브라우저에서 승인하면 됩니다.',
+    True, False);
+  ModelPage.Add('ChatGPT 구독 — 권장');
+  ModelPage.Add('Claude 구독');
+  ModelPage.Values[0] := True;
 
   ProgressPage := CreateOutputProgressPage('도구 설치 중', '런타임을 내려받고 AI에 도구를 등록합니다. 몇 분 걸릴 수 있습니다.');
 
@@ -122,6 +150,52 @@ begin
     '이렇게 쓰세요',
     '아래 안내는 시작 메뉴의 "JAIX 점검"으로 언제든 다시 확인할 수 있습니다.',
     '');
+end;
+
+function HermesChosen(): Boolean;
+begin
+  Result := Pos('hermes', ExpandConstant('{param:CHANNELS|}')) > 0;
+  if (not Result) and (ExpandConstant('{param:CHANNELS|}') = '') then
+    Result := ChannelPage.Values[2];
+end;
+
+function HermesModel(): string;
+begin
+  Result := ExpandConstant('{param:HERMESMODEL|}');
+  if Result <> '' then
+    exit;
+  if ModelPage.Values[1] then
+    Result := 'claude'
+  else
+    Result := 'chatgpt';
+end;
+
+function HermesLogin(Model: string): Boolean;
+begin
+  Result := HermesChosen() and (HermesModel() = Model) and
+    FileExists(ExpandConstant('{localappdata}\hermes\bin\hermes.exe'));
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := ((PageID = HermesPage.ID) or (PageID = ModelPage.ID)) and not ChannelPage.Values[2];
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Code: string;
+begin
+  Result := True;
+  if CurPageID = HermesPage.ID then
+  begin
+    Code := Uppercase(Trim(HermesPage.Values[0]));
+    HermesPage.Values[0] := Code;
+    if (Code <> '') and ((Length(Code) <> 29) or (Copy(Code, 1, 3) <> 'JX-')) then
+    begin
+      MsgBox('연결 코드는 JX-로 시작하는 29자입니다. AI센터에서 받은 코드를 그대로 붙여 넣으세요.', mbError, MB_OK);
+      Result := False;
+    end;
+  end;
 end;
 
 function SelectedChannels(): string;
@@ -137,6 +211,12 @@ begin
     if Result <> '' then
       Result := Result + ',';
     Result := Result + 'codex';
+  end;
+  if ChannelPage.Values[2] then
+  begin
+    if Result <> '' then
+      Result := Result + ',';
+    Result := Result + 'hermes';
   end;
 end;
 
@@ -166,7 +246,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Channels, ExePath, GuideFile, LogFile, Params, Guide: string;
+  Channels, ExePath, GuideFile, LogFile, Params, Guide, CodeFile: string;
   ResultCode: Integer;
 begin
   if CurStep <> ssPostInstall then
@@ -185,6 +265,21 @@ begin
   // --via-task: jaix setup 본 실행을 작업 스케줄러로 돌린다. 설치본의 자식으로 돌면 Windows 11 프로세스 완화
   // 정책(RedirectionGuard)을 물려받아 uv 정션 등에서 os error 448 로 죽는다(#27). 진행 줄은 그대로 이 화면에 흐른다
   Params := 'setup --via-task --channels ' + Channels + ' --guide-out "' + GuideFile + '" --log "' + LogFile + '"';
+  CodeFile := '';
+  if HermesChosen() then
+  begin
+    Params := Params + ' --hermes-model ' + HermesModel();
+    CodeFile := ExpandConstant('{param:HERMESCODEFILE|}');
+    if (CodeFile = '') and (HermesPage.Values[0] <> '') then
+    begin
+      // 사용자 폴더(본인·SYSTEM·Administrators만)에 둔다. 값은 Log 에 넘기지 않는다
+      CodeFile := ExpandConstant('{localappdata}\jaix\pending\hermes-code');
+      ForceDirectories(ExtractFileDir(CodeFile));
+      SaveStringToFile(CodeFile, HermesPage.Values[0], False);
+    end;
+    if CodeFile <> '' then
+      Params := Params + ' --hermes-code-file "' + CodeFile + '"';
+  end;
   { gw 런타임 latest.json 주소를 바꿀 때만 /GWSOURCE= (기본은 jaix 의 원내 주소, none 이면 끔) }
   if ExpandConstant('{param:GWSOURCE|}') <> '' then
     Params := Params + ' --gw-source "' + ExpandConstant('{param:GWSOURCE|}') + '"';
@@ -196,6 +291,9 @@ begin
       ResultCode := -1;
   finally
     ProgressPage.Hide;
+    // jaix가 읽자마자 지우지만, jaix가 거기까지 못 갔을 때도 코드가 남지 않게
+    if CodeFile <> '' then
+      DeleteFile(CodeFile);
   end;
   Guide := LoadGuide(GuideFile);
   if (ResultCode = 0) and (Guide <> '') then

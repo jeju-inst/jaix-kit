@@ -108,7 +108,7 @@ jobs:
 | ID | 규칙 | 검사 |
 |---|---|---|
 | TS-TOKEN-1 | **상시 분량**(플러그인 설명 + 모든 스킬 frontmatter + MCP 도구 스키마)은 도구 하나당 합계 **3k 토큰 이하**로 한다 | △ |
-| TS-TOKEN-2 | **호출 한 번에 싣는 분량**(SKILL.md + 그 워크플로가 읽는 reference)은 **10k 토큰 이하**로 한다 | △ (plugin_lint, 경고) |
+| TS-TOKEN-2 | **호출 한 번에 싣는 분량**(SKILL.md + 그 워크플로가 읽는 reference)은 **10k 토큰 이하**로 한다 | △ (plugin_lint, 경고 — SKILL.md 근사: 한글 1자 1.5토큰 + 나머지 바이트/2.5. TS-TOKEN-3 실측 5건에 맞춤, 오차 −2〜+6%) |
 | TS-TOKEN-3 | 편입 PR에 측정값을 적는다. 측정법은 다음과 같다. **`claude -p --setting-sources project --output-format json`**으로, 문서를 붙인 프롬프트와 빈 프롬프트를 번갈아 3회씩 보낸다. 각 호출의 `input + cache_creation + cache_read`의 차이를 낸다. 실행 폴더는 프로젝트 설정이 없는 빈 폴더로 한다. **3회 값이 모두 같아야 한다.** 다르면 기준선이 고정되지 않은 것이므로 원인을 찾고, 중앙값으로 덮지 않는다. 워크플로별 합계는 SKILL.md와 해당 reference를 한 번에 붙여 잰다 | 문서 |
 
 근거: `docs/handoff/README.md` 공통 규칙 9, jeju-inst/calendar-worklog#41(측정법, 22k → 10k 이하).
