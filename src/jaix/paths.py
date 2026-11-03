@@ -26,7 +26,9 @@ def codex_home():
 
 
 def hermes_home():
-    return _env_path("HERMES_HOME", Path.home() / ".hermes")
+    # Windows 의 Hermes 기본 집은 %LOCALAPPDATA%\hermes 다(맥·리눅스는 ~/.hermes, namun-ji 실측 2026-10-07)
+    default = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "hermes" if IS_WIN else Path.home() / ".hermes"
+    return _env_path("HERMES_HOME", default)
 
 
 def jaix_home():

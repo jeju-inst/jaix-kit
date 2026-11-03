@@ -1,7 +1,6 @@
-"""Hermes 채널(개인 슬랙 봇): 이번 버전은 자리만 둔다.
+"""Hermes 채널의 스킬: 잠금의 플러그인 스킬을 Hermes 스킬 폴더에 **복사**한다(Windows는 심링크 대신 복사).
 
-설치(`--channels hermes`)는 다음 버전이다 — 개인 슬랙 앱을 관리자가 미리 만들고 토큰을 넘기는 절차가 먼저 필요하다.
-여기에는 잠금의 플러그인 스킬을 Hermes 스킬 폴더에 **복사**하는 부분만 있다(Windows는 심링크 대신 복사).
+Hermes 설치·슬랙 연결은 hermesbot.py. `jaix setup --channels hermes` 가 install 로 전부 복사하고,
 `jaix update`는 이전에 jaix가 복사해 둔 스킬(.jaix.json 표시가 있는 폴더)만 잠금 커밋에 맞춘다.
 """
 import json
@@ -12,7 +11,6 @@ from pathlib import Path
 
 from jaix import net, paths
 
-NOT_YET = "Hermes(슬랙으로도 쓰기)는 다음 버전에서 켭니다. 지금은 Claude·Codex 채널만 설치합니다."
 MARKER = ".jaix.json"
 
 
@@ -64,8 +62,28 @@ def installed():
     return out
 
 
+def install(lock, log, dry_run=False):
+    """잠금 플러그인의 스킬을 전부 복사한다. 같은 이름의 사용자 스킬(표시 없음)은 덮지 않는다."""
+    have, done = installed(), []
+    with tempfile.TemporaryDirectory() as tmp:
+        for p in lock.plugins:
+            if dry_run:
+                log(f"    Hermes 스킬 {p.name}: 복사 예정")
+                continue
+            for skill in plugin_skills(p, tmp):
+                dst = skills_dir() / skill.name
+                if dst.exists() and skill.name not in have:
+                    log(f"    Hermes 스킬 {skill.name}: 같은 이름의 사용자 스킬이 있어 그대로 둠")
+                    continue
+                copy_skill(skill, dst, {"plugin": p.name, "ref": p.ref, "sha": p.sha})
+                done.append(skill.name)
+    if done:
+        log(f"    Hermes 스킬 {len(done)}개 복사")
+    return done
+
+
 def sync(lock, log, dry_run=False):
-    """이미 복사해 둔 스킬만 잠금 커밋으로 맞춘다. 새로 까는 일은 하지 않는다(다음 버전)."""
+    """이미 복사해 둔 스킬만 잠금 커밋으로 맞춘다. 새로 까는 일은 setup(install)이 한다."""
     have = installed()
     if not have:
         return []
