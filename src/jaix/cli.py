@@ -396,6 +396,9 @@ def build_parser():
     ho.add_argument("--ttl", type=float, default=hermesbot.TTL_HOURS, help="유효 시간(기본 72)")
     ho.add_argument("--spool", help=f"묶음 폴더(기본 {hermesbot.HANDOFF_SPOOL}, ji-gw-ai 배포처와 같게)")
     ho.set_defaults(func=hermesbot.cmd_handoff)
+    ap_ = hsub.add_parser("approvals", help="이 PC Hermes 의 위험 명령 승인 방식(smart·manual). off 는 AI센터 관리자만")
+    ap_.add_argument("mode", choices=hermesbot.APPROVAL_MODES)
+    ap_.set_defaults(func=hermesbot.cmd_approvals)
 
     w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
     wsub = w.add_subparsers(dest="works_cmd", required=True)
