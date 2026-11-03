@@ -1750,3 +1750,13 @@ def test_release_asset_other_http_errors_are_not_masked(monkeypatch):
     monkeypatch.setattr(net, "_api_release", lambda repo: (_ for _ in ()).throw(_http_error(404)))
     with pytest.raises(urllib.error.HTTPError):
         net.latest_release_asset("o/r", "x")
+
+
+
+def test_release_asset_web_non_limit_error_is_not_called_rate_limit(monkeypatch):
+    monkeypatch.setattr(net, "rate_limit_hit", False)
+    monkeypatch.setattr(net, "_api_release", lambda repo: (_ for _ in ()).throw(_http_error(403, "0")))
+    monkeypatch.setattr(net, "_web_release", lambda repo: (_ for _ in ()).throw(_http_error(404)))
+    with pytest.raises(urllib.error.HTTPError) as e:
+        net.latest_release_asset("o/r", "x")
+    assert e.value.code == 404 and not net.rate_limit_hit

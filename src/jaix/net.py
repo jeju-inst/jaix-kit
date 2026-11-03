@@ -93,7 +93,9 @@ def latest_release_asset(repo, pattern):
         try:
             rel = _web_release(repo)
         except urllib.error.HTTPError as e:
-            if not (e.code in (403, 429) and attempt == 0):
+            if e.code not in (403, 429):
+                raise  # 한도가 아닌 오류(404·503 등)는 그대로 — 기다리라는 안내가 틀린 답이 된다
+            if attempt == 1:
                 global rate_limit_hit
                 rate_limit_hit = True
                 raise RateLimited(RATE_LIMIT_HINT) from None
