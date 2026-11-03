@@ -1711,3 +1711,42 @@ def test_hermes_approval_mode_read_and_doctor_warns_off(isolated, monkeypatch):
     assert [c.status for c in doctor.check_hermes_bot()] == ["ok", "warn"]
     cfg.write_text("approvals:\n  mode: 'smart'\n", encoding="utf-8")
     assert hermesbot.approval_mode() == "smart" and [c.status for c in doctor.check_hermes_bot()] == ["ok"]
+
+
+# --- GitHub 익명 한도(원내 여러 PC 가 한 공인 IP 로 동시 설치, jaix-kit-dev 11-03) --------------------
+import email.message  # noqa: E402
+import urllib.error  # noqa: E402
+
+from jaix import net  # noqa: E402
+
+
+def _http_error(code, remaining=None):
+    h = email.message.Message()
+    if remaining is not None:
+        h["X-RateLimit-Remaining"] = remaining
+    return urllib.error.HTTPError("https://api.github.com/x", code, "rate limit exceeded", h, None)
+
+
+def test_release_asset_falls_back_to_web_when_api_rate_limited(monkeypatch):
+    monkeypatch.setattr(net, "_api_release", lambda repo: (_ for _ in ()).throw(_http_error(403, "0")))
+    monkeypatch.setattr(net, "_web_release", lambda repo: {"tag_name": "v1", "assets": [
+        {"name": "tool-1.exe", "browser_download_url": "https://github.com/o/r/releases/download/v1/tool-1.exe"}]})
+    assert net.latest_release_asset("o/r", r"^tool-[\d.]+\.exe$")[0] == "tool-1.exe"
+
+
+def test_release_asset_rate_limited_everywhere_gives_hint(monkeypatch):
+    monkeypatch.setattr(net, "WEB_RETRY_SECONDS", 0)
+    monkeypatch.setattr(net, "rate_limit_hit", False)
+    monkeypatch.setattr(net, "_api_release", lambda repo: (_ for _ in ()).throw(_http_error(403, "0")))
+    tries = []
+    monkeypatch.setattr(net, "_web_release", lambda repo: tries.append(1) or (_ for _ in ()).throw(_http_error(429)))
+    with pytest.raises(net.RateLimited, match="다시 실행"):
+        net.latest_release_asset("o/r", "x")
+    assert len(tries) == 2 and net.rate_limit_hit          # 한 번 쉬었다가 다시 해 본다
+    assert any(net.RATE_LIMIT_HINT in line for line in cli.guide(["claude"], {}).splitlines())
+
+
+def test_release_asset_other_http_errors_are_not_masked(monkeypatch):
+    monkeypatch.setattr(net, "_api_release", lambda repo: (_ for _ in ()).throw(_http_error(404)))
+    with pytest.raises(urllib.error.HTTPError):
+        net.latest_release_asset("o/r", "x")
