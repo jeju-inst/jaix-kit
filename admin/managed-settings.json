@@ -12,7 +12,7 @@
     "ji-project-template@jaix": true,
     "korea-rio-mcp@jaix": true,
     "gw@jaix": true,
-    "claude-for-nonprofits@claude-for-nonprofits": false
+    "claude-for-nonprofits@synced": false
   },
   "model": "sonnet",
   "permissions": {

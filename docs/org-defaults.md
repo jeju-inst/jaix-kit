@@ -21,11 +21,16 @@
 |---|---|---|
 | `claude-for-nonprofits` 의 **Default access** | **Not available** | 비영리 할인 조직에 Anthropic이 "기본 설치"로 내려보낸다(2026-10-28 갱신본, 미국 모금·지원금용 커넥터 20개·스킬 13개). 도구 정의만으로 상시 예산 3k를 몇 배 넘는다 |
 | ⚠ "Remove from organization" 은 누르지 않는다 | — | Anthropic 카탈로그 출처 전체가 빠진다(플러그인 하나만 빠지지 않음) |
-| jaix 마켓플레이스 추가 | GitHub `jeju-inst/jaix-kit` (main) | Cowork·Desktop 경로 |
+| jaix 마켓플레이스 추가 | **Sync from GitHub** → 비공개 저장소 `jeju-inst/jaix-kit-org` (아래 주) | Cowork·Desktop 경로 |
 | jaix 플러그인 6종 기본 접근 | **Installed by default** (Required 아님) | "느슨" 결정. 사용자가 끌 수 있다 |
 | 그 밖의 Anthropic 카탈로그(`engineering` 등) | 기본값(Available to install) 유지 | 깔지 않으면 비용 없음 |
 
-- 출처: https://claude.com/docs/plugins/admin
+- **주 — 조직 동기화는 공개 마켓플레이스 저장소를 받지 않는다.** Team·Enterprise 조직 동기화는 github.com 마켓플레이스 저장소가 private 또는 internal이어야 한다. `jeju-inst/jaix-kit` 은 공개라 그대로는 등록할 수 없다.
+  - 대신 플러그인 소스는 공개 저장소여도 된다(자격 증명 없이 받는다). jaix 잠금의 6종은 모두 공개이고 소스 형식도 `url`·`git-subdir` 이라 받아들여진다(2026-11-03 확인).
+  - 그래서 **`marketplace.json` 만 담은 비공개 저장소 `jeju-inst/jaix-kit-org` 를 두고**, jaix-kit main에 머지될 때마다 워크플로가 그 파일을 복사해 넣는다. 잠금의 정본은 계속 jaix-kit이다.
+  - CLI 경로(③ managed settings·`jaix setup`)는 지금처럼 공개 `jaix-kit` 을 가리킨다. 조직 동기화 규칙이 적용되지 않는다.
+  - 저장소 생성과 복사 워크플로는 별도 PR로 한다(사용자 확인 후).
+- 출처: https://claude.com/docs/plugins/admin, https://claude.com/docs/plugins/org-sync ("Plugin sources that organization sync accepts")
 
 ## 2. Connectors — `Organization settings > Connectors`
 
@@ -47,7 +52,7 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 |---|---|---|
 | `extraKnownMarketplaces.jaix` | git URL + `autoUpdate: true` | jaix 자동 등록·자동 업데이트. `jaix setup` 이 사용자 설정에 넣던 것과 같은 값 |
 | `enabledPlugins` (jaix 6종) | `true` | **managed의 `true` 는 강제 켬이다** — 사용자가 꺼도 로드된다(①의 "Installed by default"와 다름). 아래 주의 참조 |
-| `enabledPlugins` 비영리 | `false` | ①과 이중 차단. 모든 스코프에서 막힌다. **키 이름은 미확인**: 메타의 마켓플레이스 이름은 `claude-for-nonprofits` 인데 CLI에는 `claude-for-nonprofits@synced` 로 보인다 → 실측 3에서 안 막히면 `@synced` 로 바꾼다 |
+| `enabledPlugins` `claude-for-nonprofits@synced` | `false` | ①과 이중 차단. 계정 동기화 플러그인 하나를 끄는 공식 형식이 `"<name>@synced": false` 다(settings-reference `syncClaudeAiPlugins` 절) |
 | `model` | `sonnet` | 좌석이 대부분 Pro의 1.25배라 한도 방지. 사용자의 `/model` 선택보다 우선하지만 `--model` 은 이긴다 |
 | `permissions.disableBypassPermissionsMode` | `disable` | 비개발자 PC에서 "전부 허용" 모드를 막는다. 잠금이 아니라 사고 방지 |
 | `companyAnnouncements` | 안내 1줄 | 시작 화면에 표시 |
@@ -64,7 +69,7 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | 1 | managed settings가 CLI에 내려옴 | 시험 계정 `claude doctor` → "Managed settings (remote)" 줄 | |
 | 2 | Desktop Code 탭에도 적용되는지 | Code 탭에서 `/status`·플러그인 목록 | |
 | 3 | 비영리 플러그인이 사라짐 | `~/.claude/plugins/synced/` 에서 빠지는지, `/mcp` 에 `plugin:claude-for-nonprofits:*` 가 없는지 | |
-| 4 | jaix 6종이 Cowork에 보임 | Desktop Cowork 플러그인 목록 | |
+| 4 | jaix 6종이 Cowork에 보임 | `jaix-kit-org` 동기화 뒤 Desktop Cowork 플러그인 목록 | |
 | 5 | 조직 커넥터 4종이 CLI `/mcp` 에 `claude.ai …` 로 보임 | `/mcp` | |
 | 6 | Slack 커넥터 첫 연결이 Slack 관리자 승인 없이 되는지 | 일반 연구원 계정으로 연결 | |
 | 7 | `model: sonnet` 이 CLI에서 기본으로 잡힘 | 새 세션 `/model` | |
