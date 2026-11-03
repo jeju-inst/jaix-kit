@@ -34,7 +34,7 @@ TTL_HOURS = 72
 CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
-SLACKBOT_SHA = "d55adeedf013146f25f3bf162c9d50df00facbe8"
+SLACKBOT_SHA = "d3511e93d15b3150668b08eb327f8d22b49c6115"  # hermes-slackbot#18: 소유자 DM 을 홈 채널로
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
     "chatgpt": {"provider": "openai-codex", "default": "gpt-6.1-sol",
                 "base_url": "https://chatgpt.com/backend-api/codex", "login": ["auth", "add", "openai-codex"]},
@@ -48,6 +48,10 @@ QUIET = {"compression.codex_gpt55_autoraise_notice": "false"}  # 첫 대화의 �
 # 있고 /help 에도 이것만 보인다. 뺀 것: /login·/topup(쓰지 않는 Nous 계정·결제), /yolo(위험 명령 승인을 이 세션에서
 # 통째로 건너뜀). 목록은 Hermes v0.21.5 GATEWAY_KNOWN_COMMANDS 에서 셋을 뺀 것 — 새 판의 새 명령은 jaix가 올릴 때까지 막힌다
 SLASH_NOBODY = "U00JAIXNONE"
+# 위험 명령 승인 방식(사용자 결정 10-30): 연구원은 smart·manual 만, off 는 AI센터 관리자만. Hermes 는 슬랙 /approvals
+# 로 바꾸는 것을 모드와 상관없이 관리자 전용으로 막으므로(gateway _handle_approvals_command), 연구원은 PC 에서
+# `jaix hermes approvals smart|manual` 로 바꾼다. off 는 이 명령이 받지 않는다
+APPROVAL_MODES = ("smart", "manual")
 SLASH_DENIED = ("login", "topup", "yolo")
 SLASH_ALLOWED = [
     "agents", "approvals", "approve", "bg", "blueprint", "bp", "branch", "btw", "bundles", "busy", "codex-runtime",
@@ -292,6 +296,31 @@ def configure(hermes, model, log, dry_run=False):
         ok &= _run([hermes, "tools", "disable", *OFF_TOOLSETS, "--platform", platform], log)[0]
     ok &= write_mcp(hermes, log)
     return ok
+
+
+def approval_mode():
+    """config.yaml 의 approvals.mode (없으면 None — Hermes 기본값 smart). YAML 파서 없이 그 절만 본다."""
+    try:
+        text = config_path().read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = re.search(r"^approvals:\s*$(.*?)(?=^\S|\Z)", text, re.M | re.S)
+    mm = m and re.search(r"^\s+mode:\s*['\"]?(\w+)", m.group(1), re.M)
+    return mm.group(1).lower() if mm else None
+
+
+def cmd_approvals(args, log):
+    """연구원 PC: 위험 명령 승인 방식을 smart·manual 중에서 바꾼다(off 는 관리자만, 이 명령은 받지 않음)."""
+    hermes = find_hermes()
+    if not hermes:
+        log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
+        return 1
+    ok, _ = _run([hermes, "config", "set", "approvals.mode", args.mode], log)
+    if not ok:
+        return 1
+    log(f"승인 방식: {args.mode} ({'위험해 보이는 명령만 묻기' if args.mode == 'smart' else '위험 명령마다 묻기'}). "
+        "gateway 를 다시 시작하지 않아도 다음 명령부터 적용됩니다.")
+    return 0
 
 
 def builtin_skills():

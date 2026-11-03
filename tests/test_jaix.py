@@ -1686,3 +1686,28 @@ def test_hermes_quiet_refreshes_empty_managed_skill_list(isolated, monkeypatch):
     hermesbot.quiet("hermes", print)
     sets = {c[3]: c[4] for c in calls if c[1:3] == ["config", "set"]}
     assert json.loads(sets["skills.disabled"]) == ["new-default"]
+
+
+# --- 위험 명령 승인 방식(사용자 결정 10-30: 연구원은 smart·manual, off 는 관리자만) ---------------------
+def test_hermes_approvals_cli_only_smart_manual(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    assert cli.main(["hermes", "approvals", "manual"]) == 0
+    assert calls[-1] == ["hermes", "config", "set", "approvals.mode", "manual"]
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["hermes", "approvals", "off"])
+
+
+def test_hermes_approval_mode_read_and_doctor_warns_off(isolated, monkeypatch):
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("model:\n  mode: x\napprovals:\n  timeout: 60\n  mode: off\nother: 1\n", encoding="utf-8")
+    assert hermesbot.approval_mode() == "off"
+    hermesbot._save_record({"status": "connected", "slack": {"id": "a", "connected": "t"}})
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(hermesbot, "env_has", lambda k: True)
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
+    assert [c.status for c in doctor.check_hermes_bot()] == ["ok", "warn"]
+    cfg.write_text("approvals:\n  mode: 'smart'\n", encoding="utf-8")
+    assert hermesbot.approval_mode() == "smart" and [c.status for c in doctor.check_hermes_bot()] == ["ok"]
