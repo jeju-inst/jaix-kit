@@ -22,6 +22,13 @@ def _github(repo, pattern):
     return lambda: net.latest_release_asset(repo, pattern)
 
 
+def _nodejs():
+    """nodejs.org 의 최신 LTS Windows x64 zip. (jaix-works 의 nworks 가 쓴다)"""
+    rel = next(r for r in net.get_json("https://nodejs.org/dist/index.json") if r.get("lts") and "win-x64-zip" in r["files"])
+    name = f"node-{rel['version']}-win-x64.zip"
+    return name, f"https://nodejs.org/dist/{rel['version']}/{name}"
+
+
 def _adoptium():
     rel = net.get_json(ADOPTIUM_API)[0]
     pkg = rel["binary"]["package"]
@@ -40,7 +47,10 @@ class Runtime:
     path_subdir: str = ""           # tree 안에서 PATH에 넣을 하위 폴더
     winget: str | None = None
     min_major: int | None = None
+    min_version: str | None = None  # 이보다 낮으면 doctor가 "업데이트 필요"(동작은 함 → 주의)
+    min_reason: str = ""            # 그 버전이 필요한 이유(doctor 메시지)
     windows_only: bool = False
+    needed_by: str = ""             # 이 플러그인이 잠금에 있으면 필수(없으면 선택). 잠금이 곧 켜진 플러그인 목록이다
     hint: str = ""                  # 맥·리눅스 설치 안내
     purpose: str = ""
 
@@ -65,12 +75,19 @@ RUNTIMES = [
             purpose="hwp → hwpx 변환"),
     Runtime("hwp2pdf", "hwp2pdf-cli", "hwp2pdf-cli", ["--version"], True,
             _github("z0nam/hwp2pdf", r"^hwp2pdf-cli-[\d.]+\.exe$"), windows_only=True,
+            # hwp-agent가 HWP2PDF_LOCAL=1(저장된 서버 무시, 이 PC 한컴으로 변환)을 넘긴다. 이 첫 지원판보다
+            # 낮으면 그 값을 몰라 서버 설정이 있는 PC에서 로컬 렌더가 원격으로 샌다(z0nam/hwp2pdf#5)
+            min_version="2026.10.30.1", min_reason="HWP2PDF_LOCAL 지원",
             purpose="한컴오피스로 HWP 렌더(PDF)"),
+    # 웍스 도구(nworks, npm 패키지)만 쓴다. 잠금에 jaix-works 가 있으면 works.ensure 가 부른다
+    Runtime("node", "Node.js (LTS)", "node", ["--version"], False, _nodejs, tree="node",
+            winget="OpenJS.NodeJS.LTS", min_major=18, hint="brew install node", purpose="웍스 도구(nworks)"),
     Runtime("himalaya", "himalaya", "himalaya", ["--version"], False,
             _github("pimalaya/himalaya", r"^himalaya\.x86_64-windows\.zip$"), hint="brew install himalaya",
-            purpose="메일 도구(선택)"),
+            needed_by="mail", purpose="메일 도구(mail 플러그인)"),
     Runtime("age", "age", "age", ["--version"], False, _github("FiloSottile/age", r"-windows-amd64\.zip$"),
-            winget="FiloSottile.age", hint="brew install age", purpose="메일 도구 비밀 암호화(선택)"),
+            winget="FiloSottile.age", hint="brew install age", needed_by="mail",
+            purpose="메일 도구 비밀 암호화(mail 플러그인)"),
 ]
 BY_KEY = {rt.key: rt for rt in RUNTIMES}
 
@@ -101,6 +118,17 @@ def find(rt):
     m = re.search(r"(\d+)(?:\.\d+)+", raw)
     return Found(path, m.group(0) if m else None, int(m.group(1)) if m else None,
                  raw.splitlines()[0] if raw else "", managed=bool(own))
+
+
+def _vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or ""))
+
+
+def outdated(rt, found):
+    """min_version이 있고 찾은 버전이 그보다 낮으면 True. 버전을 못 읽으면 판정하지 않는다(False)."""
+    if not (rt.min_version and found.path and found.version):
+        return False
+    return _vtuple(found.version) < _vtuple(rt.min_version)
 
 
 def ok(rt, found):
@@ -222,10 +250,15 @@ def hancom_installed():
         return False
 
 
-def select(keys):
-    """--runtimes 값(쉼표 구분)을 Runtime 목록으로. 비우면 필수 + 맥에서 안 쓰는 것 제외."""
+def required(rt, lock=None):
+    """필수인지: 늘 필수이거나, 이 런타임을 쓰는 플러그인(needed_by)이 잠금에 있을 때."""
+    return rt.required or bool(rt.needed_by and lock and any(p.name == rt.needed_by for p in lock.plugins))
+
+
+def select(keys, lock=None):
+    """--runtimes 값(쉼표 구분)을 Runtime 목록으로. 비우면 필수(잠금의 플러그인이 쓰는 것 포함) + 맥에서 안 쓰는 것 제외."""
     if not keys:
-        return [rt for rt in RUNTIMES if rt.required and rt.applies]
+        return [rt for rt in RUNTIMES if required(rt, lock) and rt.applies]
     unknown = [k for k in keys if k not in BY_KEY]
     if unknown:
         raise SystemExit(f"모르는 런타임: {', '.join(unknown)} (가능: {', '.join(BY_KEY)})")

@@ -91,8 +91,13 @@ def setup(lock, log, dry_run=False, update=False):
     snap = {e["name"]: e["source"].get("sha") for e in (snapshot_lock() or {}).get("plugins", [])}
     have, rec, failed = enabled_plugins(), recorded(), []
     for p in lock.plugins:
-        stale = not same_commit(rec.get(p.id), p.sha)
-        if p.id in have and not (update and stale):
+        if p.id in have and same_commit(rec.get(p.id), p.sha):
+            continue
+        # 기록이 잠금과 다르다. `marketplace upgrade`가 깔린 사본을 스스로 새로 받아 두는 일이 있어(jaix-kit#48: 덮어
+        # 설치 뒤 사본은 최신, 기록만 옛것) 실물 커밋을 먼저 보고 맞으면 기록만 맞춘다. 실물을 모르면 setup도 다시 깐다
+        if p.id in have and same_commit(cache_head(p.name), p.sha):
+            rec[p.id] = cache_head(p.name)
+            log(f"    최신: {p.id} {p.label} (깔린 사본이 잠금과 같음 — 기록만 맞춤)")
             continue
         if _run(cli, ["plugin", "add", p.id], log):
             rec[p.id] = snap.get(p.name)
@@ -115,6 +120,24 @@ def setup(lock, log, dry_run=False, update=False):
 # 쓰기는 `codex mcp add/remove`로 한다 — Codex가 config.toml을 다시 쓰면서 주석 표식을 지우므로 파일을 직접
 # 고치지 않는다. jaix가 쓴 이름은 jaix_home/codex-mcp.json에 적어 두고 그것만 바꾸거나 지운다(사용자 항목 보존).
 ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}"
+
+
+def cache_head(name):
+    """Codex가 깐 사본의 git 커밋(사본 안 .git 의 HEAD). git-subdir 사본처럼 .git 이 없으면 None."""
+    root = plugin_root(name)
+    git = root / ".git" if root else None
+    try:
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head[4:].strip()
+            f = git / ref
+            if f.is_file():
+                return f.read_text(encoding="utf-8").strip()
+            packed = (git / "packed-refs").read_text(encoding="utf-8")
+            return next((ln.split()[0] for ln in packed.splitlines() if ln.endswith(" " + ref)), None)
+        return head
+    except (OSError, TypeError):
+        return None
 
 
 def plugin_root(name):
@@ -166,6 +189,18 @@ def _mcp_record():
     return paths.data_dir() / "codex-mcp.json"
 
 
+def _released_record():
+    return paths.data_dir() / "codex-mcp-released.json"
+
+
+def released_mcp():
+    """jaix가 썼다가, 그 뒤 바뀌어 있어 손을 뗀 항목 이름(doctor 가 '다른 설치본' 주의를 낼 대상)."""
+    try:
+        return set(json.loads(_released_record().read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return set()
+
+
 def owned_mcp():
     try:
         return json.loads(_mcp_record().read_text(encoding="utf-8"))
@@ -189,7 +224,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
     cli = cli or find_cli()
     if not cli:
         return False
-    want, owned = mcp_servers(lock), owned_mcp()
+    want, owned, released = mcp_servers(lock), owned_mcp(), released_mcp()
     ok = True
     for name, spec in want.items():
         cur = _current(name)
@@ -202,6 +237,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
         if cur is not None and cur != owned[name]:  # jaix가 쓴 뒤 사용자가 고침 → 그 뒤로는 사용자 것
             log(f"    MCP {name}: jaix가 쓴 뒤 바뀌어 있어 그대로 둠(이제 사용자 정의로 봄)")
             owned.pop(name)
+            released.add(name)
             continue
         if dry_run:
             log(f"    MCP {name}: 절대경로로 쓸 예정")
@@ -210,6 +246,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
                 *spec["args"]]
         if _run(cli, args, log):
             owned[name] = spec
+            released.discard(name)
             log(f"    MCP {name}: 플러그인 위치의 절대경로로 씀")
         else:
             ok = False
@@ -223,6 +260,7 @@ def write_mcp(lock, log, cli=None, dry_run=False):
     if not dry_run:
         _mcp_record().parent.mkdir(parents=True, exist_ok=True)
         _mcp_record().write_text(json.dumps(owned, ensure_ascii=False, indent=2), encoding="utf-8")
+        _released_record().write_text(json.dumps(sorted(released & set(want)), ensure_ascii=False), encoding="utf-8")
     return ok
 
 

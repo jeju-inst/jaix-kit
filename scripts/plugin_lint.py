@@ -6,7 +6,7 @@
   ② 저장소 루트에 .github/workflows/calver.yml 존재하고 jeju-inst/jaix-kit 의 calver-tag.yml 을 40자 SHA 로 호출 (TS-VER-2, TS-VER-3)
   ③ .mcp.json 이 있으면 command 가 uvx 인 서버는 args 에 "--python" 다음 "3.12" 가 있음 (TS-MCP-1)
   ④ skills/*/SKILL.md 존재, 본문에 'path/to' 문자열 없음 (TS-FORMAT-3, TS-SKILL-2)
-  ⑤ SKILL.md 크기 근사(바이트/3)가 10,000 토큰 초과면 경고 (TS-TOKEN-2)
+  ⑤ SKILL.md 토큰 근사(한글 1.5/자 + 나머지 바이트/2.5)가 10,000 토큰 초과면 경고 (TS-TOKEN-2)
 
 출력은 플러그인별 ✓/△ 목록이며, 기본은 전부 경고 모드(종료 코드 0)이다.
 --strict 옵션 지정 시 위반(①~④)이 1건이라도 있으면 종료 코드 1로 종료한다.
@@ -25,6 +25,23 @@ for stream in (sys.stdout, sys.stderr):
 
 MARKET = Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json"
 CALVER_TAG_SHA_RE = re.compile(r"^jeju-inst/jaix-kit/\.github/workflows/calver-tag\.yml@[0-9a-fA-F]{40}$")
+
+
+# 한글 음절·자모. 토큰 근사에서 바이트 수와 따로 센다
+HANGUL_RE = re.compile(r"[\uac00-\ud7a3\u3131-\u318e]")
+
+
+def approx_tokens(text):
+    """SKILL.md 토큰 근사: 한글 1자 1.5토큰 + 나머지 UTF-8 바이트 2.5바이트당 1토큰.
+
+    바이트/3 은 한국어 문서를 26〜28% 적게 셌다(UTF-8 한글 3바이트가 1.5토큰 안팎).
+    TS-TOKEN-3 실측(2026-10-30) 5건에 맞춘 계수다 — 오차 −2%〜+6%, 넘치게 셀 때가 많아 경고 기준에 안전하다.
+      mail 11,255B·한글 2,072자 → 5,240 / gw 5,732B·1,286자 → 2,652 / korea-rio 3,186B·13자 → 1,204
+      hwp-agent 35,413B·729자 → 14,237 / calendar-worklog(검증용) 9,037B·1,918자 → 4,081
+    """
+    hangul = len(HANGUL_RE.findall(text))
+    other = len(text.encode("utf-8")) - 3 * hangul
+    return 1.5 * hangul + other / 2.5
 
 
 def check_calver_workflow(text):
@@ -187,8 +204,8 @@ def lint_plugin(plugin_entry, files, read_func):
                 if "path/to" in text:
                     issues.append(f"TS-SKILL-2: {sf} 본문에 'path/to' 문자열 포함")
 
-                # ⑤ SKILL.md 크기 근사(바이트/3 을 토큰 근사로) 10000 초과면 경고
-                tokens = len(raw) / 3
+                # ⑤ SKILL.md 토큰 근사 10000 초과면 경고(TS-TOKEN-3 실측에 맞춘 계수)
+                tokens = approx_tokens(text)
                 if tokens > 10000:
                     warnings.append(f"TS-TOKEN-2: {sf} 크기({len(raw):,} B, 약 {int(tokens):,} 토큰)가 10,000 토큰 초과")
             except Exception as e:
