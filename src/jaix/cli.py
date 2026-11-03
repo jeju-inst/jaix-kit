@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, runtimes, schedule, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -102,6 +102,8 @@ def guide(channels, result):
                 "  gw 를 처음 쓰기 전에 한 번 로그인하세요. 아이디·비밀번호는 이 PC에 안전하게 저장됩니다.",
                 "  Claude·Codex 에게 'gw 로그인해 줘'라고 하면 입력 창이 뜹니다.",
                 "  새 명령창에서 직접 `gw login` 을 치면 그 자리에서 묻습니다."]
+    if net.rate_limit_hit:
+        out += ["", f"※ {net.RATE_LIMIT_HINT}."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
             "문제가 있으면 새 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
     return "\n".join(out)
