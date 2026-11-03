@@ -38,8 +38,9 @@ jobs:
           mkdir -p mirror/.claude-plugin
           cp .claude-plugin/marketplace.json mirror/.claude-plugin/marketplace.json
           cd mirror
-          if git diff --quiet; then echo "변경 없음"; exit 0; fi
+          git add .claude-plugin/marketplace.json
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "jaix-kit ${GITHUB_SHA::7} 의 marketplace.json 반영"
+          git commit -m "jaix-kit ${GITHUB_SHA::7} 의 marketplace.json 반영"
           git push origin HEAD:main
