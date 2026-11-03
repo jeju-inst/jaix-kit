@@ -92,7 +92,7 @@
 | 1 | 설치기 화면 | ✅ | "슬랙으로도 쓰기" 체크 → "슬랙 연결 코드"·"Hermes가 쓸 AI" 화면. `abc` 는 오류 창, 빈칸은 통과 |
 | 2 | 비대화형 설치 | ✅ | UAC·Y/n 없음(사용자가 화면 확인). setup 19:02:27-19:12:55, Hermes 단계 약 9분, `%LOCALAPPDATA%\hermes` 2,580MB, Defender 1116/1117 0건 |
 | 3 | 코드 흔적 | ✅ | `pending\` 비어 있음. setup.log·hermes.json·Inno 로그에서 `xoxb-`·`xapp-` 0건, `JX-` 는 설치기 오류 문구뿐 |
-| 4 | 시작프로그램 gateway | ⚠️ | `Startup\Hermes_Gateway.vbs` 생성, Hermes 예약 작업 없음(UAC 경로 안 탐). **재로그온 뒤 기동은 아직 미확인** |
+| 4 | 시작프로그램 gateway | ✅ | `Startup\Hermes_Gateway.vbs` 생성, Hermes 예약 작업 없음(UAC 경로 안 탐). 11/3 재로그온(18:03:12) → gateway 18:03:42 기동 → 18:04:12 `slack connected` → 채널 멘션에 답함 |
 | 5 | .env | ✅ | `SLACK_BOT_TOKEN`·`SLACK_APP_TOKEN`·`SLACK_ALLOWED_USERS` 키 존재(값은 보지 않음), `.env.bak-*` 생성 |
 | 6 | gateway.log | ✅ | `slack-namespace: /hermes-jitest -> /hermes handler registered`, `✓ slack connected` |
 | 7 | toolset | ✅ | cli·slack 모두 browser·computer_use 빠짐(`hermes tools list --platform slack` ✗). `model.provider: openai-codex`. `config.yaml.jaix-bak-*` |
@@ -108,7 +108,7 @@
 - 관리자 쪽에서 막힌 것: `jaix hermes handoff` 가 `args.log` 로 바로 죽음(#67), 슬랙 봇 핸들이 하이픈 없는 `hermesjitest` 라 이름 검사에서 멈춤(#69, hermes-slackbot#17). 둘 다 PR로 고쳐짐. 실측은 함수 직접 호출 우회로 진행했다.
 - 시험용 앱 `Hermes-jitest` 는 테스트 계정의 설정 토큰으로 만들어 **앱 소유자가 테스트 계정**이고, 그 계정은 앱 설치 권한이 없어 관리자 승인을 거쳤다. 실제 배포 때는 관리자 계정으로 `provision_app.py token set` 을 다시 해야 `update-all` 대상에 들어간다.
 - 슬랙에서 본 것(연구원에게는 소음):
-  - 첫 DM에 영어 시스템 안내 2개(홈 채널 `/hermes sethome`, Codex 컨텍스트 자동 요약 85%).
+  - 첫 DM에 영어 시스템 안내 2개(홈 채널 `/hermes sethome`, Codex 컨텍스트 자동 요약 85%). 홈 채널 안내는 새 대화(채널 멘션)마다 다시 붙는다.
   - `help` 목록이 `/new` 처럼 접두어 없이 나와, 실제로 쳐야 하는 `/hermes-jitest new` 와 다르다.
   - `/login`·`/topup`(Nous), `/yolo` 가 그대로 보인다. 스킬 57개 중 jaix 것은 6개.
 
@@ -156,7 +156,7 @@
 - [ ] 단독 hwp-agent 설치본과의 충돌: 설치기가 jaix를 감지하면 MCP 자동 등록 체크 해제, doctor 문구 "다른 설치본이 차지"(jaix-setup·jaix-standard에 배정됨).
 - [ ] Hermes 슬랙 소음 정리(영어 첫 안내, 접두어 없는 help, Nous 명령, 기본 스킬 51개) — hermes-slackbot 판단.
 - [ ] 설치 완료 화면에 버전 표시.
-- [ ] Hermes 남은 실측: 재로그온 기동(4), 같은 코드 재사용·코드 없이 재설치(12), 제거(#11-9).
+- [ ] Hermes 남은 실측: 같은 코드 재사용·코드 없이 재설치(12), 제거(#11-9).
 
 ## 인수 시험 0절 반영
 [acceptance-tests.md](acceptance-tests.md) 0절에 namun-ji 결과 줄을 붙였다.
