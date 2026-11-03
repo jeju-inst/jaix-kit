@@ -16,10 +16,10 @@ https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe
 ## 2. "Windows의 PC 보호" 창이 뜨면 — 추가 정보 → 실행
 설치 파일에 코드 서명을 하지 않아서 처음 실행할 때 SmartScreen이 막을 수 있다. 위험하다는 뜻이 아니라 "아직 평판 기록이 없는 파일"이라는 뜻이다.
 
+PC에 따라 이 창이 뜨지 않을 수 있습니다. 뜨면 [추가 정보] → [실행]을 누르세요.
+
 1. 파란 창에서 **추가 정보**를 누른다.
-   (그림 1 — `smartscreen-1.png`: "Windows의 PC 보호" 창, **추가 정보** 링크 표시)
 2. 아래에 생긴 **실행** 버튼을 누른다. 게시자는 "알 수 없는 게시자"로 나온다.
-   (그림 2 — `smartscreen-2.png`: 앱 이름 `jaix-setup.exe` · **실행** 버튼 표시)
 
 **Windows 보안(Defender) 알림이 뜨면** 지우거나 허용하지 말고 그 화면 그대로 AI센터에 연락한다.
 
