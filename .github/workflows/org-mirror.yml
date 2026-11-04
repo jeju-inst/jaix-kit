@@ -1,0 +1,46 @@
+name: org-mirror
+
+# claude.ai 조직 동기화(Plugins & skills → Sync from GitHub)는 마켓플레이스 저장소가 비공개여야 한다.
+# 이 저장소는 공개라서, main 의 marketplace.json 을 비공개 사본 jeju-inst/jaix-kit-org 에 그대로 복사한다.
+# 정본은 계속 여기다. 사본 저장소에서는 고치지 않는다. 상세: docs/org-defaults.md 1절.
+#
+# 인증: 사본 저장소의 쓰기 권한 deploy key. 비밀키는 이 저장소 시크릿 ORG_MIRROR_DEPLOY_KEY.
+
+on:
+  push:
+    branches: [main]
+    paths: [".claude-plugin/marketplace.json"]
+  workflow_dispatch:
+
+concurrency: org-mirror
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 사본 저장소 받기
+        env:
+          KEY: ${{ secrets.ORG_MIRROR_DEPLOY_KEY }}
+        run: |
+          test -n "$KEY" || { echo "::error::ORG_MIRROR_DEPLOY_KEY 시크릿이 없음 (docs/org-defaults.md 1절)"; exit 1; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git clone --depth 1 git@github.com:jeju-inst/jaix-kit-org.git mirror
+
+      - name: marketplace.json 복사 · push
+        run: |
+          mkdir -p mirror/.claude-plugin
+          cp .claude-plugin/marketplace.json mirror/.claude-plugin/marketplace.json
+          cd mirror
+          git add .claude-plugin/marketplace.json
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "jaix-kit ${GITHUB_SHA::7} 의 marketplace.json 반영"
+          git push origin HEAD:main

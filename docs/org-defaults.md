@@ -29,7 +29,8 @@
   - 대신 플러그인 소스는 공개 저장소여도 된다(자격 증명 없이 받는다). jaix 잠금의 6종은 모두 공개이고 소스 형식도 `url`·`git-subdir` 이라 받아들여진다(2026-11-03 확인).
   - 그래서 **`marketplace.json` 만 담은 비공개 저장소 `jeju-inst/jaix-kit-org` 를 두고**, jaix-kit main에 머지될 때마다 워크플로가 그 파일을 복사해 넣는다. 잠금의 정본은 계속 jaix-kit이다.
   - CLI 경로(③ managed settings·`jaix setup`)는 지금처럼 공개 `jaix-kit` 을 가리킨다. 조직 동기화 규칙이 적용되지 않는다.
-  - 저장소 생성과 복사 워크플로는 별도 PR로 한다(사용자 확인 후).
+  - 복사는 `.github/workflows/org-mirror.yml` 이 한다(main의 `marketplace.json` 이 바뀔 때 + 수동 실행). 인증은 사본 저장소의 **쓰기 deploy key** 이고, 비밀키는 이 저장소 시크릿 `ORG_MIRROR_DEPLOY_KEY` 에 둔다. 시크릿이 없으면 워크플로가 실패로 알린다.
+  - 콘솔에서 "Sync from GitHub" 를 처음 할 때 Anthropic GitHub App을 `jaix-kit-org` 에 설치하라고 나온다. 그 저장소만 골라 허용한다.
 - 출처: https://claude.com/docs/plugins/admin, https://claude.com/docs/plugins/org-sync ("Plugin sources that organization sync accepts")
 
 ## 2. Connectors — `Organization settings > Connectors`
