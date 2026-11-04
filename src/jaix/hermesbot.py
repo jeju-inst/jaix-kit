@@ -340,24 +340,60 @@ def show_console():
         return False
 
 
+def _call_login(cmd):
+    """로그인 명령을 같은 콘솔에서 돌린다. Ctrl+C 는 콘솔의 모든 프로세스에 가므로 jaix 도 KeyboardInterrupt 를
+    받는다 — 여기서 받아 자식이 끝나길 기다리고 '취소'(130)로 돌려준다. 그냥 두면 main 이 130 으로 끝내 창이 결과를
+    읽기 전에 닫혔다(jaix-win 11/4: Ctrl+C 뒤 한두 줄만 보이고 닫힘)."""
+    p = subprocess.Popen(cmd, env=_child_env())
+    try:
+        return p.wait()
+    except KeyboardInterrupt:
+        try:
+            p.wait(timeout=10)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            p.kill()
+        return CANCELLED
+
+
+CANCELLED = 130
+
+
+def _login_record(model, code):
+    """창이 닫힌 뒤에도 되짚을 수 있게 결과만 남긴다(값·토큰은 없다 — hermes 가 직접 받는다)."""
+    try:
+        f = paths.data_dir() / "hermes-login.log"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with open(f, "a", encoding="utf-8") as out:
+            out.write(f"{datetime.datetime.now().isoformat(timespec='seconds')} model={model} code={code}\n")
+    except OSError:
+        pass
+
+
 def cmd_login(args, log, run=None, wait=None):
-    """AI 구독 로그인 창: 설치기 마지막 화면이 이것을 연다. 설치기가 cmd.exe 를 직접 띄우던 것을 대신한다 —
-    서명 없는 설치기 → cmd /K 패턴에 Defender 행동 탐지(Bearfoos.B!ml)가 걸렸다(jaix-win 11/4 실측).
-    hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다."""
+    """AI 구독 로그인 창: 설치기 마지막 화면이 이것을 연다(설치기가 cmd.exe 를 직접 띄우지 않게, #86).
+    hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다. 성공·실패·취소 모두
+    결과를 보이고 Enter 를 기다린다(Windows)."""
     show_console()  # 숨은 창이면 안내·기기 코드·Enter 대기를 아무도 못 본다 — 무엇보다 먼저
+    again = f"jaix hermes login --model {args.model}"
     hermes = find_hermes()
     if not hermes:
         log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
         code = 1
     else:
         log(f"Hermes AI 로그인 ({args.model}) — 브라우저가 열리면 승인하세요.")
+        log("승인을 기다리는 동안에는 키를 눌러도 반응이 없습니다. 그만두려면 Ctrl+C.")
         try:
-            code = (run or subprocess.call)([hermes, *PROVIDERS[args.model]["login"]], env=_child_env())
+            code = (run or _call_login)([hermes, *PROVIDERS[args.model]["login"]])
         except OSError as e:
             log(f"로그인을 시작하지 못함: {e}")
             code = 1
-        log("로그인했습니다." if code == 0 else
-            f"로그인이 끝나지 않았습니다(코드 {code}). 새 명령창에서 `hermes {' '.join(PROVIDERS[args.model]['login'])}` 로 다시 하세요.")
+        if code == 0:
+            log("로그인했습니다.")
+        elif code == CANCELLED:
+            log(f"로그인을 취소했습니다. 나중에 새 명령창에서 `{again}` 로 다시 하세요.")
+        else:
+            log(f"로그인이 끝나지 않았습니다(코드 {code}). 새 명령창에서 `{again}` 로 다시 하세요.")
+        _login_record(args.model, code)
     if IS_WIN and not getattr(args, "no_wait", False):
         try:  # 설치기가 띄운 창은 끝나면 바로 닫힌다 — 결과를 읽을 틈을 준다
             (wait or input)("창을 닫으려면 Enter 를 누르세요.")

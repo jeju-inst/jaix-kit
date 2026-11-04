@@ -1779,7 +1779,7 @@ def test_hermes_login_runs_provider_login_and_waits(monkeypatch):
     monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
     calls, waited = [], []
     args = argparse.Namespace(model="claude", no_wait=False)
-    rc = hermesbot.cmd_login(args, lambda m="": None, run=lambda cmd, env=None: calls.append(cmd) or 0,
+    rc = hermesbot.cmd_login(args, lambda m="": None, run=lambda cmd: calls.append(cmd) or 0,
                              wait=waited.append)
     assert rc == 0 and calls == [["/x/hermes", "auth", "add", "anthropic", "--type", "oauth"]]
     assert bool(waited) == hermesbot.IS_WIN
@@ -1853,3 +1853,33 @@ def test_doctor_warns_when_logon_task_failed(monkeypatch):
     monkeypatch.setattr(schedule, "last_run", lambda: ("1999-11-30 0:00:00", 0x41303))
     c = doctor.check_autoupdate()[0]
     assert c.status == "ok" and "작업은 아직 안 돎" in c.message and "1999" not in c.message
+
+
+def test_hermes_login_ctrl_c_keeps_window_and_records(isolated, monkeypatch):
+    """Ctrl+C 가 jaix 까지 올라와 창이 바로 닫히던 것(jaix-win 11/4). 취소로 받고, 안내 뒤 Enter 를 기다린다."""
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+
+    class Child:
+        waits = 0
+
+        def __init__(self, cmd, env=None):
+            pass
+
+        def wait(self, timeout=None):
+            Child.waits += 1
+            if Child.waits == 1:
+                raise KeyboardInterrupt
+            return 1
+
+        def kill(self):
+            raise AssertionError("자식이 스스로 끝났으면 죽이지 않는다")
+
+    monkeypatch.setattr(hermesbot.subprocess, "Popen", Child)
+    seen, waited = [], []
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False), seen.append, wait=waited.append)
+    assert rc == hermesbot.CANCELLED and Child.waits == 2 and waited
+    assert any("취소" in m and "jaix hermes login --model chatgpt" in m for m in seen)
+    rec = (paths.data_dir() / "hermes-login.log").read_text(encoding="utf-8")
+    assert "model=chatgpt code=130" in rec
