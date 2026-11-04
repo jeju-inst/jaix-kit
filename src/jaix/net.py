@@ -4,6 +4,9 @@ import os
 import re
 import shutil
 import tempfile
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -40,10 +43,67 @@ def download(url, dest, timeout=120):
     return dest
 
 
+RATE_LIMIT_HINT = ("GitHub 내려받기 한도에 걸렸습니다(같은 인터넷 주소에서 한 시간에 60번). "
+                   "10-20분 뒤 jaix setup 을 다시 실행하세요")
+
+
+class RateLimited(RuntimeError):
+    """GitHub API 익명 한도. 메시지는 연구원이 읽는 안내다."""
+
+
+rate_limit_hit = False  # 이번 실행에서 한도에 걸린 적이 있는지(마지막 안내문에 한 줄 더 쓰려고)
+
+
+def _rate_limited(err):
+    return isinstance(err, urllib.error.HTTPError) and err.code in (403, 429) and (
+        err.code == 429 or err.headers.get("X-RateLimit-Remaining") == "0"
+        or "rate limit" in str(err.reason).lower())
+
+
+def _api_release(repo):
+    return get_json(f"https://api.github.com/repos/{repo}/releases/latest")
+
+
+def _web_release(repo, timeout=20):
+    """API 를 쓰지 않는 길: github.com 의 releases/latest 가 넘겨 주는 태그와 그 태그의 첨부 목록 HTML.
+    API 한도(공인 IP 하나당 시간당 60회)와 따로 센다 — 원내 여러 PC 가 한 IP 로 동시에 설치할 때를 위해."""
+    with urllib.request.urlopen(_request(f"https://github.com/{repo}/releases/latest"), timeout=timeout) as r:
+        tag = urllib.parse.unquote(r.geturl().rstrip("/").rsplit("/", 1)[-1])
+    with urllib.request.urlopen(_request(f"https://github.com/{repo}/releases/expanded_assets/{tag}"),
+                                timeout=timeout) as r:
+        html = r.read().decode("utf-8", "replace")
+    names = re.findall(rf'href="/{re.escape(repo)}/releases/download/{re.escape(tag)}/([^"?#]+)"', html)
+    base = f"https://github.com/{repo}/releases/download/{tag}/"
+    return {"tag_name": tag, "assets": [{"name": urllib.parse.unquote(n), "browser_download_url": base + n}
+                                        for n in dict.fromkeys(names)]}
+
+
 def latest_release_asset(repo, pattern):
-    """GitHub repo의 최신 릴리스에서 이름이 pattern(정규식)에 맞는 첫 첨부의 (이름, URL)."""
-    rel = get_json(f"https://api.github.com/repos/{repo}/releases/latest")
+    """GitHub repo의 최신 릴리스에서 이름이 pattern(정규식)에 맞는 첫 첨부의 (이름, URL).
+    API 가 한도에 걸리면 github.com 웹 경로로 다시 찾고, 그것도 막히면 잠시 쉬었다가 한 번 더 한다."""
+    rel = None
+    try:
+        rel = _api_release(repo)
+    except urllib.error.HTTPError as e:
+        if not _rate_limited(e):
+            raise
+    for attempt in range(2):
+        if rel is not None:
+            break
+        try:
+            rel = _web_release(repo)
+        except urllib.error.HTTPError as e:
+            if e.code not in (403, 429):
+                raise  # 한도가 아닌 오류(404·503 등)는 그대로 — 기다리라는 안내가 틀린 답이 된다
+            if attempt == 1:
+                global rate_limit_hit
+                rate_limit_hit = True
+                raise RateLimited(RATE_LIMIT_HINT) from None
+            time.sleep(WEB_RETRY_SECONDS)
     for asset in rel.get("assets", []):
         if re.search(pattern, asset["name"]):
             return asset["name"], asset["browser_download_url"]
     raise LookupError(f"{repo} 최신 릴리스({rel.get('tag_name')})에 '{pattern}' 파일이 없음")
+
+
+WEB_RETRY_SECONDS = 30

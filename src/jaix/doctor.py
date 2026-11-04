@@ -394,6 +394,9 @@ def check_hermes_bot():
     else:
         slack = rec.get("slack") or {}
         out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}"))
+    if hermesbot.approval_mode() == "off":
+        out.append(Check("warn", area, "위험 명령 승인이 꺼져 있음(approvals.mode: off) — 에이전트가 묻지 않고 실행함",
+                         "AI센터가 켠 것이 아니면 jaix hermes approvals smart"))
     if rec.get("last_error"):
         out.append(Check("warn", area, f"마지막 다시 설치에서 실패(기존 연결은 그대로): {rec['last_error']}",
                          "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림"))
