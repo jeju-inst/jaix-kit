@@ -323,10 +323,28 @@ def cmd_approvals(args, log):
     return 0
 
 
+def show_console():
+    """jaix.exe 는 hide_console="hide-early"(installer/jaix.spec)로 빌드돼, 설치기가 띄워 콘솔을 혼자 가지면 창이
+    숨는다. 로그인은 기기 코드를 읽고 붙여 넣어야 하므로 다시 보이게 한다(Codex #86 P1). Windows 외·콘솔 없음은 그대로."""
+    if not IS_WIN:
+        return False
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if not hwnd:
+            return False
+        ctypes.windll.user32.ShowWindow(hwnd, 5)  # SW_SHOW
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        return True
+    except (AttributeError, OSError):
+        return False
+
+
 def cmd_login(args, log, run=None, wait=None):
     """AI 구독 로그인 창: 설치기 마지막 화면이 이것을 연다. 설치기가 cmd.exe 를 직접 띄우던 것을 대신한다 —
     서명 없는 설치기 → cmd /K 패턴에 Defender 행동 탐지(Bearfoos.B!ml)가 걸렸다(jaix-win 11/4 실측).
     hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다."""
+    show_console()  # 숨은 창이면 안내·기기 코드·Enter 대기를 아무도 못 본다 — 무엇보다 먼저
     hermes = find_hermes()
     if not hermes:
         log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")

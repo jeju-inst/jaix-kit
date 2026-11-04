@@ -1774,6 +1774,8 @@ def test_installer_does_not_spawn_cmd_from_run_section():
 
 
 def test_hermes_login_runs_provider_login_and_waits(monkeypatch):
+    shown = []
+    monkeypatch.setattr(hermesbot, "show_console", lambda: shown.append(1))  # hide-early 로 숨은 창을 먼저 보인다
     monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
     calls, waited = [], []
     args = argparse.Namespace(model="claude", no_wait=False)
@@ -1781,8 +1783,14 @@ def test_hermes_login_runs_provider_login_and_waits(monkeypatch):
                              wait=waited.append)
     assert rc == 0 and calls == [["/x/hermes", "auth", "add", "anthropic", "--type", "oauth"]]
     assert bool(waited) == hermesbot.IS_WIN
+    assert shown == [1]
     monkeypatch.setattr(hermesbot, "find_hermes", lambda: None)
     assert hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), lambda m="": None) == 1
+
+
+def test_show_console_is_noop_off_windows():
+    if not hermesbot.IS_WIN:
+        assert hermesbot.show_console() is False
 
 
 def test_hermes_login_parser():
