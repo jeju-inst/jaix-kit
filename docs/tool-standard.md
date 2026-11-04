@@ -135,8 +135,9 @@ jobs:
 | TS-RUNTIME-1 | 도구가 실행에 필요로 하는 런타임(Python 버전, JRE, 외부 jar, 외부 CLI 예: `hwp2pdf-cli`)을 **선언한다.** `jaix setup`이 그것을 미리 설치한다. Python 버전은 `.mcp.json`의 `--python`이 선언이다. jar처럼 내려받는 파일은 주소와 sha256을 저장소 안 한 곳에 두고(예: hwp-agent `fetch_jar.py`), jaix가 잠금이 고정한 커밋의 그 파일을 읽는다 | △ |
 | TS-RUNTIME-2 | 도구는 외부 런타임을 **스스로 설치하지 않는다.** 찾는 순서(예: 환경변수 → PATH)를 문서에 적고, 없으면 무엇을 깔아야 하는지 한 줄로 알린다. 설치는 `jaix setup` 몫이다 | 문서 |
 | TS-RUNTIME-3 | 런타임이 없거나 바쁘면(예: 한글이 열려 있음) 다음 수단으로 넘어가고, **어느 수단으로 처리했는지 결과에 표시한다.** 사용자의 작업(열려 있는 한글 등)을 닫거나 방해하지 않는다 | 문서 |
+| TS-RUNTIME-4 | 스킬이 부르는 셸 명령은 **플러그인 루트 `bin/`** 에 둔다(Windows는 `<이름>.cmd`, 맥·리눅스는 확장자 없는 실행파일). 스크립트는 자기 위치에서 플러그인 루트를 찾는다(심볼릭 링크를 끝까지 따라가거나 `%~dp0`). 플러그인 `bin/`을 PATH에 넣어 주는 호스트는 Claude Code뿐이라(Codex·Hermes는 안 함), **`jaix setup`·`jaix update`가 잠금 커밋의 플러그인 사본을 받아 `bin/`의 명령을 사용자 PATH에 올린다**(Windows: jaix 실행 폴더에 `.cmd` 심, 맥: `~/.local/bin` 링크). 도구는 PATH 등록을 스스로 하지 않고, 연구원에게 clone·PATH 편집을 시키지 않는다. jaix가 만들지 않은 같은 이름의 파일은 덮지 않는다 | 문서 (jaix 쪽 구현 `plugbin.py`, `jaix doctor` 플러그인 명령 줄) |
 
-근거: jeju-inst/jaix-kit#15·#19(Python·jar 미리 받기), `docs/handoff/README.md` "hwp2pdf 위치" 약속, z0nam/hwp-agent#71(엔진 순서·표시).
+근거: jeju-inst/jaix-kit#15·#19(Python·jar 미리 받기), `docs/handoff/README.md` "hwp2pdf 위치" 약속, z0nam/hwp-agent#71(엔진 순서·표시). TS-RUNTIME-4: mail-skill Windows 실기에서 `mailskill`이 PATH에 없음(mail-skill-dev 보고, 2026-11-04). Claude Code 2.1.318은 켜진 플러그인 `bin/`을 Bash PATH에 넣고, Codex 0.160.0은 넣지 않음을 실측.
 
 ### SECRET — 비밀·공개 범위
 
@@ -212,6 +213,7 @@ jobs:
 - [ ] TS-WIN-1 bash 전용 스크립트: 없음 / 목록: ___
 - [ ] TS-WIN-2·3 한글·공백 경로, cp949 출력 확인
 - [ ] TS-RUNTIME-1 선언한 런타임: ___ (jaix setup이 미리 설치하는지 확인)
+- [ ] TS-RUNTIME-4 스킬이 부르는 셸 명령: 없음 / `bin/` 에 ___ (jaix doctor "플러그인 명령" 줄 ok 확인)
 - [ ] TS-SECRET-1-3 비밀 없음 · 관리자 경로 없음 · (private 원본이면) allow-list + 누수 검사
 - [ ] TS-TEST-1-3 테스트가 실제 데이터·설정·자격증명·외부 프로그램을 쓰지 않음
 - [ ] TS-ACCEPT-1 docs/acceptance-tests.md 시나리오: #___

@@ -4,11 +4,12 @@
 """
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path, PureWindowsPath
 
-from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
+from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -201,6 +202,40 @@ def check_works(lock):
         out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix works login"))
     else:
         out.append(Check("ok", "웍스 로그인", "됨"))
+    return out
+
+
+def check_plugin_bin(lock):
+    """플러그인 bin/ 명령(예: mailskill)이 PATH 에 잡히는가. Claude Code 말고는 jaix 가 올린 것만 보인다(TS-RUNTIME-4)."""
+    rec = plugbin.recorded()
+    out = []
+    for p in lock.plugins:
+        r = rec.get(p.name)
+        if r is None:
+            # 기록이 없으면 bin 이 있는지 모른다 — 아무 기록도 없을 때만 한 번 알린다(아래)
+            continue
+        cmds = r.get("commands") or []
+        if not cmds:
+            continue
+        area = f"플러그인 명령({p.name})"
+        if r.get("sha") != p.sha:
+            out.append(Check("warn", area, f"잠금과 다른 커밋의 명령 ({str(r.get('sha'))[:7]})", "jaix update"))
+            continue
+        missing = [Path(c).name for c in cmds if not Path(c).exists()]
+        if missing:
+            out.append(Check("fail", area, f"없음: {', '.join(missing)}", "jaix setup"))
+            continue
+        names = [Path(c).stem if IS_WIN else Path(c).name for c in cmds]
+        hidden = [n for n in names if not (shutil.which(n) and Path(shutil.which(n)).parent == plugbin.link_dir())]
+        if hidden and not IS_WIN:
+            out.append(Check("warn", area, f"PATH에서 jaix 것이 안 잡힘: {', '.join(hidden)} — 스킬이 다른 것을 부르거나 못 찾음",
+                             f"{plugbin.link_dir()} 를 PATH 앞쪽에 두기"))
+        elif hidden and IS_WIN and not winenv.in_user_path(plugbin.link_dir()):
+            out.append(Check("fail", area, f"{plugbin.link_dir()} 가 사용자 PATH에 없음", "jaix setup 다시 실행 후 새 창 열기"))
+        else:
+            out.append(Check("ok", area, f"{', '.join(sorted(set(names)))} ({plugbin.link_dir()})"))
+    if not rec and lock.plugins:
+        out.append(Check("warn", "플러그인 명령", "아직 확인 안 함 — 스킬이 부르는 명령(mailskill 등)이 PATH에 없을 수 있음", "jaix update"))
     return out
 
 
@@ -420,22 +455,33 @@ def check_autoupdate():
     if not schedule.supported():
         return [Check("skip", area, "이 OS는 지원 안 함 — 가끔 jaix update")]
     if not schedule.registered():
+        if schedule.installer_managed():
+            return [Check("warn", area, f"시작프로그램 바로가기({schedule.STARTUP_LINK})가 없음 — Codex·Hermes 도구가 "
+                                        "저절로 갱신되지 않음", "jaix-setup 을 다시 실행 (또는 가끔 jaix update)")]
         return [Check("warn", area, "등록 안 됨 — Codex·Hermes 도구가 저절로 갱신되지 않음", "jaix setup")]
     bad = schedule.run_mode()
     if bad:
         return [Check("warn", area, f"실행 모드 문제: {bad}", "jaix setup (다시 등록)")]
+    ran = schedule.last_run()
+    # 0x41303 = 아직 안 돎(마지막 실행 칸에 1999-11-30 같은 자리값이 찍힌다)
+    task = (" · 작업은 아직 안 돎" if ran[1] == 0x41303 else f" · 작업 마지막 실행 {ran[0]}") if ran else ""
+    if ran and schedule.run_failed(ran[1]):
+        return [Check("warn", area, f"작업이 실패로 끝남({ran[0]}, 결과 0x{ran[1]:X}) — 기록: {schedule.log_file()}",
+                      "jaix setup (다시 등록) 뒤 다시 로그온해 보고, 그래도 같으면 이 줄을 AI센터에 보내 주세요")]
     last = schedule.last_status()
+    if schedule.installer_managed():
+        task = " · 시작프로그램 바로가기"
     if not last:
-        return [Check("ok", area, "등록됨 (아직 돈 적 없음)")]
+        return [Check("ok", area, f"등록됨 (아직 돈 적 없음){task}")]
     if last.get("ok"):
         by = " (jaix setup)" if last.get("by") == "setup" else ""
-        return [Check("ok", area, f"마지막 갱신 {last.get('time')}{by}")]
+        return [Check("ok", area, f"마지막 갱신 {last.get('time')}{by}{task}")]
     why = last.get("error") or "; ".join(last.get("problems") or [])
-    return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()})", "jaix update")]
+    return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()}){task}", "jaix update")]
 
 
 def run(lock):
-    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 

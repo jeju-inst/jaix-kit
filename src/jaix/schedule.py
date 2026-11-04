@@ -5,6 +5,11 @@ Claude는 마켓플레이스 autoUpdate로 저절로 갱신되지만 Codex·Herm
   (`schtasks /SC ONLOGON`은 모든 사용자 대상이라 관리자 권한을 요구한다). 하위 폴더를 만들려면 권한이 필요해서 루트에 둔다.
 - macOS: ~/Library/LaunchAgents의 LaunchAgent(RunAtLoad). launchd의 PATH는 비어 있다시피 해서 등록할 때 PATH를 적어 둔다.
 결과는 data_dir(Windows %LOCALAPPDATA%\\jaix)의 update-status.json·update.log에 남고 doctor가 보여 준다.
+
+**Windows 설치본(jaix-setup)은 예약 작업을 쓰지 않는다**(2026-11-04): 서명 없는 창 없는 jaixw.exe 가 schtasks 로
+자기 자신을 로그온 작업에 등록하는 흐름이 Defender `Behavior:Win32/Persistence.A!ml` 로 잡혀 jaixw.exe 와
+jaix-update 작업이 함께 격리·삭제됐다(jaix-win 실측). 대신 설치기(Inno [Icons])가 시작프로그램 폴더에
+`JAIX 갱신` 바로가기를 선언하고, jaix 는 그것을 확인만 한다. 개발 설치(파이썬)는 그대로 예약 작업.
 """
 import json
 import os
@@ -45,6 +50,27 @@ def plist_path():
     return paths.launch_agents_dir() / f"{AGENT_LABEL}.plist"
 
 
+STARTUP_LINK = "JAIX 갱신.lnk"  # installer/jaix-setup.iss [Icons] 의 {userstartup} 항목과 같은 이름
+LOGON_DELAY = 120  # 바로가기에는 작업의 '지연 2분'이 없어 jaix update --delay 로 대신한다(로그온 직후 네트워크)
+
+
+def installer_managed():
+    """Windows 설치본이면 로그온 자동 갱신은 설치기가 둔 시작프로그램 바로가기다(예약 작업을 만들지 않는다)."""
+    return IS_WIN and paths.exe_dir() is not None
+
+
+def startup_dir():
+    return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def startup_link():
+    return startup_dir() / STARTUP_LINK
+
+
+def _task_registered():
+    return _run(["schtasks", "/Query", "/TN", TASK_NAME])[0]
+
+
 def _user_id():
     domain, user = os.environ.get("USERDOMAIN"), os.environ.get("USERNAME")
     return f"{domain}\\{user}" if domain else user
@@ -81,7 +107,7 @@ def task_xml(cmd, user, logon=True):
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>{str(logon).lower()}</RunOnlyIfNetworkAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
     <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
     <Enabled>true</Enabled>
   </Settings>
@@ -131,8 +157,10 @@ def _run(args):
 
 
 def registered():
+    if installer_managed():
+        return startup_link().is_file()
     if IS_WIN:
-        return _run(["schtasks", "/Query", "/TN", TASK_NAME])[0]
+        return _task_registered()
     if IS_MAC:
         return plist_path().exists()
     return False
@@ -141,8 +169,8 @@ def registered():
 def run_mode():
     """등록된 작업의 실행 모드 문제(없으면 None). 세션 0(무인)에서는 한컴 COM이 뜨지 않아(hwp-render 실측)
     반드시 '사용자가 로그온할 때만 실행'(InteractiveToken)·일반 권한이어야 한다. Windows 외에는 늘 None."""
-    if not IS_WIN:
-        return None  # LaunchAgent는 gui/<uid> 도메인 = 로그온한 사용자 세션
+    if not IS_WIN or installer_managed():
+        return None  # LaunchAgent는 gui/<uid> 도메인, 바로가기는 로그온한 사용자 셸이 연다
     try:
         r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/XML"], capture_output=True, creationflags=paths.NO_WINDOW, timeout=60)
         raw = r.stdout
@@ -164,6 +192,51 @@ def missing_command(root):
     return None
 
 
+# 작업 스케줄러 '마지막 실행 결과' 중 실패가 아닌 것: 0 성공 · 0x41301 실행 중 · 0x41303 아직 안 돎
+_RESULT_OK = {0, 0x41301, 0x41303}
+
+
+def last_run():
+    """등록된 작업의 (마지막 실행 시각, 마지막 결과 코드). Windows 외·읽지 못하면 None.
+    jaix setup 도 update-status.json 을 덮어써서, 로그온 작업이 실제로 돌았는지는 작업 스케줄러에만 남는다
+    (jaix-win 11/4 ④: 재로그온 때 작업이 돌지 않았는데 doctor 는 '마지막 갱신'만 보였다)."""
+    if not IS_WIN or installer_managed():
+        return None
+    try:
+        r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "CSV", "/NH"], capture_output=True,
+                           creationflags=paths.NO_WINDOW, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return parse_last_run(r.stdout.decode(_oem_encoding(), errors="replace"))
+
+
+def _oem_encoding():
+    import locale
+    try:
+        import ctypes
+        return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
+    except (AttributeError, OSError):
+        return locale.getpreferredencoding(False)
+
+
+def parse_last_run(text):
+    """schtasks /V /FO CSV /NH 한 줄: 머리글이 언어마다 달라 자리로 읽는다(5 = 마지막 실행 시간, 6 = 마지막 결과)."""
+    import csv
+    rows = [r for r in csv.reader(text.splitlines()) if len(r) > 6]
+    if not rows:
+        return None
+    when, result = rows[0][5].strip(), rows[0][6].strip()
+    try:
+        code = int(result, 0) & 0xFFFFFFFF
+    except ValueError:
+        return when, None
+    return when, code
+
+
+def run_failed(code):
+    return code is not None and code not in _RESULT_OK
+
+
 def mode_problem(root):
     ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
     logon = root.findtext("t:Principals/t:Principal/t:LogonType", default="", namespaces=ns)
@@ -180,6 +253,8 @@ def register(log, dry_run=False):
     if not supported():
         log("  로그온 자동 갱신: 이 OS는 지원 안 함 → 가끔 `jaix update`")
         return False
+    if installer_managed():
+        return _check_startup_link(log, dry_run)
     cmd = command()
     if dry_run:
         log(f"  로그온 자동 갱신: 등록 예정 ({' '.join(cmd)})")
@@ -199,11 +274,30 @@ def register(log, dry_run=False):
     return ok
 
 
+def _check_startup_link(log, dry_run):
+    """설치본: 예전 판이 만든 jaix-update 예약 작업은 지우고(Defender 가 지속성으로 잡는 그 작업), 설치기가 둔
+    시작프로그램 바로가기가 있는지만 본다. jaix 는 바로가기를 만들지 않는다 — 만드는 주체가 서명 없는 PE 면 같은 판정이다."""
+    if not dry_run and _task_registered() and _run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])[0]:
+        log("  로그온 자동 갱신: 예전 예약 작업 jaix-update 를 지움(이제 시작프로그램 바로가기)")
+    if startup_link().is_file():
+        log(f"  로그온 자동 갱신: 시작프로그램 바로가기 ({startup_link().name}, 설치 프로그램이 둠)")
+        return True
+    log("  로그온 자동 갱신: 시작프로그램 바로가기가 없음 → jaix-setup 을 다시 실행하면 생김")
+    return False
+
+
 def unregister():
     """설치본 제거(jaix cleanup)가 부른다. 없으면 아무 일 없음."""
     if IS_WIN:
         _run(["schtasks", "/Delete", "/TN", "jaix-setup-once", "/F"])  # 설치 중 끊겼으면 남아 있을 수 있다
-        return registered() and _run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])[0]
+        removed = False
+        if installer_managed() and startup_link().is_file():  # --no-autoupdate: 사용자가 끄라고 했다
+            try:
+                startup_link().unlink()
+                removed = True
+            except OSError:
+                pass
+        return (_task_registered() and _run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])[0]) or removed
     if IS_MAC and plist_path().exists():
         _run(["launchctl", "bootout", f"gui/{os.getuid()}", str(plist_path())])
         plist_path().unlink()

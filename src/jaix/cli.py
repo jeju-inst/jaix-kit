@@ -7,11 +7,12 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, runtimes, schedule, uvpython, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -123,7 +124,8 @@ def _hermes_guide(res):
         lines.append(f"  슬랙 봇 Hermes-{res.get('id')} 가 연결됐습니다. 이 PC가 켜져 있어야 봇이 답합니다.")
     elif status == "no-code":
         lines.append("  Hermes는 깔았지만 슬랙 연결 코드가 없어 연결하지 않았습니다. AI센터에서 코드를 받아 다시 설치하세요.")
-    lines += ["  처음 한 번 AI 구독에 로그인하세요: 마지막 화면의 'AI 로그인 창 열기'를 켜 두거나,",
+    lines += ["  처음 한 번 AI 구독에 로그인하세요: 설치기 다음 화면 'AI 구독 로그인'의 [로그인 창 열기],",
+              "  시작 메뉴의 'JAIX Hermes 로그인', 또는",
               f"  새 명령창에서 `{login}` 을 실행합니다(브라우저에서 승인)."]
     return lines
 
@@ -208,9 +210,15 @@ def cmd_setup(args, log):
     works_res = steps.run("웍스(nworks)", works.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
     if works_res is not None:
         result["works"] = works_res
+    # 스킬이 부르는 플러그인 bin/ 명령(예: mailskill). Claude Code 말고는 플러그인 bin 을 PATH 에 넣지 않는다
+    pb_res = steps.run("플러그인 명령", plugbin.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
+    if pb_res is not None:
+        result["plugbin"] = pb_res
     log("\n[2/3] Claude")
     if "claude" in chosen:
-        res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run)
+        # 다시 설치할 때 이미 깔린 옛 판도 잠금에 맞춘다(update 와 같게). 빠뜨리면 Codex 만 맞고 Claude 는 옛 판으로
+        # 남아 doctor 가 실패를 보였다(jaix-win 11/4 ③)
+        res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run, update=True)
         if res is not None:
             result["claude"] = res
     else:
@@ -252,7 +260,8 @@ def _setup_problems(result):
                 or result.get("hancom_consent") is False
                 or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed"
-                or (result.get("works") or {}).get("status") == "failed")
+                or (result.get("works") or {}).get("status") == "failed"
+                or (result.get("plugbin") or {}).get("status") == "failed")
 
 
 def cmd_doctor(args, log):
@@ -276,7 +285,9 @@ def cmd_update(args, log):
         if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
             schedule.write_status(problems)
         return 1 if problems else 0
-    # 로그온 예약 작업이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다. 실패는 doctor가 보여 준다
+    # 로그온 자동 갱신(예약 작업·시작프로그램 바로가기)이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다
+    if args.delay:  # 바로가기는 로그온 즉시 돈다 — 네트워크가 올라올 틈(예약 작업의 '지연 2분' 대신)
+        time.sleep(args.delay)
     log = Log(schedule.open_log(), quiet=True)
     log(_banner("update", "logon task") + " — 로그온 자동 갱신")
     try:
@@ -314,6 +325,9 @@ def _update(args, log):
         problems.append("gw 설치 실패")
     if works.ensure(lock, log, dry_run=args.dry_run, offline=args.offline)["status"] == "failed":
         problems.append("웍스(nworks) 설치 실패")
+    pb = plugbin.ensure(lock, log, dry_run=args.dry_run, offline=args.offline)
+    if pb["failed"]:
+        problems.append(f"플러그인 명령 받기 실패: {', '.join(pb['failed'])}")
     log("\n[2/3] Claude · Codex 플러그인")
     claude.setup(lock, log, dry_run=args.dry_run, update=True)
     if claude.find_cli() and not args.dry_run:
@@ -388,6 +402,7 @@ def build_parser():
     u.add_argument("--dry-run", action="store_true")
     u.add_argument("--quiet", action="store_true",
                    help="화면에 쓰지 않고 update.log·update-status.json에만 남김(로그온 자동 갱신용)")
+    u.add_argument("--delay", type=int, default=0, help="--quiet 일 때 시작 전에 기다릴 초(시작프로그램 바로가기용)")
     u.set_defaults(func=cmd_update)
 
     h = sub.add_parser("hermes", help="Hermes 관리자 명령")
@@ -401,6 +416,10 @@ def build_parser():
     ap_ = hsub.add_parser("approvals", help="이 PC Hermes 의 위험 명령 승인 방식(smart·manual). off 는 AI센터 관리자만")
     ap_.add_argument("mode", choices=hermesbot.APPROVAL_MODES)
     ap_.set_defaults(func=hermesbot.cmd_approvals)
+    lg = hsub.add_parser("login", help="Hermes 의 AI 구독 로그인(설치기 마지막 화면이 부름)")
+    lg.add_argument("--model", choices=sorted(hermesbot.PROVIDERS), default="chatgpt")
+    lg.add_argument("--no-wait", action="store_true", help="끝나고 Enter 를 기다리지 않음")
+    lg.set_defaults(func=hermesbot.cmd_login)
 
     w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
     wsub = w.add_subparsers(dest="works_cmd", required=True)

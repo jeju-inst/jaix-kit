@@ -29,6 +29,8 @@ jobs:
         run: claude plugin validate .
       - name: Check lock (sha pins, tags)
         run: python scripts/jaixlock.py check
+      - name: Managed settings ↔ lock (docs/org-defaults.md 3절)
+        run: python scripts/managed_check.py
       - name: Lint plugins (standards check, advisory)
         run: python scripts/plugin_lint.py
       - name: Install every plugin from this checkout (fresh machine)
