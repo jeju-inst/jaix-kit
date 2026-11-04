@@ -279,22 +279,67 @@ def _yaml_has_key(text, section, name):
     return bool(re.search(rf"""^\s*(?:-\s*)?["']?{re.escape(name)}["']?\s*:""", text, re.M))
 
 
+def _config_digest():
+    try:
+        return hashlib.sha256(config_path().read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+class _Setter:
+    """hermes 설정 명령을 값이 바뀐 것만 부른다. hermes.exe 는 부를 때마다 서명 없는 python 을 하나 더 띄우는데,
+    창 없는 jaixw.exe 가 그걸 수십 번(재설치·로그온 갱신마다) 되풀이하는 것이 Defender 행동 판정에 보탰을 수 있다
+    (jaix-win 11/4). 건너뛰는 조건: 지난번 jaix 가 같은 값을 넣었고, 그 뒤 config.yaml 이 바뀌지 않았음(지문 같음).
+    사용자·Hermes 가 파일을 고쳤으면 지문이 달라져 전부 다시 넣는다(사용자 값을 덮지 않는 규칙은 부르는 쪽이 지킨다)."""
+
+    def __init__(self, hermes, log):
+        self.hermes, self.log = hermes, log
+        rec = recorded()
+        fresh = rec.get("config_digest") is not None and rec.get("config_digest") == _config_digest()
+        self.applied = dict(rec.get("applied") or {}) if fresh else {}
+        self.skipped = self.ran = 0
+        self.backed_up = False
+
+    def __call__(self, key, value, args):
+        if self.applied.get(key) == value:
+            self.skipped += 1
+            return True
+        if not self.backed_up:
+            saved = backup_config()
+            if saved:
+                self.log(f"    config.yaml 백업: {saved.name}")
+            self.backed_up = True
+        self.ran += 1
+        ok = _run([self.hermes, *args], self.log)[0]
+        if ok:
+            self.applied[key] = value
+        else:
+            self.applied.pop(key, None)
+        return ok
+
+    def save(self):
+        rec = recorded()
+        rec["applied"], rec["config_digest"] = self.applied, _config_digest()
+        _save_record(rec)
+        if self.skipped:
+            self.log(f"    Hermes 설정: 바뀐 것만 넣음({self.ran}건, 그대로인 {self.skipped}건은 건너뜀)")
+
+
 def configure(hermes, model, log, dry_run=False):
     """모델·도구·MCP. 값은 `hermes config set`(YAML/JSON 값)과 `hermes tools disable`로 넣는다(Hermes가 형식을 지킨다)."""
     spec = PROVIDERS[model]
     if dry_run:
         log(f"    설정: 모델 {spec['provider']} · 끌 도구 {', '.join(OFF_TOOLSETS)} · MCP(jaix 항목)")
         return True
-    saved = backup_config()
-    if saved:
-        log(f"    config.yaml 백업: {saved.name}")
+    put = _Setter(hermes, log)
     ok = True
     for key in ("provider", "default", "base_url"):
         if key in spec:
-            ok &= _run([hermes, "config", "set", f"model.{key}", spec[key]], log)[0]
+            ok &= put(f"model.{key}", spec[key], ["config", "set", f"model.{key}", spec[key]])
     for platform in ("cli", "slack"):
-        ok &= _run([hermes, "tools", "disable", *OFF_TOOLSETS, "--platform", platform], log)[0]
-    ok &= write_mcp(hermes, log)
+        ok &= put(f"tools:{platform}", list(OFF_TOOLSETS), ["tools", "disable", *OFF_TOOLSETS, "--platform", platform])
+    ok &= write_mcp(hermes, log, put)
+    put.save()
     return ok
 
 
@@ -426,31 +471,35 @@ def quiet(hermes, log):
         text = config_path().read_text(encoding="utf-8")
     except OSError:
         text = ""
+    put = _Setter(hermes, log)
     ok = True
     for key, value in QUIET.items():
-        ok &= _run([hermes, "config", "set", key, value], log)[0]
+        ok &= put(key, value, ["config", "set", key, value])
     if _yaml_has_key(text, "slack", "allow_admin_from") and not owned.get("slash"):
         log("    슬래시 명령 제한: 사용자 설정(slack.allow_admin_from)이 있어 그대로 둠")
     else:
         allow = sorted(set(SLASH_ALLOWED) | set(skills.installed()))  # jaix 스킬의 슬래시 명령은 열어 둔다
-        ok &= _run([hermes, "config", "set", "slack.allow_admin_from", json.dumps([SLASH_NOBODY])], log)[0]
-        ok &= _run([hermes, "config", "set", "slack.user_allowed_commands", json.dumps(allow)], log)[0]
+        for key, value in (("slack.allow_admin_from", json.dumps([SLASH_NOBODY])),
+                           ("slack.user_allowed_commands", json.dumps(allow))):
+            ok &= put(key, value, ["config", "set", key, value])
         owned["slash"] = True
         log(f"    슬래시 명령: /{', /'.join(SLASH_DENIED)} 막음")
     if _yaml_has_key(text, "skills", "disabled") and "skills" not in owned:  # 빈 목록도 jaix 것이다
         log("    기본 스킬: 사용자 설정(skills.disabled)이 있어 그대로 둠")
     else:
         off = builtin_skills()
-        ok &= _run([hermes, "config", "set", "skills.disabled", json.dumps(off, ensure_ascii=False)], log)[0]
+        value = json.dumps(off, ensure_ascii=False)
+        ok &= put("skills.disabled", value, ["config", "set", "skills.disabled", value])
         owned["skills"] = off
         log(f"    기본 스킬 {len(off)}개 끔(jaix 스킬만 켬)")
+    put.save()
     rec = recorded()
     rec["quiet"] = owned
     _save_record(rec)
     return ok
 
 
-def write_mcp(hermes, log):
+def write_mcp(hermes, log, put=None):
     """jaix가 Codex에 쓴 MCP 항목(codex-mcp.json)만 Hermes 에 넣는다. import-agent 는 항목을 고를 수 없어 쓰지 않는다
     (jaix-win Q9). 이미 같은 이름이 있으면 jaix가 넣은 것(기록)일 때만 바꾼다."""
     want = codex.owned_mcp()
@@ -470,7 +519,7 @@ def write_mcp(hermes, log):
             continue
         value = json.dumps({"command": spec["command"], "args": spec["args"], **({"env": spec["env"]} if spec.get("env") else {})},
                            ensure_ascii=False)
-        if _run([hermes, "config", "set", f"mcp_servers.{name}", value], log)[0]:
+        if (put or _Setter(hermes, log))(f"mcp_servers.{name}", value, ["config", "set", f"mcp_servers.{name}", value]):
             owned[name] = spec
             log(f"    MCP {name}: 넣음")
         else:
