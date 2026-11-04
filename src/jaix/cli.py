@@ -210,7 +210,9 @@ def cmd_setup(args, log):
         result["works"] = works_res
     log("\n[2/3] Claude")
     if "claude" in chosen:
-        res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run)
+        # 다시 설치할 때 이미 깔린 옛 판도 잠금에 맞춘다(update 와 같게). 빠뜨리면 Codex 만 맞고 Claude 는 옛 판으로
+        # 남아 doctor 가 실패를 보였다(jaix-win 11/4 ③)
+        res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run, update=True)
         if res is not None:
             result["claude"] = res
     else:
@@ -401,6 +403,10 @@ def build_parser():
     ap_ = hsub.add_parser("approvals", help="이 PC Hermes 의 위험 명령 승인 방식(smart·manual). off 는 AI센터 관리자만")
     ap_.add_argument("mode", choices=hermesbot.APPROVAL_MODES)
     ap_.set_defaults(func=hermesbot.cmd_approvals)
+    lg = hsub.add_parser("login", help="Hermes 의 AI 구독 로그인(설치기 마지막 화면이 부름)")
+    lg.add_argument("--model", choices=sorted(hermesbot.PROVIDERS), default="chatgpt")
+    lg.add_argument("--no-wait", action="store_true", help="끝나고 Enter 를 기다리지 않음")
+    lg.set_defaults(func=hermesbot.cmd_login)
 
     w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
     wsub = w.add_subparsers(dest="works_cmd", required=True)
