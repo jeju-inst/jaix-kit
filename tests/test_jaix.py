@@ -1380,13 +1380,27 @@ def test_no_slack_secrets_in_repo():
 # --- mail 플러그인이 잠금에 들어가면: himalaya·age 필수, uv 관리 Python 3.12 점검 -----------------------
 def _with_mail(the_lock):
     data = json.loads(json.dumps(the_lock.data))
-    data["plugins"].append({**data["plugins"][0], "name": "mail"})
+    if not any(p["name"] == "mail-skill" for p in data["plugins"]):
+        data["plugins"].append({**data["plugins"][0], "name": "mail-skill"})
     return lock.Lock(data, the_lock.source)
+
+
+def _without_mail(the_lock):
+    data = json.loads(json.dumps(the_lock.data))
+    data["plugins"] = [p for p in data["plugins"] if p["name"] != "mail-skill"]
+    return lock.Lock(data, the_lock.source)
+
+
+def test_mail_runtime_name_matches_lock_entry(the_lock):
+    """needed_by·MAIL_PLUGIN 은 잠금 entry 이름(plugin.json name)과 같아야 한다 — 'mail' 로 두면 영영 필수가 안 된다."""
+    names = {p.name for p in the_lock.plugins}
+    assert runtimes.BY_KEY["himalaya"].needed_by in names and runtimes.BY_KEY["age"].needed_by in names
+    assert doctor.MAIL_PLUGIN in names
 
 
 def test_mail_runtimes_required_only_when_mail_in_lock(the_lock):
     keys = lambda lk: {rt.key for rt in runtimes.select([], lk)}
-    assert not {"himalaya", "age"} & keys(the_lock)
+    assert not {"himalaya", "age"} & keys(_without_mail(the_lock))
     assert {"himalaya", "age"} <= keys(_with_mail(the_lock))
     assert not runtimes.required(runtimes.BY_KEY["age"], None)
 
@@ -1394,12 +1408,12 @@ def test_mail_runtimes_required_only_when_mail_in_lock(the_lock):
 def test_doctor_mail_runtime_missing_fails_only_with_mail(the_lock, monkeypatch):
     monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found(None, None))
     by = lambda lk: {c.area: c.status for c in doctor.check_runtimes(lk)}
-    assert by(the_lock)["himalaya"] == "skip"
+    assert by(_without_mail(the_lock))["himalaya"] == "skip"
     assert by(_with_mail(the_lock))["himalaya"] == "fail"
 
 
 def test_doctor_mail_python(the_lock, monkeypatch):
-    assert doctor.check_mail_python(the_lock) == []
+    assert doctor.check_mail_python(_without_mail(the_lock)) == []
     lk = _with_mail(the_lock)
     monkeypatch.setattr(runtimes, "find", lambda rt: runtimes.Found("/x/uv", "0.9"))
     monkeypatch.setattr(uvpython, "find", lambda v, uv=None: None)
