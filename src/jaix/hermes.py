@@ -5,11 +5,10 @@ Hermes 설치·슬랙 연결은 hermesbot.py. `jaix setup --channels hermes` 가
 """
 import json
 import shutil
-import tarfile
 import tempfile
 from pathlib import Path
 
-from jaix import net, paths
+from jaix import paths, plugbin
 
 MARKER = ".jaix.json"
 
@@ -32,19 +31,9 @@ def copy_skill(src, dst, meta):
     tmp.rename(dst)
 
 
-def _codeload(url, sha):
-    repo = url.removeprefix("https://github.com/").removesuffix(".git")
-    return f"https://codeload.github.com/{repo}/tar.gz/{sha}"
-
-
 def plugin_skills(plugin, workdir):
     """잠금 커밋의 소스를 받아 플러그인 skills/<이름>/SKILL.md 폴더들을 돌려준다."""
-    archive = net.download(_codeload(plugin.url, plugin.sha), Path(workdir) / f"{plugin.name}.tar.gz")
-    out = Path(workdir) / plugin.name
-    with tarfile.open(archive) as t:
-        t.extractall(out, filter="data")
-    top = next(out.iterdir())  # codeload는 <repo>-<sha>/ 하나로 묶는다
-    skills = top / plugin.subdir / "skills" if plugin.subdir else top / "skills"
+    skills = plugbin.fetch_root(plugin, workdir) / "skills"
     return [d for d in sorted(skills.iterdir()) if (d / "SKILL.md").is_file()] if skills.is_dir() else []
 
 

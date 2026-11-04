@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, runtimes, schedule, uvpython, winenv
+from jaix import claude, cli, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
 REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
@@ -18,6 +19,7 @@ REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
 REAL_HERMES_SETUP = hermesbot.setup
+REAL_PLUGBIN_ENSURE = plugbin.ensure
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
@@ -34,6 +36,10 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(hwpjar, "ensure", lambda lock, log, dry_run=False, offline=False: True)
     monkeypatch.setattr(hwpjar, "dest", lambda: tmp_path / "hwp-agent" / "hwp2hwpx.jar")
     monkeypatch.setattr(hwprhwp, "ensure", lambda lock, log, dry_run=False, offline=False: True)
+    # 플러그인 bin 명령: 소스를 진짜로 받지 않고, 링크는 tmp 에(시험은 REAL_PLUGBIN_ENSURE 를 부른다)
+    monkeypatch.setattr(plugbin, "ensure", lambda lock, log, dry_run=False, offline=False:
+                        {"status": "ok", "commands": [], "failed": []})
+    monkeypatch.setenv("JAIX_LINK_DIR", str(tmp_path / "linkbin"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # 한컴 옵션 파일도 tmp 로
     monkeypatch.setattr(paths, "desktop_installed", lambda: False)
     # 예약 작업은 진짜로 등록하지 않는다(맥이면 launchctl이 시험 중에 update를 돌린다)
@@ -2007,3 +2013,125 @@ def test_hermes_config_backup_only_when_writing(isolated, monkeypatch):
     before = len(backups())
     hermesbot.configure("hermes", "chatgpt", print)
     assert len(backups()) == before  # 아무것도 쓰지 않았으면 백업도 만들지 않음
+
+
+
+
+# --- 플러그인 bin/ 명령을 PATH 에 (plugbin, TS-RUNTIME-4) -------------------------------------------
+def _fake_plugin_source(monkeypatch, with_bin=("mailskill", "mailskill.cmd", "mailskill.ps1", "mail-secret.cmd")):
+    """잠금 커밋 소스 대신 가짜 플러그인 루트를 돌려준다. 받은 (이름, 커밋)을 센다."""
+    fetched = []
+
+    def fake_fetch(plugin, workdir):
+        fetched.append((plugin.name, plugin.sha))
+        root = Path(workdir) / plugin.name / "root"
+        (root / "skills" / plugin.name).mkdir(parents=True, exist_ok=True)
+        (root / "skills" / plugin.name / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+        if plugin.name == "mail-skill":
+            (root / "bin").mkdir(exist_ok=True)
+            (root / "scripts").mkdir(exist_ok=True)
+            for f in with_bin:
+                (root / "bin" / f).write_text("@echo off\n" if "." in f else "#!/bin/sh\necho hi\n", encoding="utf-8")
+        return root
+
+    monkeypatch.setattr(plugbin, "fetch_root", fake_fetch)
+    return fetched
+
+
+def _lock_with_mail_skill(the_lock, sha="a" * 40, include=True):
+    data = json.loads(json.dumps(the_lock.data))
+    data["plugins"] = [p for p in data["plugins"] if p["name"] != "mail-skill"]
+    if include:
+        data["plugins"].append({"name": "mail-skill", "version": "2026.11.3.1", "source": {
+            "source": "git-subdir", "url": "https://github.com/z0nam/mail-skill.git", "path": "plugins/mail-skill",
+            "ref": "v2026.11.03.1", "sha": sha}})
+    return lock.Lock(data, the_lock.source)
+
+
+def test_plugbin_puts_plugin_bin_commands_on_path(isolated, monkeypatch, the_lock):
+    fetched = _fake_plugin_source(monkeypatch)
+    the = _lock_with_mail_skill(the_lock)
+    res = REAL_PLUGBIN_ENSURE(the, print)
+    assert res["status"] == "ok"
+    link = plugbin.link_dir()
+    copy_bin = plugbin.plugins_dir() / "mail-skill" / "bin"
+    assert (plugbin.plugins_dir() / "mail-skill" / "scripts").is_dir()  # bin 스크립트가 ../scripts 를 찾는다
+    if paths.IS_WIN:
+        shim = (link / "mailskill.cmd").read_text(encoding="utf-8")
+        assert str(copy_bin / "mailskill.cmd") in shim and "%*" in shim
+        assert (link / "mail-secret.cmd").is_file()
+        assert str(copy_bin / "mailskill").replace("\\", "/") in (link / "mailskill").read_text(encoding="utf-8")
+        assert not (link / "mailskill.ps1").exists()
+    else:
+        assert (link / "mailskill").resolve() == (copy_bin / "mailskill").resolve()
+        assert os.access(copy_bin / "mailskill", os.X_OK)
+        assert not (link / "mailskill.cmd").exists() and not (link / "mail-secret.cmd").exists()
+    assert "mailskill" in res["commands"]
+    # bin 이 없는 플러그인도 기록돼 다음엔 받지 않는다
+    assert set(plugbin.recorded()) == {p.name for p in the.plugins}
+    n = len(fetched)
+    REAL_PLUGBIN_ENSURE(the, print)
+    assert len(fetched) == n  # 커밋이 같으면 다시 받지 않음
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), print)
+    assert fetched[-1] == ("mail-skill", "b" * 40) and len(fetched) == n + 1
+    # 잠금에서 빠지면 명령과 사본을 지운다
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, include=False), print)
+    assert not (link / "mailskill").exists() and not (link / "mailskill").is_symlink()
+    assert not (plugbin.plugins_dir() / "mail-skill").exists()
+    assert "mail-skill" not in plugbin.recorded()
+
+
+def test_plugbin_does_not_overwrite_foreign_command(isolated, monkeypatch, the_lock):
+    _fake_plugin_source(monkeypatch)
+    link = plugbin.link_dir()
+    link.mkdir(parents=True)
+    name = "mailskill.cmd" if paths.IS_WIN else "mailskill"
+    (link / name).write_text("user's own\n", encoding="utf-8")
+    msgs = []
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), msgs.append)
+    assert (link / name).read_text(encoding="utf-8") == "user's own\n"
+    assert any("jaix 가 만들지 않은 파일" in m for m in msgs)
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, include=False), print)
+    assert (link / name).exists()  # 지울 때도 남의 것은 둔다
+
+
+def test_plugbin_refetches_when_command_deleted_and_reports_failure(isolated, monkeypatch, the_lock):
+    fetched = _fake_plugin_source(monkeypatch)
+    the = _lock_with_mail_skill(the_lock)
+    REAL_PLUGBIN_ENSURE(the, print)
+    for c in plugbin.recorded()["mail-skill"]["commands"]:
+        Path(c).unlink()
+    n = len(fetched)
+    REAL_PLUGBIN_ENSURE(the, print)
+    assert len(fetched) == n + 1 and all(Path(c).exists() for c in plugbin.recorded()["mail-skill"]["commands"])
+
+    def boom(plugin, workdir):
+        raise OSError("offline")
+    monkeypatch.setattr(plugbin, "fetch_root", boom)
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="c" * 40), print)
+    assert res["status"] == "failed" and "mail-skill" in res["failed"]
+    assert plugbin.recorded()["mail-skill"]["sha"] == "a" * 40  # 실패하면 기록을 바꾸지 않아 다음에 다시 한다
+
+
+def test_doctor_plugin_bin(isolated, monkeypatch, the_lock):
+    _fake_plugin_source(monkeypatch)
+    the = _lock_with_mail_skill(the_lock)
+    assert [c.status for c in doctor.check_plugin_bin(the)] == ["warn"]  # 아직 확인 안 함
+    REAL_PLUGBIN_ENSURE(the, print)
+    monkeypatch.setenv("PATH", str(plugbin.link_dir()) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setattr(winenv, "in_user_path", lambda d: True)
+    checks = doctor.check_plugin_bin(the)
+    assert [c.status for c in checks] == ["ok"] and "mailskill" in checks[0].message
+    checks = doctor.check_plugin_bin(_lock_with_mail_skill(the_lock, sha="d" * 40))
+    assert [c.status for c in checks] == ["warn"] and checks[0].fix == "jaix update"
+
+
+def test_setup_counts_plugbin_failure():
+    assert cli._setup_problems({"plugbin": {"status": "failed"}})
+    assert not cli._setup_problems({"plugbin": {"status": "ok"}})
+
+
+def test_hermes_skills_use_shared_fetch(isolated, monkeypatch, the_lock):
+    _fake_plugin_source(monkeypatch)
+    p = _lock_with_mail_skill(the_lock).plugins[-1]
+    assert [d.name for d in hermes.plugin_skills(p, isolated / "w")] == ["mail-skill"]
