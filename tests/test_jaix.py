@@ -1767,10 +1767,20 @@ def test_release_asset_web_non_limit_error_is_not_called_rate_limit(monkeypatch)
 def test_installer_does_not_spawn_cmd_from_run_section():
     """① 설치기 → cmd /K 에 Defender 행동 탐지가 걸렸다. [Run] 은 jaix.exe 가 띄운다."""
     iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
-    run = "\n".join(ln for ln in iss.split("[Run]", 1)[1].split("\n[", 1)[0].splitlines() if not ln.startswith(";"))
-    assert "{cmd}" not in run and "cmd.exe" not in run.lower()
-    assert 'Filename: "{app}\\jaix\\jaix.exe"; Parameters: "hermes login --model chatgpt"' in run
-    assert 'Parameters: "hermes login --model claude"' in run
+    # [마침] 뒤 nowait 로 로그인 창을 남기던 [Run] 도 없앴다 — 설치기가 끝날 때 남는 자식 0개(jaix-win 11/4 (다))
+    assert "\n[Run]" not in iss.replace("\r", "")
+
+
+def test_installer_login_page_waits_for_login_and_start_menu_shortcut():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    code = iss.split("[Code]", 1)[1]
+    assert "LoginPage := CreateCustomPage(\n    GuidePage.ID," in code.replace("\r", "")  # 완료 화면 바로 앞
+    click = code.split("procedure LoginButtonClick", 1)[1].split("\nend;", 1)[0]
+    assert "ewWaitUntilTerminated" in click and "--no-wait" in click and "{app}\\jaix\\jaix.exe" in click
+    assert "WizardSilent()" in code.split("function ShouldSkipPage", 1)[1].split("\nend;", 1)[0]
+    icons = iss.split("[Icons]", 1)[1].split("\n[", 1)[0]
+    assert ('Name: "{autoprograms}\\JAIX Hermes 로그인"; Filename: "{app}\\jaix\\jaix.exe"; '
+            'Parameters: "hermes login --model {code:HermesModelArg}"') in icons
 
 
 def test_hermes_login_runs_provider_login_and_waits(monkeypatch):

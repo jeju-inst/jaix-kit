@@ -124,7 +124,8 @@ def _hermes_guide(res):
         lines.append(f"  슬랙 봇 Hermes-{res.get('id')} 가 연결됐습니다. 이 PC가 켜져 있어야 봇이 답합니다.")
     elif status == "no-code":
         lines.append("  Hermes는 깔았지만 슬랙 연결 코드가 없어 연결하지 않았습니다. AI센터에서 코드를 받아 다시 설치하세요.")
-    lines += ["  처음 한 번 AI 구독에 로그인하세요: 마지막 화면의 'AI 로그인 창 열기'를 켜 두거나,",
+    lines += ["  처음 한 번 AI 구독에 로그인하세요: 설치기 다음 화면 'AI 구독 로그인'의 [로그인 창 열기],",
+              "  시작 메뉴의 'JAIX Hermes 로그인', 또는",
               f"  새 명령창에서 `{login}` 을 실행합니다(브라우저에서 승인)."]
     return lines
 
