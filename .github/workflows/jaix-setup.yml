@@ -172,7 +172,11 @@ jobs:
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
           $lnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'JAIX 갱신.lnk'
           if (-not (Test-Path $lnk)) { Get-ChildItem ([Environment]::GetFolderPath('Startup')); throw "시작프로그램 바로가기 없음: $lnk" }
-          $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+          # WScript.Shell 은 한글 이름 .lnk 를 빈 바로가기로 읽는다(러너 코드페이지 1252) → ASCII 이름 사본으로 읽는다
+          $copy = Join-Path $env:TEMP 'jaix-startup-check.lnk'
+          Copy-Item -LiteralPath $lnk -Destination $copy -Force
+          Write-Host "바로가기 파일: $((Get-Item -LiteralPath $lnk).Length) B"
+          $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($copy)
           Write-Host "바로가기: $($sc.TargetPath) $($sc.Arguments)"
           if ($sc.TargetPath -notlike '*\jaix\jaixw.exe') { throw "바로가기가 창 없는 jaixw.exe 를 부르지 않음: $($sc.TargetPath)" }
           if ($sc.Arguments -notlike 'update --quiet*') { throw "바로가기 인자: $($sc.Arguments)" }
