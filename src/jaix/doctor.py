@@ -420,6 +420,9 @@ def check_autoupdate():
     if not schedule.supported():
         return [Check("skip", area, "이 OS는 지원 안 함 — 가끔 jaix update")]
     if not schedule.registered():
+        if schedule.installer_managed():
+            return [Check("warn", area, f"시작프로그램 바로가기({schedule.STARTUP_LINK})가 없음 — Codex·Hermes 도구가 "
+                                        "저절로 갱신되지 않음", "jaix-setup 을 다시 실행 (또는 가끔 jaix update)")]
         return [Check("warn", area, "등록 안 됨 — Codex·Hermes 도구가 저절로 갱신되지 않음", "jaix setup")]
     bad = schedule.run_mode()
     if bad:
@@ -431,6 +434,8 @@ def check_autoupdate():
         return [Check("warn", area, f"작업이 실패로 끝남({ran[0]}, 결과 0x{ran[1]:X}) — 기록: {schedule.log_file()}",
                       "jaix setup (다시 등록) 뒤 다시 로그온해 보고, 그래도 같으면 이 줄을 AI센터에 보내 주세요")]
     last = schedule.last_status()
+    if schedule.installer_managed():
+        task = " · 시작프로그램 바로가기"
     if not last:
         return [Check("ok", area, f"등록됨 (아직 돈 적 없음){task}")]
     if last.get("ok"):

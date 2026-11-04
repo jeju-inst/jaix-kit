@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
 from datetime import datetime
@@ -278,7 +279,9 @@ def cmd_update(args, log):
         if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
             schedule.write_status(problems)
         return 1 if problems else 0
-    # 로그온 예약 작업이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다. 실패는 doctor가 보여 준다
+    # 로그온 자동 갱신(예약 작업·시작프로그램 바로가기)이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다
+    if args.delay:  # 바로가기는 로그온 즉시 돈다 — 네트워크가 올라올 틈(예약 작업의 '지연 2분' 대신)
+        time.sleep(args.delay)
     log = Log(schedule.open_log(), quiet=True)
     log(_banner("update", "logon task") + " — 로그온 자동 갱신")
     try:
@@ -390,6 +393,7 @@ def build_parser():
     u.add_argument("--dry-run", action="store_true")
     u.add_argument("--quiet", action="store_true",
                    help="화면에 쓰지 않고 update.log·update-status.json에만 남김(로그온 자동 갱신용)")
+    u.add_argument("--delay", type=int, default=0, help="--quiet 일 때 시작 전에 기다릴 초(시작프로그램 바로가기용)")
     u.set_defaults(func=cmd_update)
 
     h = sub.add_parser("hermes", help="Hermes 관리자 명령")

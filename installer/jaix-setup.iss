@@ -57,6 +57,11 @@ Source: "payload\jaix\*"; DestDir: "{app}\jaix"; Flags: ignoreversion recursesub
 [Icons]
 Name: "{autoprograms}\JAIX 점검 (jaix doctor)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" doctor"; Comment: "도구 설치 상태 점검"
 Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" update"; Comment: "런타임·도구를 잠금 버전에 맞춤"
+; 로그온 자동 갱신. jaix 가 schtasks 로 jaixw.exe 를 로그온 작업에 등록하던 것을 대신한다 — 서명 없는 창 없는 exe 의
+; 자기 등록이 Defender Behavior:Win32/Persistence.A!ml 로 잡혀 jaixw.exe·작업이 격리됐다(jaix-win 11/4). 설치기가
+; 선언한 시작프로그램 바로가기는 제거 때 함께 지워진다. 이름은 src/jaix/schedule.py STARTUP_LINK 와 같게
+Name: "{userstartup}\JAIX 갱신"; Filename: "{app}\jaix\jaixw.exe"; Parameters: "update --quiet --delay 120"; \
+  Comment: "로그온 때 JAIX 도구를 잠금 버전에 맞춤(jaix update)"
 
 [Registry]
 ; jaix.exe 자체를 사용자 PATH에. 런타임 폴더(bin·git·jre)는 jaix setup이 넣고, 예전 설치본이 넣은 {app} 항목도 뺀다
