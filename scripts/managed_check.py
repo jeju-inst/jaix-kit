@@ -26,6 +26,9 @@ def compare(lock_names, managed):
 
 
 def main():
+    # Windows runner 콘솔(cp1252)에서 한글 출력이 UnicodeEncodeError 로 죽지 않게
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     lock = [p["name"] for p in load(".claude-plugin/marketplace.json")["plugins"]]
     missing, stale = compare(lock, load("admin/managed-settings.json"))
     for name in missing:
