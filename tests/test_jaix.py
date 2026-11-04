@@ -1804,3 +1804,35 @@ def test_setup_updates_stale_claude_plugins(isolated, monkeypatch):
     monkeypatch.setattr(claude, "setup", lambda lock, log, **kw: seen.update(kw) or {"managed": None, "cli": False})
     assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
     assert seen.get("update") is True
+# --- 로그온 작업 진단 (jaix-win 11/4 ④) ----------------------------------------------------------------------
+def test_logon_task_has_no_network_condition():
+    """'네트워크 연결 시만'은 로그온 트리거를 조용히 건너뛰게 할 수 있다. 오프라인은 jaix update 가 스스로 다룬다."""
+    xml = schedule.task_xml(["C:\\jaixw.exe", "update", "--quiet"], "u")
+    assert "<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>" in xml
+    assert "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" in xml
+
+
+def test_parse_last_run_reads_by_position():
+    line = '"PC","\\jaix-update","N/A","준비","대화형만","2026-11-03 오후 6:05:12","2147942402","PC\\u"'
+    assert schedule.parse_last_run(line) == ("2026-11-03 오후 6:05:12", 0x80070002)
+    assert schedule.run_failed(0x80070002)
+    assert schedule.parse_last_run('"PC","\\jaix-update","N/A","준비","대화형만","1999-11-30","267011","u"')[1] == 0x41303
+    assert schedule.parse_last_run('"PC","\\t","N/A","x","y","when","-2147024894","u"')[1] == 0x80070002
+    assert not schedule.run_failed(0x41303) and not schedule.run_failed(0) and not schedule.run_failed(None)
+    assert schedule.parse_last_run("") is None
+
+
+def test_doctor_warns_when_logon_task_failed(monkeypatch):
+    monkeypatch.setattr(schedule, "supported", lambda: True)
+    monkeypatch.setattr(schedule, "registered", lambda: True)
+    monkeypatch.setattr(schedule, "run_mode", lambda: None)
+    monkeypatch.setattr(schedule, "last_status", lambda: {"ok": True, "time": "t", "by": "setup"})
+    monkeypatch.setattr(schedule, "last_run", lambda: ("2026-11-03 18:05", 0x80070002))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "warn" and "0x80070002" in c.message
+    monkeypatch.setattr(schedule, "last_run", lambda: ("2026-11-03 18:05", 0))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "작업 마지막 실행 2026-11-03 18:05" in c.message
+    monkeypatch.setattr(schedule, "last_run", lambda: ("1999-11-30 0:00:00", 0x41303))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "작업은 아직 안 돎" in c.message and "1999" not in c.message

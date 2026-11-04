@@ -424,14 +424,20 @@ def check_autoupdate():
     bad = schedule.run_mode()
     if bad:
         return [Check("warn", area, f"실행 모드 문제: {bad}", "jaix setup (다시 등록)")]
+    ran = schedule.last_run()
+    # 0x41303 = 아직 안 돎(마지막 실행 칸에 1999-11-30 같은 자리값이 찍힌다)
+    task = (" · 작업은 아직 안 돎" if ran[1] == 0x41303 else f" · 작업 마지막 실행 {ran[0]}") if ran else ""
+    if ran and schedule.run_failed(ran[1]):
+        return [Check("warn", area, f"작업이 실패로 끝남({ran[0]}, 결과 0x{ran[1]:X}) — 기록: {schedule.log_file()}",
+                      "jaix setup (다시 등록) 뒤 다시 로그온해 보고, 그래도 같으면 이 줄을 AI센터에 보내 주세요")]
     last = schedule.last_status()
     if not last:
-        return [Check("ok", area, "등록됨 (아직 돈 적 없음)")]
+        return [Check("ok", area, f"등록됨 (아직 돈 적 없음){task}")]
     if last.get("ok"):
         by = " (jaix setup)" if last.get("by") == "setup" else ""
-        return [Check("ok", area, f"마지막 갱신 {last.get('time')}{by}")]
+        return [Check("ok", area, f"마지막 갱신 {last.get('time')}{by}{task}")]
     why = last.get("error") or "; ".join(last.get("problems") or [])
-    return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()})", "jaix update")]
+    return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()}){task}", "jaix update")]
 
 
 def run(lock):

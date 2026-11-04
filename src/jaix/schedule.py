@@ -81,7 +81,7 @@ def task_xml(cmd, user, logon=True):
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>{str(logon).lower()}</RunOnlyIfNetworkAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
     <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
     <Enabled>true</Enabled>
   </Settings>
@@ -162,6 +162,51 @@ def missing_command(root):
     if cmd and Path(os.path.expandvars(cmd)).is_absolute() and not Path(os.path.expandvars(cmd)).exists():
         return f"작업이 부르는 {cmd} 가 없음(설치 위치가 바뀜)"
     return None
+
+
+# 작업 스케줄러 '마지막 실행 결과' 중 실패가 아닌 것: 0 성공 · 0x41301 실행 중 · 0x41303 아직 안 돎
+_RESULT_OK = {0, 0x41301, 0x41303}
+
+
+def last_run():
+    """등록된 작업의 (마지막 실행 시각, 마지막 결과 코드). Windows 외·읽지 못하면 None.
+    jaix setup 도 update-status.json 을 덮어써서, 로그온 작업이 실제로 돌았는지는 작업 스케줄러에만 남는다
+    (jaix-win 11/4 ④: 재로그온 때 작업이 돌지 않았는데 doctor 는 '마지막 갱신'만 보였다)."""
+    if not IS_WIN:
+        return None
+    try:
+        r = subprocess.run(["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "CSV", "/NH"], capture_output=True,
+                           creationflags=paths.NO_WINDOW, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return parse_last_run(r.stdout.decode(_oem_encoding(), errors="replace"))
+
+
+def _oem_encoding():
+    import locale
+    try:
+        import ctypes
+        return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
+    except (AttributeError, OSError):
+        return locale.getpreferredencoding(False)
+
+
+def parse_last_run(text):
+    """schtasks /V /FO CSV /NH 한 줄: 머리글이 언어마다 달라 자리로 읽는다(5 = 마지막 실행 시간, 6 = 마지막 결과)."""
+    import csv
+    rows = [r for r in csv.reader(text.splitlines()) if len(r) > 6]
+    if not rows:
+        return None
+    when, result = rows[0][5].strip(), rows[0][6].strip()
+    try:
+        code = int(result, 0) & 0xFFFFFFFF
+    except ValueError:
+        return when, None
+    return when, code
+
+
+def run_failed(code):
+    return code is not None and code not in _RESULT_OK
 
 
 def mode_problem(root):
