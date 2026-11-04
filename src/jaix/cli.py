@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, paths, runtimes, schedule, uvpython, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, runtimes, schedule, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -102,6 +102,8 @@ def guide(channels, result):
                 "  gw 를 처음 쓰기 전에 한 번 로그인하세요. 아이디·비밀번호는 이 PC에 안전하게 저장됩니다.",
                 "  Claude·Codex 에게 'gw 로그인해 줘'라고 하면 입력 창이 뜹니다.",
                 "  새 명령창에서 직접 `gw login` 을 치면 그 자리에서 묻습니다."]
+    if net.rate_limit_hit:
+        out += ["", f"※ {net.RATE_LIMIT_HINT}."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
             "문제가 있으면 새 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
     return "\n".join(out)
@@ -396,6 +398,9 @@ def build_parser():
     ho.add_argument("--ttl", type=float, default=hermesbot.TTL_HOURS, help="유효 시간(기본 72)")
     ho.add_argument("--spool", help=f"묶음 폴더(기본 {hermesbot.HANDOFF_SPOOL}, ji-gw-ai 배포처와 같게)")
     ho.set_defaults(func=hermesbot.cmd_handoff)
+    ap_ = hsub.add_parser("approvals", help="이 PC Hermes 의 위험 명령 승인 방식(smart·manual). off 는 AI센터 관리자만")
+    ap_.add_argument("mode", choices=hermesbot.APPROVAL_MODES)
+    ap_.set_defaults(func=hermesbot.cmd_approvals)
 
     w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
     wsub = w.add_subparsers(dest="works_cmd", required=True)

@@ -1,0 +1,24 @@
+{
+  "extraKnownMarketplaces": {
+    "jaix": {
+      "source": { "source": "git", "url": "https://github.com/jeju-inst/jaix-kit.git" },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "calendar-worklog-ji@jaix": true,
+    "hwp-agent@jaix": true,
+    "ji-report-writing@jaix": true,
+    "ji-project-template@jaix": true,
+    "korea-rio-mcp@jaix": true,
+    "gw@jaix": true,
+    "claude-for-nonprofits@synced": false
+  },
+  "model": "sonnet",
+  "permissions": {
+    "disableBypassPermissionsMode": "disable"
+  },
+  "companyAnnouncements": [
+    "제주연구원 AI 도구(jaix)가 자동으로 설치·업데이트됩니다. 사용법·문의는 AI센터 안내 페이지를 보세요."
+  ]
+}
