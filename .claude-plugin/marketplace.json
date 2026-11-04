@@ -131,8 +131,8 @@
         "source": "git-subdir",
         "url": "https://github.com/z0nam/mail-skill.git",
         "path": "plugins/mail-skill",
-        "ref": "v2026.11.03.1",
-        "sha": "8fc3acaf757b946e580b7471fd2f2d576c00a48d"
+        "ref": "v2026.11.04.1",
+        "sha": "adce7365cb99d609e53f14934233b6239b994add"
       },
       "homepage": "https://github.com/z0nam/mail-skill",
       "metadata": {
@@ -140,7 +140,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.03.1"
+      "version": "2026.11.04.1"
     }
   ]
 }

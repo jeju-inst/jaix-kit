@@ -1,5 +1,7 @@
+import argparse
 import dataclasses
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -7,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, runtimes, schedule, uvpython, winenv
+from jaix import claude, cli, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
 REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
@@ -17,6 +19,7 @@ REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
 REAL_HERMES_SETUP = hermesbot.setup
+REAL_PLUGBIN_ENSURE = plugbin.ensure
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
@@ -33,6 +36,10 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(hwpjar, "ensure", lambda lock, log, dry_run=False, offline=False: True)
     monkeypatch.setattr(hwpjar, "dest", lambda: tmp_path / "hwp-agent" / "hwp2hwpx.jar")
     monkeypatch.setattr(hwprhwp, "ensure", lambda lock, log, dry_run=False, offline=False: True)
+    # 플러그인 bin 명령: 소스를 진짜로 받지 않고, 링크는 tmp 에(시험은 REAL_PLUGBIN_ENSURE 를 부른다)
+    monkeypatch.setattr(plugbin, "ensure", lambda lock, log, dry_run=False, offline=False:
+                        {"status": "ok", "commands": [], "failed": []})
+    monkeypatch.setenv("JAIX_LINK_DIR", str(tmp_path / "linkbin"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # 한컴 옵션 파일도 tmp 로
     monkeypatch.setattr(paths, "desktop_installed", lambda: False)
     # 예약 작업은 진짜로 등록하지 않는다(맥이면 launchctl이 시험 중에 update를 돌린다)
@@ -1774,3 +1781,381 @@ def test_release_asset_web_non_limit_error_is_not_called_rate_limit(monkeypatch)
     with pytest.raises(urllib.error.HTTPError) as e:
         net.latest_release_asset("o/r", "x")
     assert e.value.code == 404 and not net.rate_limit_hit
+
+
+# --- jaix-win 11/4 실측 4건 ---------------------------------------------------------------------------------
+def test_installer_does_not_spawn_cmd_from_run_section():
+    """① 설치기 → cmd /K 에 Defender 행동 탐지가 걸렸다. [Run] 은 jaix.exe 가 띄운다."""
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    # [마침] 뒤 nowait 로 로그인 창을 남기던 [Run] 도 없앴다 — 설치기가 끝날 때 남는 자식 0개(jaix-win 11/4 (다))
+    assert "\n[Run]" not in iss.replace("\r", "")
+
+
+def test_installer_login_page_waits_for_login_and_start_menu_shortcut():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    code = iss.split("[Code]", 1)[1]
+    assert "LoginPage := CreateCustomPage(\n    GuidePage.ID," in code.replace("\r", "")  # 완료 화면 바로 앞
+    click = code.split("procedure LoginButtonClick", 1)[1].split("\nend;", 1)[0]
+    assert "ewWaitUntilTerminated" in click and "--no-wait" in click and "{app}\\jaix\\jaix.exe" in click
+    assert "WizardSilent()" in code.split("function ShouldSkipPage", 1)[1].split("\nend;", 1)[0]
+    icons = iss.split("[Icons]", 1)[1].split("\n[", 1)[0]
+    assert ('Name: "{autoprograms}\\JAIX Hermes 로그인"; Filename: "{app}\\jaix\\jaix.exe"; '
+            'Parameters: "hermes login --model {code:HermesModelArg}"') in icons
+
+
+def test_hermes_login_runs_provider_login_and_waits(monkeypatch):
+    shown = []
+    monkeypatch.setattr(hermesbot, "show_console", lambda: shown.append(1))  # hide-early 로 숨은 창을 먼저 보인다
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    calls, waited = [], []
+    args = argparse.Namespace(model="claude", no_wait=False)
+    rc = hermesbot.cmd_login(args, lambda m="": None, run=lambda cmd: calls.append(cmd) or 0,
+                             wait=waited.append)
+    assert rc == 0 and calls == [["/x/hermes", "auth", "add", "anthropic", "--type", "oauth"]]
+    assert bool(waited) == hermesbot.IS_WIN
+    assert shown == [1]
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: None)
+    assert hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), lambda m="": None) == 1
+
+
+def test_show_console_is_noop_off_windows():
+    if not hermesbot.IS_WIN:
+        assert hermesbot.show_console() is False
+
+
+def test_hermes_login_parser():
+    args = cli.build_parser().parse_args(["hermes", "login", "--model", "claude"])
+    assert args.func is hermesbot.cmd_login and args.model == "claude"
+
+
+def test_setup_updates_stale_claude_plugins(isolated, monkeypatch):
+    """③ 다시 설치할 때 옛 판 Claude 플러그인도 잠금에 맞춘다(update=True)."""
+    seen = {}
+    monkeypatch.setattr(claude, "setup", lambda lock, log, **kw: seen.update(kw) or {"managed": None, "cli": False})
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
+    assert seen.get("update") is True
+# --- 로그온 작업 진단 (jaix-win 11/4 ④) ----------------------------------------------------------------------
+def test_logon_task_has_no_network_condition():
+    """'네트워크 연결 시만'은 로그온 트리거를 조용히 건너뛰게 할 수 있다. 오프라인은 jaix update 가 스스로 다룬다."""
+    xml = schedule.task_xml(["C:\\jaixw.exe", "update", "--quiet"], "u")
+    assert "<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>" in xml
+    assert "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" in xml
+
+
+def test_parse_last_run_reads_by_position():
+    line = '"PC","\\jaix-update","N/A","준비","대화형만","2026-11-03 오후 6:05:12","2147942402","PC\\u"'
+    assert schedule.parse_last_run(line) == ("2026-11-03 오후 6:05:12", 0x80070002)
+    assert schedule.run_failed(0x80070002)
+    assert schedule.parse_last_run('"PC","\\jaix-update","N/A","준비","대화형만","1999-11-30","267011","u"')[1] == 0x41303
+    assert schedule.parse_last_run('"PC","\\t","N/A","x","y","when","-2147024894","u"')[1] == 0x80070002
+    assert not schedule.run_failed(0x41303) and not schedule.run_failed(0) and not schedule.run_failed(None)
+    assert schedule.parse_last_run("") is None
+
+
+# jaix-win 11/4 실측 원문(한국어 Windows, chcp 949, jaix-test 대화형 세션). '실행할 작업' 열은 따옴표가 이스케이프되지
+# 않아 CSV 로 깨지지만 그 뒤라 5·6 열은 영향이 없다
+KO_SCHTASKS_ROW = (
+    '"NAMUN-JI","\\jaix-update","N/A","준비","대화형만","2026-11-04 오후 2:21:55","0","N/A",'
+    '""C:\\Users\\jaix-test\\AppData\\Local\\Programs\\jaix\\jaix\\jaixw.exe" update --quiet","N/A",'
+    '"JAIX 도구를 잠금 버전에 맞춤(로그온 때 jaix update). jaix-setup 제거 시 함께 지워짐","사용","사용 안 함","",'
+    '"jaix-test","사용 안 함","01:00:00","이 형식으로 데이터를 예약할 수 없습니다.","로그온 시","N/A","N/A","N/A",'
+    '"N/A","N/A","N/A","N/A","N/A","N/A"')
+
+
+def test_parse_last_run_real_korean_windows_row():
+    raw = (KO_SCHTASKS_ROW + "\r\n").encode("cp949")  # schtasks 가 내는 바이트 그대로
+    assert schedule.parse_last_run(raw.decode("cp949", errors="replace")) == ("2026-11-04 오후 2:21:55", 0)
+    # 코드페이지를 잘못 짚어도 판정(결과 코드)은 그대로다 — 날짜 속 한글만 깨진다
+    assert schedule.parse_last_run(raw.decode("utf-8", errors="replace"))[1] == 0
+
+
+def test_doctor_warns_when_logon_task_failed(monkeypatch):
+    monkeypatch.setattr(schedule, "supported", lambda: True)
+    monkeypatch.setattr(schedule, "registered", lambda: True)
+    monkeypatch.setattr(schedule, "run_mode", lambda: None)
+    monkeypatch.setattr(schedule, "last_status", lambda: {"ok": True, "time": "t", "by": "setup"})
+    monkeypatch.setattr(schedule, "last_run", lambda: ("2026-11-03 18:05", 0x80070002))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "warn" and "0x80070002" in c.message
+    monkeypatch.setattr(schedule, "last_run", lambda: ("2026-11-03 18:05", 0))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "작업 마지막 실행 2026-11-03 18:05" in c.message
+    monkeypatch.setattr(schedule, "last_run", lambda: ("1999-11-30 0:00:00", 0x41303))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "작업은 아직 안 돎" in c.message and "1999" not in c.message
+
+
+def test_hermes_login_ctrl_c_keeps_window_and_records(isolated, monkeypatch):
+    """Ctrl+C 가 jaix 까지 올라와 창이 바로 닫히던 것(jaix-win 11/4). 취소로 받고, 안내 뒤 Enter 를 기다린다."""
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+
+    class Child:
+        waits = 0
+
+        def __init__(self, cmd, env=None):
+            pass
+
+        def wait(self, timeout=None):
+            Child.waits += 1
+            if Child.waits == 1:
+                raise KeyboardInterrupt
+            return 1
+
+        def kill(self):
+            raise AssertionError("자식이 스스로 끝났으면 죽이지 않는다")
+
+    monkeypatch.setattr(hermesbot.subprocess, "Popen", Child)
+    seen, waited = [], []
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False), seen.append, wait=waited.append)
+    assert rc == hermesbot.CANCELLED and Child.waits == 2 and waited
+    assert any("취소" in m and "jaix hermes login --model chatgpt" in m for m in seen)
+    rec = (paths.data_dir() / "hermes-login.log").read_text(encoding="utf-8")
+    assert "model=chatgpt code=130" in rec
+
+
+# --- 설치본 로그온 자동 갱신 = 설치기가 둔 시작프로그램 바로가기 (Defender Persistence.A!ml, jaix-win 11/4) ----------
+@pytest.fixture
+def managed(isolated, monkeypatch, tmp_path):
+    monkeypatch.setattr(schedule, "IS_WIN", True)
+    monkeypatch.setattr(schedule.paths, "exe_dir", lambda: tmp_path / "app" / "jaix")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    state = argparse.Namespace(calls=[], task=False)
+
+    def fake_run(args):
+        state.calls.append(args)
+        if args[:2] == ["schtasks", "/Query"]:
+            return (state.task, "")
+        return (True, "")
+    monkeypatch.setattr(schedule, "_run", fake_run)
+    return state
+
+
+def test_installer_declares_startup_link_with_same_name():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    name = schedule.STARTUP_LINK.removesuffix(".lnk")
+    line = next(ln for ln in iss.splitlines() if ln.startswith('Name: "{userstartup}'))
+    assert f'{{userstartup}}\\{name}"' in line and 'jaixw.exe"' in line
+    assert f"update --quiet --delay {schedule.LOGON_DELAY}" in line
+
+
+def test_managed_register_does_not_create_task_and_drops_legacy(managed):
+    assert schedule.installer_managed()
+    managed.task = True  # 예전 판이 만든 jaix-update
+    seen = []
+    assert schedule.register(seen.append) is False  # 바로가기가 아직 없음
+    assert not any(c[:2] == ["schtasks", "/Create"] for c in managed.calls)
+    assert ["schtasks", "/Delete", "/TN", schedule.TASK_NAME, "/F"] in managed.calls
+    assert any("바로가기가 없음" in m for m in seen)
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    managed.task = False
+    seen.clear()
+    assert schedule.register(seen.append) is True and schedule.registered()
+    assert any("시작프로그램 바로가기" in m for m in seen)
+    assert schedule.run_mode() is None and schedule.last_run() is None
+
+
+def test_managed_unregister_removes_link(managed):
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    assert schedule.unregister() is True and not schedule.startup_link().exists()
+
+
+def test_doctor_managed_missing_link_points_to_installer(managed, monkeypatch):
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "warn" and schedule.STARTUP_LINK in c.message and "jaix-setup" in c.fix
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    monkeypatch.setattr(schedule, "last_status", lambda: {"ok": True, "time": "t"})
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "시작프로그램 바로가기" in c.message
+
+
+def test_update_quiet_delay_sleeps(isolated, monkeypatch):
+    slept = []
+    monkeypatch.setattr(cli.time, "sleep", slept.append)
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    assert cli.main(["update", "--quiet", "--delay", "120"]) == 0
+    assert slept == [120]
+
+
+# --- Hermes 설정: 바뀐 것만 부르기 (재설치·로그온 갱신에서 hermes.exe 반복 줄이기, jaix-win 11/4) ------------------
+def _hermes_fake_run(calls):
+    def run(cmd, log, timeout=600):
+        calls.append(cmd)
+        f = hermesbot.config_path()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with open(f, "a", encoding="utf-8") as out:  # hermes config set 이 파일을 고치는 것 흉내
+            out.write(f"# {' '.join(cmd[1:4])}\n")
+        return True, ""
+    return run
+
+
+def test_hermes_quiet_skips_unchanged_on_rerun(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: ["a", "b"])
+    assert hermesbot.quiet("hermes", print)
+    first = len(calls)
+    assert first >= 4
+    calls.clear()
+    seen = []
+    assert hermesbot.quiet("hermes", seen.append)  # 로그온 update·재설치
+    assert calls == [] and any("건너뜀" in m for m in seen)
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: ["a", "b", "c"])  # Hermes 업데이트로 새 기본 스킬
+    assert hermesbot.quiet("hermes", print)
+    assert [c[3] for c in calls] == ["skills.disabled"]
+
+
+def test_hermes_settings_reapplied_when_config_changed_elsewhere(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    monkeypatch.setattr(hermesbot.codex, "owned_mcp", lambda: {})
+    assert hermesbot.configure("hermes", "chatgpt", print) and hermesbot.quiet("hermes", print)
+    n = len(calls)
+    calls.clear()
+    assert hermesbot.configure("hermes", "chatgpt", print) and hermesbot.quiet("hermes", print)
+    assert calls == []
+    with open(hermesbot.config_path(), "a", encoding="utf-8") as f:  # 사용자·Hermes 가 파일을 고침
+        f.write("model:\n  provider: other\n")
+    assert hermesbot.configure("hermes", "chatgpt", print) and hermesbot.quiet("hermes", print)
+    assert len(calls) == n  # 지문이 달라져 전부 다시
+    calls.clear()
+    assert hermesbot.configure("hermes", "claude", print)  # 모델을 바꾸면 바뀐 키만
+    assert calls and all(c[1] == "config" and c[3].startswith("model.") for c in calls)
+
+
+def test_hermes_config_backup_only_when_writing(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot.codex, "owned_mcp", lambda: {})
+    hermesbot.configure("hermes", "chatgpt", print)
+    backups = lambda: list(hermesbot.config_path().parent.glob("config.yaml.jaix-bak-*"))
+    before = len(backups())
+    hermesbot.configure("hermes", "chatgpt", print)
+    assert len(backups()) == before  # 아무것도 쓰지 않았으면 백업도 만들지 않음
+
+
+
+
+# --- 플러그인 bin/ 명령을 PATH 에 (plugbin, TS-RUNTIME-4) -------------------------------------------
+def _fake_plugin_source(monkeypatch, with_bin=("mailskill", "mailskill.cmd", "mailskill.ps1", "mail-secret.cmd")):
+    """잠금 커밋 소스 대신 가짜 플러그인 루트를 돌려준다. 받은 (이름, 커밋)을 센다."""
+    fetched = []
+
+    def fake_fetch(plugin, workdir):
+        fetched.append((plugin.name, plugin.sha))
+        root = Path(workdir) / plugin.name / "root"
+        (root / "skills" / plugin.name).mkdir(parents=True, exist_ok=True)
+        (root / "skills" / plugin.name / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+        if plugin.name == "mail-skill":
+            (root / "bin").mkdir(exist_ok=True)
+            (root / "scripts").mkdir(exist_ok=True)
+            for f in with_bin:
+                (root / "bin" / f).write_text("@echo off\n" if "." in f else "#!/bin/sh\necho hi\n", encoding="utf-8")
+        return root
+
+    monkeypatch.setattr(plugbin, "fetch_root", fake_fetch)
+    return fetched
+
+
+def _lock_with_mail_skill(the_lock, sha="a" * 40, include=True):
+    data = json.loads(json.dumps(the_lock.data))
+    data["plugins"] = [p for p in data["plugins"] if p["name"] != "mail-skill"]
+    if include:
+        data["plugins"].append({"name": "mail-skill", "version": "2026.11.3.1", "source": {
+            "source": "git-subdir", "url": "https://github.com/z0nam/mail-skill.git", "path": "plugins/mail-skill",
+            "ref": "v2026.11.03.1", "sha": sha}})
+    return lock.Lock(data, the_lock.source)
+
+
+def test_plugbin_puts_plugin_bin_commands_on_path(isolated, monkeypatch, the_lock):
+    fetched = _fake_plugin_source(monkeypatch)
+    the = _lock_with_mail_skill(the_lock)
+    res = REAL_PLUGBIN_ENSURE(the, print)
+    assert res["status"] == "ok"
+    link = plugbin.link_dir()
+    copy_bin = plugbin.plugins_dir() / "mail-skill" / "bin"
+    assert (plugbin.plugins_dir() / "mail-skill" / "scripts").is_dir()  # bin 스크립트가 ../scripts 를 찾는다
+    if paths.IS_WIN:
+        shim = (link / "mailskill.cmd").read_text(encoding="utf-8")
+        assert str(copy_bin / "mailskill.cmd") in shim and "%*" in shim
+        assert (link / "mail-secret.cmd").is_file()
+        assert str(copy_bin / "mailskill").replace("\\", "/") in (link / "mailskill").read_text(encoding="utf-8")
+        assert not (link / "mailskill.ps1").exists()
+    else:
+        assert (link / "mailskill").resolve() == (copy_bin / "mailskill").resolve()
+        assert os.access(copy_bin / "mailskill", os.X_OK)
+        assert not (link / "mailskill.cmd").exists() and not (link / "mail-secret.cmd").exists()
+    assert "mailskill" in res["commands"]
+    # bin 이 없는 플러그인도 기록돼 다음엔 받지 않는다
+    assert set(plugbin.recorded()) == {p.name for p in the.plugins}
+    n = len(fetched)
+    REAL_PLUGBIN_ENSURE(the, print)
+    assert len(fetched) == n  # 커밋이 같으면 다시 받지 않음
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), print)
+    assert fetched[-1] == ("mail-skill", "b" * 40) and len(fetched) == n + 1
+    # 잠금에서 빠지면 명령과 사본을 지운다
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, include=False), print)
+    assert not (link / "mailskill").exists() and not (link / "mailskill").is_symlink()
+    assert not (plugbin.plugins_dir() / "mail-skill").exists()
+    assert "mail-skill" not in plugbin.recorded()
+
+
+def test_plugbin_does_not_overwrite_foreign_command(isolated, monkeypatch, the_lock):
+    _fake_plugin_source(monkeypatch)
+    link = plugbin.link_dir()
+    link.mkdir(parents=True)
+    name = "mailskill.cmd" if paths.IS_WIN else "mailskill"
+    (link / name).write_text("user's own\n", encoding="utf-8")
+    msgs = []
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), msgs.append)
+    assert (link / name).read_text(encoding="utf-8") == "user's own\n"
+    assert any("jaix 가 만들지 않은 파일" in m for m in msgs)
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, include=False), print)
+    assert (link / name).exists()  # 지울 때도 남의 것은 둔다
+
+
+def test_plugbin_refetches_when_command_deleted_and_reports_failure(isolated, monkeypatch, the_lock):
+    fetched = _fake_plugin_source(monkeypatch)
+    the = _lock_with_mail_skill(the_lock)
+    REAL_PLUGBIN_ENSURE(the, print)
+    for c in plugbin.recorded()["mail-skill"]["commands"]:
+        Path(c).unlink()
+    n = len(fetched)
+    REAL_PLUGBIN_ENSURE(the, print)
+    assert len(fetched) == n + 1 and all(Path(c).exists() for c in plugbin.recorded()["mail-skill"]["commands"])
+
+    def boom(plugin, workdir):
+        raise OSError("offline")
+    monkeypatch.setattr(plugbin, "fetch_root", boom)
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="c" * 40), print)
+    assert res["status"] == "failed" and "mail-skill" in res["failed"]
+    assert plugbin.recorded()["mail-skill"]["sha"] == "a" * 40  # 실패하면 기록을 바꾸지 않아 다음에 다시 한다
+
+
+def test_doctor_plugin_bin(isolated, monkeypatch, the_lock):
+    _fake_plugin_source(monkeypatch)
+    the = _lock_with_mail_skill(the_lock)
+    assert [c.status for c in doctor.check_plugin_bin(the)] == ["warn"]  # 아직 확인 안 함
+    REAL_PLUGBIN_ENSURE(the, print)
+    monkeypatch.setenv("PATH", str(plugbin.link_dir()) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setattr(winenv, "in_user_path", lambda d: True)
+    checks = doctor.check_plugin_bin(the)
+    assert [c.status for c in checks] == ["ok"] and "mailskill" in checks[0].message
+    checks = doctor.check_plugin_bin(_lock_with_mail_skill(the_lock, sha="d" * 40))
+    assert [c.status for c in checks] == ["warn"] and checks[0].fix == "jaix update"
+
+
+def test_setup_counts_plugbin_failure():
+    assert cli._setup_problems({"plugbin": {"status": "failed"}})
+    assert not cli._setup_problems({"plugbin": {"status": "ok"}})
+
+
+def test_hermes_skills_use_shared_fetch(isolated, monkeypatch, the_lock):
+    _fake_plugin_source(monkeypatch)
+    p = _lock_with_mail_skill(the_lock).plugins[-1]
+    assert [d.name for d in hermes.plugin_skills(p, isolated / "w")] == ["mail-skill"]

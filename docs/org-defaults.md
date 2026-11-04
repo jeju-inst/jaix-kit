@@ -10,10 +10,10 @@
 |---|---|---|---|---|
 | ① Plugins & skills (조직 플러그인) | ○ (계정 동기화) | ○ | ○ | ○ (스킬) |
 | ② Connectors (조직 커넥터) | ○ (claude.ai 로그인 시 자동) | ○ | 미확인 | ○ |
-| ③ Managed settings (JSON) | ○ (시작 시 + 1시간마다) | 미확인 | **✕ (문서에 명시)** | ✕ |
+| ③ Managed settings (JSON) | ○ (시작 시 + 1시간마다) | **✕ (11-04 실측)** | **✕ (문서에 명시)** | ✕ |
 
 - 그래서 **jaix 플러그인은 ①과 ③ 두 곳에 다 등록한다.** ③만 하면 Cowork에 안 간다.
-- ③의 `model` 은 터미널·IDE에만 적용된다. Desktop·Cowork는 온보딩 안내에서 Sonnet을 고르게 한다(`design.md` 사용량 예산 절).
+- ③의 `model` 은 터미널·IDE에만 적용된다. Desktop·Cowork는 기본이 Opus로 보였다(11-04) → 온보딩 안내에서 Sonnet을 고르게 한다(`install-guide.md` 4-1절).
 
 ## 1. Plugins & skills — `Organization settings > Plugins & skills`
 
@@ -29,16 +29,19 @@
   - 대신 플러그인 소스는 공개 저장소여도 된다(자격 증명 없이 받는다). jaix 잠금의 6종은 모두 공개이고 소스 형식도 `url`·`git-subdir` 이라 받아들여진다(2026-11-03 확인).
   - 그래서 **`marketplace.json` 만 담은 비공개 저장소 `jeju-inst/jaix-kit-org` 를 두고**, jaix-kit main에 머지될 때마다 워크플로가 그 파일을 복사해 넣는다. 잠금의 정본은 계속 jaix-kit이다.
   - CLI 경로(③ managed settings·`jaix setup`)는 지금처럼 공개 `jaix-kit` 을 가리킨다. 조직 동기화 규칙이 적용되지 않는다.
-  - 저장소 생성과 복사 워크플로는 별도 PR로 한다(사용자 확인 후).
+  - 복사는 `.github/workflows/org-mirror.yml` 이 한다(main의 `marketplace.json` 이 바뀔 때 + 수동 실행). 인증은 사본 저장소의 **쓰기 deploy key** 이고, 비밀키는 이 저장소 시크릿 `ORG_MIRROR_DEPLOY_KEY` 에 둔다. 시크릿이 없으면 워크플로가 실패로 알린다.
+  - 콘솔에서 "Sync from GitHub" 를 처음 할 때 Anthropic GitHub App을 `jaix-kit-org` 에 설치하라고 나온다. 그 저장소만 골라 허용한다.
 - 출처: https://claude.com/docs/plugins/admin, https://claude.com/docs/plugins/org-sync ("Plugin sources that organization sync accepts")
 
 ## 2. Connectors — `Organization settings > Connectors`
 
 | 커넥터 | 켬 | 비고 |
 |---|---|---|
-| Slack | ○ | Slack 워크스페이스 쪽 앱 승인이 따로 필요한지 미확인 → 실측 |
-| Google Drive · Gmail · Calendar | ○ | worklog가 캘린더를 씀 |
-| monday | ○ | |
+| Slack | ○ | 워크스페이스가 앱 승인 요구 상태라 **슬랙 관리자 도구 → 앱 및 워크플로 → Claude → "이 워크스페이스에 대해 승인"** 이 필요함(11-04 처리). 관리자가 미리 설치한 봇(Hermes-* 등)은 "승인 필요" 상태여도 작동함 — 멤버가 직접 설치·인가하는 앱만 승인 대상 |
+| Google Calendar · Drive | ○ | **`ji.re.kr` Google Workspace 계정**으로 연결. worklog가 캘린더를 씀 |
+| Gmail | ○ | **`jri.re.kr`(옛 도메인) 계정**으로 연결 — `ji.re.kr` 메일이 포워딩되고 과거 메일이 있음. `ji.re.kr` 메일 본체는 웍스라 그 Google 계정의 Gmail은 비어 있음. 발신·답장은 jaix `mail`(웍스) |
+| Google Docs · Sheets · Slides | ✕ (권장) | Drive로 충분, 도구 수만 늘어남. 연결한 사람에게만 도구가 붙음 |
+| monday | ○ | 디렉터리의 monday **Plugin**(Cowork 플러그인·CRM)은 쓰지 않음 — 커넥터만 |
 | 규정 Q&A (커스텀) | ○ (OAuth 준비 뒤) | URL·인증은 `docs/regs-mcp.md`. OAuth 전에는 등록 값만 확인(같은 문서 Q3) |
 
 - 켜 두어도 연구원은 각자 처음 쓸 때 자기 계정으로 OAuth를 한 번 한다.
@@ -66,10 +69,11 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 
 | # | 확인 | 방법 | 결과 |
 |---|---|---|---|
-| 1 | managed settings가 CLI에 내려옴 | 시험 계정 `claude doctor` → "Managed settings (remote)" 줄 | |
-| 2 | Desktop Code 탭에도 적용되는지 | Code 탭에서 `/status`·플러그인 목록 | |
-| 3 | 비영리 플러그인이 사라짐 | `~/.claude/plugins/synced/` 에서 빠지는지, `/mcp` 에 `plugin:claude-for-nonprofits:*` 가 없는지 | |
-| 4 | jaix 6종이 Cowork에 보임 | `jaix-kit-org` 동기화 뒤 Desktop Cowork 플러그인 목록 | |
-| 5 | 조직 커넥터 4종이 CLI `/mcp` 에 `claude.ai …` 로 보임 | `/mcp` | |
-| 6 | Slack 커넥터 첫 연결이 Slack 관리자 승인 없이 되는지 | 일반 연구원 계정으로 연결 | |
-| 7 | `model: sonnet` 이 CLI에서 기본으로 잡힘 | 새 세션 `/model` | |
+| 1 | managed settings가 CLI에 내려옴 | 시험 계정 `claude doctor` → "Managed settings (remote)" 줄 | ✅ 11-04 `~/.claude/remote-settings.json` 동기화, 내용 일치. 시작 화면에 companyAnnouncements 표시 |
+| 2 | Desktop Code 탭에도 적용되는지 | Code 탭에서 `/status`·플러그인 목록 | managed settings는 ✕ (jaix 안 보임). ①조직 동기화 후 ✅ 6종 "pre-installed by your organization" — **Desktop은 ①로만 간다** |
+| 3 | 비영리 플러그인이 사라짐 | `~/.claude/plugins/synced/` 에서 빠지는지, `/mcp` 에 `plugin:claude-for-nonprofits:*` 가 없는지 | ✅ CLI: "synced copy ignored: locked by managed settings", MCP 사라짐. Desktop: ① Not available 후 재시작하니 사라짐 |
+| 4 | jaix 6종이 Cowork에 보임 | `jaix-kit-org` 동기화 뒤 Desktop Cowork 플러그인 목록 | ✅ 11-04 채팅(Cowork 통합) 입력창 `/` 에 6종 스킬이 모두 뜸. **스킬이 뜨는 것까지만 확인** — 로컬 CLI·MCP 실제 실행은 인수 시험에서 |
+| 5 | 조직 커넥터 4종이 CLI `/mcp` 에 `claude.ai …` 로 보임 | `/mcp` | ✅ Gmail·Calendar·Drive·monday. Slack은 개인 설치 `plugin:slack:slack` 과 같은 URL이라 하나로 합쳐짐(일반 PC에선 `claude.ai Slack` 예상) |
+| 6 | Slack 커넥터 첫 연결이 Slack 관리자 승인 없이 되는지 | 일반 연구원 계정으로 연결 | 사전 조치 ✅: 워크스페이스가 **앱 승인 요구** 상태였고 Claude 앱이 "승인 필요"였음 → 11-04 "이 워크스페이스에 대해 승인". 일반 멤버 실측은 불가(Claude 좌석이 Owner 2명뿐) → 11/10 첫 사용자로 최종 확인 |
+| 7 | `model: sonnet` 이 CLI에서 기본으로 잡힘 | 새 세션 `/model` | ✅ 새 세션 Sonnet 5.5. 세션 안 `/model` 로 Opus 전환 가능, 다음 시작엔 다시 Sonnet("Managed settings pins Sonnet 5.5 — applies on restart"). 본인은 `claude --model opus` |
+| 8 | CLI에서 jaix가 managed `@jaix` 와 조직 동기화 사본으로 두 벌 잡히지 않는지 | `claude plugin list` (동기화 반영 뒤) | ⏳ 11-04 시점 CLI 동기화 폴더 미갱신. 비영리 사례로 보아 managed와 같은 이름의 동기화 사본은 무시될 것으로 예상 |

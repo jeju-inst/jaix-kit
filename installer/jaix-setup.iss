@@ -57,18 +57,23 @@ Source: "payload\jaix\*"; DestDir: "{app}\jaix"; Flags: ignoreversion recursesub
 [Icons]
 Name: "{autoprograms}\JAIX 점검 (jaix doctor)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" doctor"; Comment: "도구 설치 상태 점검"
 Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" update"; Comment: "런타임·도구를 잠금 버전에 맞춤"
+; 로그온 자동 갱신. jaix 가 schtasks 로 jaixw.exe 를 로그온 작업에 등록하던 것을 대신한다 — 서명 없는 창 없는 exe 의
+; 자기 등록이 Defender Behavior:Win32/Persistence.A!ml 로 잡혀 jaixw.exe·작업이 격리됐다(jaix-win 11/4). 설치기가
+; 선언한 시작프로그램 바로가기는 제거 때 함께 지워진다. 이름은 src/jaix/schedule.py STARTUP_LINK 와 같게
+Name: "{userstartup}\JAIX 갱신"; Filename: "{app}\jaix\jaixw.exe"; Parameters: "update --quiet --delay 120"; \
+  Comment: "로그온 때 JAIX 도구를 잠금 버전에 맞춤(jaix update)"
+; Hermes AI 구독 로그인을 설치 뒤에도 다시 할 수 있게. 사용자가 탐색기에서 여는 것이라 설치기의 자식이 아니다
+Name: "{autoprograms}\JAIX Hermes 로그인"; Filename: "{app}\jaix\jaix.exe"; Parameters: "hermes login --model {code:HermesModelArg}"; \
+  Comment: "Hermes 가 쓸 AI 구독에 로그인(브라우저에서 승인)"; Check: HermesChosen
 
 [Registry]
 ; jaix.exe 자체를 사용자 PATH에. 런타임 폴더(bin·git·jre)는 jaix setup이 넣고, 예전 설치본이 넣은 {app} 항목도 뺀다
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
   ValueData: "{olddata};{app}\jaix"; Check: NeedsAddPath(ExpandConstant('{app}\jaix'))
 
-[Run]
-; Hermes 를 깔았으면 마지막 화면에서 AI 구독 로그인 창을 연다(브라우저 승인 한 번은 사람이 한다)
-Filename: "{cmd}"; Parameters: "/K ""{localappdata}\hermes\bin\hermes.exe"" auth add openai-codex"; \
-  Description: "Hermes AI 로그인 창 열기 (ChatGPT)"; Flags: postinstall nowait skipifsilent; Check: HermesLogin('chatgpt')
-Filename: "{cmd}"; Parameters: "/K ""{localappdata}\hermes\bin\hermes.exe"" auth add anthropic --type oauth"; \
-  Description: "Hermes AI 로그인 창 열기 (Claude)"; Flags: postinstall nowait skipifsilent; Check: HermesLogin('claude')
+; [Run] 항목은 두지 않는다. Hermes AI 구독 로그인은 완료 화면 앞 'AI 구독 로그인' 페이지에서 설치기가 끝나기를
+; 기다리며 연다(LoginPage). [마침] 뒤에 nowait 로 띄우면 설치기가 끝날 때 자식(로그인 창)이 남는데, 그 패턴에
+; Defender 행동 탐지(Bearfoos.B!ml)가 걸렸다(jaix-win 11/4). 설치기가 끝날 때 남는 자식은 0개여야 한다
 
 [UninstallRun]
 ; 사용자 PATH에서 jaix 폴더들을 뺀다. Claude·Codex 설정과 설치된 플러그인은 그대로 둔다
@@ -85,6 +90,9 @@ var
   HermesPage: TInputQueryWizardPage;
   ModelPage: TInputOptionWizardPage;
   GuidePage: TOutputMsgMemoWizardPage;
+  LoginPage: TWizardPage;
+  LoginButton: TNewButton;
+  LoginResult: TNewStaticText;
   ProgressPage: TOutputProgressWizardPage;
   SetupLines: Integer;
   SetupFailed: Boolean;
@@ -107,6 +115,62 @@ begin
     // userprofile 은 Inno 상수가 아니다(ExpandConstant에 쓰면 런타임 오류) — 환경변수로
     DirExists(GetEnv('USERPROFILE') + '\.codex') or
     FileExists(ExpandConstant('{userappdata}\npm\codex.cmd'));
+end;
+
+function HermesChosen(): Boolean;
+begin
+  Result := Pos('hermes', ExpandConstant('{param:CHANNELS|}')) > 0;
+  if (not Result) and (ExpandConstant('{param:CHANNELS|}') = '') then
+    Result := ChannelPage.Values[2];
+end;
+
+function HermesModel(): string;
+begin
+  Result := ExpandConstant('{param:HERMESMODEL|}');
+  if Result <> '' then
+    exit;
+  if ModelPage.Values[1] then
+    Result := 'claude'
+  else
+    Result := 'chatgpt';
+end;
+
+// 로그인 창(jaix.exe 콘솔)을 설치기 안에서 열고 끝나기를 기다린다 — 설치기가 끝날 때 남는 자식이 없게.
+// --no-wait: 결과는 jaix 창이 아니라 이 페이지에 보인다. 기다리는 동안 [다음]·[취소]는 막는다
+procedure LoginButtonClick(Sender: TObject);
+var
+  ResultCode: Integer;
+  Model, Again: string;
+  WasBack: Boolean;
+begin
+  Model := HermesModel();
+  Again := '시작 메뉴의 "JAIX Hermes 로그인"(또는 새 명령창에서 jaix hermes login --model ' + Model + ')으로 다시 하세요.';
+  WasBack := WizardForm.BackButton.Enabled;
+  LoginButton.Enabled := False;
+  WizardForm.NextButton.Enabled := False;
+  WizardForm.BackButton.Enabled := False;
+  WizardForm.CancelButton.Enabled := False;
+  LoginResult.Caption := '로그인 창에서 진행 중입니다. 브라우저에서 승인하세요...';
+  try
+    if not Exec(ExpandConstant('{app}\jaix\jaix.exe'), 'hermes login --model ' + Model + ' --no-wait',
+                ExpandConstant('{app}'), SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode) then
+      ResultCode := -1;
+  finally
+    LoginButton.Enabled := True;
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.BackButton.Enabled := WasBack;
+    WizardForm.CancelButton.Enabled := True;
+  end;
+  Log('jaix hermes login 종료 코드 ' + IntToStr(ResultCode));
+  if ResultCode = 0 then
+  begin
+    LoginButton.Caption := '다시 로그인';
+    LoginResult.Caption := '로그인했습니다. [다음]을 누르세요.';
+  end
+  else if ResultCode = 130 then
+    LoginResult.Caption := '로그인을 취소했습니다. 다시 누르거나, 나중에 ' + Again
+  else
+    LoginResult.Caption := '로그인이 끝나지 않았습니다(코드 ' + IntToStr(ResultCode) + '). 다시 누르거나, 나중에 ' + Again;
 end;
 
 procedure InitializeWizard();
@@ -136,7 +200,7 @@ begin
     HermesPage.ID,
     'Hermes가 쓸 AI',
     '이미 쓰고 있는 구독을 고르세요.',
-    '설치가 끝나면 로그인 창이 열립니다. 브라우저에서 승인하면 됩니다.',
+    '설치 마지막에 로그인 창을 여는 단계가 있습니다. 브라우저에서 승인하면 됩니다.',
     True, False);
   ModelPage.Add('ChatGPT 구독 — 권장');
   ModelPage.Add('Claude 구독');
@@ -150,35 +214,57 @@ begin
     '이렇게 쓰세요',
     '아래 안내는 시작 메뉴의 "JAIX 점검"으로 언제든 다시 확인할 수 있습니다.',
     '');
+
+  LoginPage := CreateCustomPage(
+    GuidePage.ID,
+    'AI 구독 로그인',
+    'Hermes가 쓸 AI 구독에 처음 한 번 로그인합니다.');
+  with TNewStaticText.Create(LoginPage) do
+  begin
+    Parent := LoginPage.Surface;
+    Left := 0;
+    Top := 0;
+    Width := LoginPage.SurfaceWidth;
+    AutoSize := False;
+    WordWrap := True;
+    Height := ScaleY(72);
+    Caption :=
+      '[로그인 창 열기]를 누르면 검은 창이 열리고 브라우저에서 로그인·승인을 요청합니다' +
+      '(ChatGPT는 창에 나온 코드를 브라우저에 입력). 승인하면 창이 저절로 닫히고 결과가 아래에 나옵니다.' + #13#10 +
+      '지금 하지 않아도 됩니다 — [다음]으로 넘어가고, 나중에 시작 메뉴의 "JAIX Hermes 로그인"으로 하세요.';
+  end;
+  LoginButton := TNewButton.Create(LoginPage);
+  LoginButton.Parent := LoginPage.Surface;
+  LoginButton.Left := 0;
+  LoginButton.Top := ScaleY(84);
+  LoginButton.Width := ScaleX(160);
+  LoginButton.Height := ScaleY(26);
+  LoginButton.Caption := '로그인 창 열기';
+  LoginButton.OnClick := @LoginButtonClick;
+  LoginResult := TNewStaticText.Create(LoginPage);
+  LoginResult.Parent := LoginPage.Surface;
+  LoginResult.Left := 0;
+  LoginResult.Top := ScaleY(124);
+  LoginResult.Width := LoginPage.SurfaceWidth;
+  LoginResult.AutoSize := False;
+  LoginResult.WordWrap := True;
+  LoginResult.Height := ScaleY(60);
+  LoginResult.Caption := '';
 end;
 
-function HermesChosen(): Boolean;
+// {code:...} 로 부르는 형(시작 메뉴 바로가기 인자)
+function HermesModelArg(Param: string): string;
 begin
-  Result := Pos('hermes', ExpandConstant('{param:CHANNELS|}')) > 0;
-  if (not Result) and (ExpandConstant('{param:CHANNELS|}') = '') then
-    Result := ChannelPage.Values[2];
-end;
-
-function HermesModel(): string;
-begin
-  Result := ExpandConstant('{param:HERMESMODEL|}');
-  if Result <> '' then
-    exit;
-  if ModelPage.Values[1] then
-    Result := 'claude'
-  else
-    Result := 'chatgpt';
-end;
-
-function HermesLogin(Model: string): Boolean;
-begin
-  Result := HermesChosen() and (HermesModel() = Model) and
-    FileExists(ExpandConstant('{localappdata}\hermes\bin\hermes.exe'));
+  Result := HermesModel();
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := ((PageID = HermesPage.ID) or (PageID = ModelPage.ID)) and not ChannelPage.Values[2];
+  // 로그인 페이지: Hermes 를 골랐고 실제로 깔렸을 때만. 무인 설치는 페이지를 띄우지 않는다
+  if PageID = LoginPage.ID then
+    Result := WizardSilent() or not HermesChosen() or
+      not FileExists(ExpandConstant('{localappdata}\hermes\bin\hermes.exe'));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -306,7 +392,8 @@ begin
   if ResultCode <> 0 then
   begin
     SetupFailed := True;
-    Log('jaix setup 종료 코드 ' + IntToStr(ResultCode));
+    // 아래 줄의 코드는 jaix 의 것(1 = 일부 실패, 2 = 멈춤)이다. 설치기 자신은 GetCustomSetupExitCode 로 10 을 낸다
+    Log('jaix setup 종료 코드 ' + IntToStr(ResultCode) + ' → 설치기 종료 코드 10');
   end;
 end;
 
