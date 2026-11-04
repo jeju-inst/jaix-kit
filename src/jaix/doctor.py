@@ -4,11 +4,12 @@
 """
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path, PureWindowsPath
 
-from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, proc, runtimes, schedule, uvpython, winenv, works
+from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, runtimes, schedule, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -201,6 +202,40 @@ def check_works(lock):
         out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix works login"))
     else:
         out.append(Check("ok", "웍스 로그인", "됨"))
+    return out
+
+
+def check_plugin_bin(lock):
+    """플러그인 bin/ 명령(예: mailskill)이 PATH 에 잡히는가. Claude Code 말고는 jaix 가 올린 것만 보인다(TS-RUNTIME-4)."""
+    rec = plugbin.recorded()
+    out = []
+    for p in lock.plugins:
+        r = rec.get(p.name)
+        if r is None:
+            # 기록이 없으면 bin 이 있는지 모른다 — 아무 기록도 없을 때만 한 번 알린다(아래)
+            continue
+        cmds = r.get("commands") or []
+        if not cmds:
+            continue
+        area = f"플러그인 명령({p.name})"
+        if r.get("sha") != p.sha:
+            out.append(Check("warn", area, f"잠금과 다른 커밋의 명령 ({str(r.get('sha'))[:7]})", "jaix update"))
+            continue
+        missing = [Path(c).name for c in cmds if not Path(c).exists()]
+        if missing:
+            out.append(Check("fail", area, f"없음: {', '.join(missing)}", "jaix setup"))
+            continue
+        names = [Path(c).stem if IS_WIN else Path(c).name for c in cmds]
+        hidden = [n for n in names if not (shutil.which(n) and Path(shutil.which(n)).parent == plugbin.link_dir())]
+        if hidden and not IS_WIN:
+            out.append(Check("warn", area, f"PATH에서 jaix 것이 안 잡힘: {', '.join(hidden)} — 스킬이 다른 것을 부르거나 못 찾음",
+                             f"{plugbin.link_dir()} 를 PATH 앞쪽에 두기"))
+        elif hidden and IS_WIN and not winenv.in_user_path(plugbin.link_dir()):
+            out.append(Check("fail", area, f"{plugbin.link_dir()} 가 사용자 PATH에 없음", "jaix setup 다시 실행 후 새 창 열기"))
+        else:
+            out.append(Check("ok", area, f"{', '.join(sorted(set(names)))} ({plugbin.link_dir()})"))
+    if not rec and lock.plugins:
+        out.append(Check("warn", "플러그인 명령", "아직 확인 안 함 — 스킬이 부르는 명령(mailskill 등)이 PATH에 없을 수 있음", "jaix update"))
     return out
 
 
@@ -446,7 +481,7 @@ def check_autoupdate():
 
 
 def run(lock):
-    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 

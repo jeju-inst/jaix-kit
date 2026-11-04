@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, runtimes, schedule, uvpython, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -210,6 +210,10 @@ def cmd_setup(args, log):
     works_res = steps.run("웍스(nworks)", works.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
     if works_res is not None:
         result["works"] = works_res
+    # 스킬이 부르는 플러그인 bin/ 명령(예: mailskill). Claude Code 말고는 플러그인 bin 을 PATH 에 넣지 않는다
+    pb_res = steps.run("플러그인 명령", plugbin.ensure, lock, log, dry_run=args.dry_run, offline=args.offline)
+    if pb_res is not None:
+        result["plugbin"] = pb_res
     log("\n[2/3] Claude")
     if "claude" in chosen:
         # 다시 설치할 때 이미 깔린 옛 판도 잠금에 맞춘다(update 와 같게). 빠뜨리면 Codex 만 맞고 Claude 는 옛 판으로
@@ -256,7 +260,8 @@ def _setup_problems(result):
                 or result.get("hancom_consent") is False
                 or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed"
-                or (result.get("works") or {}).get("status") == "failed")
+                or (result.get("works") or {}).get("status") == "failed"
+                or (result.get("plugbin") or {}).get("status") == "failed")
 
 
 def cmd_doctor(args, log):
@@ -320,6 +325,9 @@ def _update(args, log):
         problems.append("gw 설치 실패")
     if works.ensure(lock, log, dry_run=args.dry_run, offline=args.offline)["status"] == "failed":
         problems.append("웍스(nworks) 설치 실패")
+    pb = plugbin.ensure(lock, log, dry_run=args.dry_run, offline=args.offline)
+    if pb["failed"]:
+        problems.append(f"플러그인 명령 받기 실패: {', '.join(pb['failed'])}")
     log("\n[2/3] Claude · Codex 플러그인")
     claude.setup(lock, log, dry_run=args.dry_run, update=True)
     if claude.find_cli() and not args.dry_run:
