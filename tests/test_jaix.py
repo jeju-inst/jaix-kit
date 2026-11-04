@@ -1883,3 +1883,69 @@ def test_hermes_login_ctrl_c_keeps_window_and_records(isolated, monkeypatch):
     assert any("취소" in m and "jaix hermes login --model chatgpt" in m for m in seen)
     rec = (paths.data_dir() / "hermes-login.log").read_text(encoding="utf-8")
     assert "model=chatgpt code=130" in rec
+
+
+# --- 설치본 로그온 자동 갱신 = 설치기가 둔 시작프로그램 바로가기 (Defender Persistence.A!ml, jaix-win 11/4) ----------
+@pytest.fixture
+def managed(isolated, monkeypatch, tmp_path):
+    monkeypatch.setattr(schedule, "IS_WIN", True)
+    monkeypatch.setattr(schedule.paths, "exe_dir", lambda: tmp_path / "app" / "jaix")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    state = argparse.Namespace(calls=[], task=False)
+
+    def fake_run(args):
+        state.calls.append(args)
+        if args[:2] == ["schtasks", "/Query"]:
+            return (state.task, "")
+        return (True, "")
+    monkeypatch.setattr(schedule, "_run", fake_run)
+    return state
+
+
+def test_installer_declares_startup_link_with_same_name():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    name = schedule.STARTUP_LINK.removesuffix(".lnk")
+    line = next(ln for ln in iss.splitlines() if ln.startswith('Name: "{userstartup}'))
+    assert f'{{userstartup}}\\{name}"' in line and 'jaixw.exe"' in line
+    assert f"update --quiet --delay {schedule.LOGON_DELAY}" in line
+
+
+def test_managed_register_does_not_create_task_and_drops_legacy(managed):
+    assert schedule.installer_managed()
+    managed.task = True  # 예전 판이 만든 jaix-update
+    seen = []
+    assert schedule.register(seen.append) is False  # 바로가기가 아직 없음
+    assert not any(c[:2] == ["schtasks", "/Create"] for c in managed.calls)
+    assert ["schtasks", "/Delete", "/TN", schedule.TASK_NAME, "/F"] in managed.calls
+    assert any("바로가기가 없음" in m for m in seen)
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    managed.task = False
+    seen.clear()
+    assert schedule.register(seen.append) is True and schedule.registered()
+    assert any("시작프로그램 바로가기" in m for m in seen)
+    assert schedule.run_mode() is None and schedule.last_run() is None
+
+
+def test_managed_unregister_removes_link(managed):
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    assert schedule.unregister() is True and not schedule.startup_link().exists()
+
+
+def test_doctor_managed_missing_link_points_to_installer(managed, monkeypatch):
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "warn" and schedule.STARTUP_LINK in c.message and "jaix-setup" in c.fix
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    monkeypatch.setattr(schedule, "last_status", lambda: {"ok": True, "time": "t"})
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "시작프로그램 바로가기" in c.message
+
+
+def test_update_quiet_delay_sleeps(isolated, monkeypatch):
+    slept = []
+    monkeypatch.setattr(cli.time, "sleep", slept.append)
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    assert cli.main(["update", "--quiet", "--delay", "120"]) == 0
+    assert slept == [120]

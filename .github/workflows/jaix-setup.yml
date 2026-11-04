@@ -163,39 +163,30 @@ jobs:
           (Get-Command hwp2pdf-cli).Source
           Get-ChildItem "$env:APPDATA\uv\python"   # jaix-kit#14: 설치본이 uv 관리 Python을 앱 밖에서 깔았는지
 
-      # 로그온 자동 갱신: 이 사용자로 못박은 예약 작업이 있고, 그 명령이 돌아 상태를 남기는지
-      - name: Logon auto-update task
+      # 로그온 자동 갱신: 설치기가 둔 시작프로그램 바로가기(jaixw.exe update --quiet)가 있고, 예약 작업은 만들지 않으며
+      # (Defender Persistence.A!ml, jaix-win 11/4), 그 명령이 돌아 상태를 남기는지
+      - name: Logon auto-update shortcut
         shell: pwsh
         run: |
           [Console]::OutputEncoding = [Text.Encoding]::UTF8
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
-          $raw = schtasks /Query /TN jaix-update /XML | Out-String
-          if ($LASTEXITCODE -ne 0) { throw "예약 작업 jaix-update 없음" }
-          $task = ([xml]$raw).Task
-          $exec = $task.Actions.Exec
-          Write-Host "명령: $($exec.Command) $($exec.Arguments)"
-          if ($exec.Command -notlike '*\jaix\jaixw.exe*') { throw "작업이 창 없는 jaixw.exe 를 부르지 않음: $($exec.Command)" }
-          $pr = $task.Principals.Principal
-          Write-Host "로그온 트리거 사용자: $($task.Triggers.LogonTrigger.UserId) · 실행: $($pr.LogonType) · 권한: $($pr.RunLevel)"
-          # 스케줄러는 기본값 LeastPrivilege 를 지워서 돌려준다 → 비어 있으면 일반 권한
-          if ($pr.RunLevel -and $pr.RunLevel -ne 'LeastPrivilege') { throw "관리자 권한으로 등록됨: $($pr.RunLevel)" }
-          if ($pr.LogonType -ne 'InteractiveToken') { throw "'로그온할 때만 실행'이 아님: $($pr.LogonType)" }
+          $lnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'JAIX 갱신.lnk'
+          if (-not (Test-Path $lnk)) { Get-ChildItem ([Environment]::GetFolderPath('Startup')); throw "시작프로그램 바로가기 없음: $lnk" }
+          $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+          Write-Host "바로가기: $($sc.TargetPath) $($sc.Arguments)"
+          if ($sc.TargetPath -notlike '*\jaix\jaixw.exe') { throw "바로가기가 창 없는 jaixw.exe 를 부르지 않음: $($sc.TargetPath)" }
+          if ($sc.Arguments -notlike 'update --quiet*') { throw "바로가기 인자: $($sc.Arguments)" }
+          schtasks /Query /TN jaix-update 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "설치본이 예약 작업 jaix-update 를 만듦(지속성 판정 대상)" }
+          $global:LASTEXITCODE = 0
           $jaix = Join-Path $env:LOCALAPPDATA 'jaix'
           $status = "$jaix\update-status.json"
           Remove-Item $status -ErrorAction SilentlyContinue
-          schtasks /Run /TN jaix-update
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $status); $i++) { Start-Sleep 5 }
-          if (-not (Test-Path $status)) {
-            # 러너는 대화형 로그온이 아니라 InteractiveToken 작업이 안 돌 수 있다 → 등록된 명령을 그대로 실행
-            Write-Warning "작업 스케줄러가 작업을 돌리지 않음 → 등록된 명령을 직접 실행"
-            schtasks /Query /TN jaix-update /V /FO LIST
-            Start-Process -FilePath $exec.Command.Trim('"') -ArgumentList $exec.Arguments -Wait -NoNewWindow
-          }
+          # 로그온 때 셸이 여는 것과 같은 명령(지연만 빼고)
+          Start-Process -FilePath $sc.TargetPath -ArgumentList 'update','--quiet' -Wait -NoNewWindow
           Get-Content "$jaix\update.log" -Tail 40
           $s = Get-Content $status -Raw | ConvertFrom-Json
           if (-not $s.ok) { throw "자동 갱신 실패: $($s.error) $($s.problems)" }
-          jaix doctor
-          # 실행 모드('로그온할 때만 실행'·일반 권한)와 마지막 결과까지 doctor가 통과로 보는지
           $c = (jaix doctor --json | Out-String | ConvertFrom-Json).checks | Where-Object area -eq '로그온 자동 갱신'
           Write-Host "doctor: $($c.status) $($c.message)"
           if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
@@ -213,6 +204,8 @@ jobs:
           schtasks /Query /TN jaix-update 2>$null
           if ($LASTEXITCODE -eq 0) { throw "예약 작업 jaix-update 가 남음" }
           $global:LASTEXITCODE = 0   # 없어서 난 1이 단계 결과가 되지 않게
+          $lnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'JAIX 갱신.lnk'
+          if (Test-Path $lnk) { throw "시작프로그램 바로가기가 남음: $lnk" }
           Write-Host "제거 확인"
 
       - uses: actions/upload-artifact@v4
