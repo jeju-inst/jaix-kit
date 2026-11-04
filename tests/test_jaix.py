@@ -1949,3 +1949,61 @@ def test_update_quiet_delay_sleeps(isolated, monkeypatch):
     monkeypatch.setattr(cli, "_update", lambda args, log: [])
     assert cli.main(["update", "--quiet", "--delay", "120"]) == 0
     assert slept == [120]
+
+
+# --- Hermes 설정: 바뀐 것만 부르기 (재설치·로그온 갱신에서 hermes.exe 반복 줄이기, jaix-win 11/4) ------------------
+def _hermes_fake_run(calls):
+    def run(cmd, log, timeout=600):
+        calls.append(cmd)
+        f = hermesbot.config_path()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with open(f, "a", encoding="utf-8") as out:  # hermes config set 이 파일을 고치는 것 흉내
+            out.write(f"# {' '.join(cmd[1:4])}\n")
+        return True, ""
+    return run
+
+
+def test_hermes_quiet_skips_unchanged_on_rerun(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: ["a", "b"])
+    assert hermesbot.quiet("hermes", print)
+    first = len(calls)
+    assert first >= 4
+    calls.clear()
+    seen = []
+    assert hermesbot.quiet("hermes", seen.append)  # 로그온 update·재설치
+    assert calls == [] and any("건너뜀" in m for m in seen)
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: ["a", "b", "c"])  # Hermes 업데이트로 새 기본 스킬
+    assert hermesbot.quiet("hermes", print)
+    assert [c[3] for c in calls] == ["skills.disabled"]
+
+
+def test_hermes_settings_reapplied_when_config_changed_elsewhere(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    monkeypatch.setattr(hermesbot.codex, "owned_mcp", lambda: {})
+    assert hermesbot.configure("hermes", "chatgpt", print) and hermesbot.quiet("hermes", print)
+    n = len(calls)
+    calls.clear()
+    assert hermesbot.configure("hermes", "chatgpt", print) and hermesbot.quiet("hermes", print)
+    assert calls == []
+    with open(hermesbot.config_path(), "a", encoding="utf-8") as f:  # 사용자·Hermes 가 파일을 고침
+        f.write("model:\n  provider: other\n")
+    assert hermesbot.configure("hermes", "chatgpt", print) and hermesbot.quiet("hermes", print)
+    assert len(calls) == n  # 지문이 달라져 전부 다시
+    calls.clear()
+    assert hermesbot.configure("hermes", "claude", print)  # 모델을 바꾸면 바뀐 키만
+    assert calls and all(c[1] == "config" and c[3].startswith("model.") for c in calls)
+
+
+def test_hermes_config_backup_only_when_writing(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot.codex, "owned_mcp", lambda: {})
+    hermesbot.configure("hermes", "chatgpt", print)
+    backups = lambda: list(hermesbot.config_path().parent.glob("config.yaml.jaix-bak-*"))
+    before = len(backups())
+    hermesbot.configure("hermes", "chatgpt", print)
+    assert len(backups()) == before  # 아무것도 쓰지 않았으면 백업도 만들지 않음
