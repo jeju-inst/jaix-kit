@@ -1,3 +1,4 @@
+import argparse
 import dataclasses
 import json
 import re
@@ -1760,3 +1761,38 @@ def test_release_asset_web_non_limit_error_is_not_called_rate_limit(monkeypatch)
     with pytest.raises(urllib.error.HTTPError) as e:
         net.latest_release_asset("o/r", "x")
     assert e.value.code == 404 and not net.rate_limit_hit
+
+
+# --- jaix-win 11/4 실측 4건 ---------------------------------------------------------------------------------
+def test_installer_does_not_spawn_cmd_from_run_section():
+    """① 설치기 → cmd /K 에 Defender 행동 탐지가 걸렸다. [Run] 은 jaix.exe 가 띄운다."""
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    run = "\n".join(ln for ln in iss.split("[Run]", 1)[1].split("\n[", 1)[0].splitlines() if not ln.startswith(";"))
+    assert "{cmd}" not in run and "cmd.exe" not in run.lower()
+    assert 'Filename: "{app}\\jaix\\jaix.exe"; Parameters: "hermes login --model chatgpt"' in run
+    assert 'Parameters: "hermes login --model claude"' in run
+
+
+def test_hermes_login_runs_provider_login_and_waits(monkeypatch):
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    calls, waited = [], []
+    args = argparse.Namespace(model="claude", no_wait=False)
+    rc = hermesbot.cmd_login(args, lambda m="": None, run=lambda cmd, env=None: calls.append(cmd) or 0,
+                             wait=waited.append)
+    assert rc == 0 and calls == [["/x/hermes", "auth", "add", "anthropic", "--type", "oauth"]]
+    assert bool(waited) == hermesbot.IS_WIN
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: None)
+    assert hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), lambda m="": None) == 1
+
+
+def test_hermes_login_parser():
+    args = cli.build_parser().parse_args(["hermes", "login", "--model", "claude"])
+    assert args.func is hermesbot.cmd_login and args.model == "claude"
+
+
+def test_setup_updates_stale_claude_plugins(isolated, monkeypatch):
+    """③ 다시 설치할 때 옛 판 Claude 플러그인도 잠금에 맞춘다(update=True)."""
+    seen = {}
+    monkeypatch.setattr(claude, "setup", lambda lock, log, **kw: seen.update(kw) or {"managed": None, "cli": False})
+    assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
+    assert seen.get("update") is True

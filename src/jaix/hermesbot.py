@@ -323,6 +323,31 @@ def cmd_approvals(args, log):
     return 0
 
 
+def cmd_login(args, log, run=None, wait=None):
+    """AI 구독 로그인 창: 설치기 마지막 화면이 이것을 연다. 설치기가 cmd.exe 를 직접 띄우던 것을 대신한다 —
+    서명 없는 설치기 → cmd /K 패턴에 Defender 행동 탐지(Bearfoos.B!ml)가 걸렸다(jaix-win 11/4 실측).
+    hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다."""
+    hermes = find_hermes()
+    if not hermes:
+        log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
+        code = 1
+    else:
+        log(f"Hermes AI 로그인 ({args.model}) — 브라우저가 열리면 승인하세요.")
+        try:
+            code = (run or subprocess.call)([hermes, *PROVIDERS[args.model]["login"]], env=_child_env())
+        except OSError as e:
+            log(f"로그인을 시작하지 못함: {e}")
+            code = 1
+        log("로그인했습니다." if code == 0 else
+            f"로그인이 끝나지 않았습니다(코드 {code}). 새 명령창에서 `hermes {' '.join(PROVIDERS[args.model]['login'])}` 로 다시 하세요.")
+    if IS_WIN and not getattr(args, "no_wait", False):
+        try:  # 설치기가 띄운 창은 끝나면 바로 닫힌다 — 결과를 읽을 틈을 준다
+            (wait or input)("창을 닫으려면 Enter 를 누르세요.")
+        except (EOFError, KeyboardInterrupt):
+            pass
+    return code
+
+
 def builtin_skills():
     """Hermes 스킬 폴더의 스킬 이름(jaix가 복사한 skills/jaix/ 아래는 뺀다). SKILL.md 의 name, 없으면 폴더 이름."""
     root = paths.hermes_home() / "skills"

@@ -64,10 +64,12 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
   ValueData: "{olddata};{app}\jaix"; Check: NeedsAddPath(ExpandConstant('{app}\jaix'))
 
 [Run]
-; Hermes 를 깔았으면 마지막 화면에서 AI 구독 로그인 창을 연다(브라우저 승인 한 번은 사람이 한다)
-Filename: "{cmd}"; Parameters: "/K ""{localappdata}\hermes\bin\hermes.exe"" auth add openai-codex"; \
+; Hermes 를 깔았으면 마지막 화면에서 AI 구독 로그인 창을 연다(브라우저 승인 한 번은 사람이 한다).
+; 설치기가 cmd.exe 를 직접 띄우지 않는다 — 서명 없는 설치기 → cmd /K 에 Defender 행동 탐지(Bearfoos.B!ml)가
+; 걸려 설치기가 격리됐다(jaix-win 11/4). 콘솔 프로그램인 jaix.exe 가 제 창을 열고 hermes 로그인을 부른다
+Filename: "{app}\jaix\jaix.exe"; Parameters: "hermes login --model chatgpt"; \
   Description: "Hermes AI 로그인 창 열기 (ChatGPT)"; Flags: postinstall nowait skipifsilent; Check: HermesLogin('chatgpt')
-Filename: "{cmd}"; Parameters: "/K ""{localappdata}\hermes\bin\hermes.exe"" auth add anthropic --type oauth"; \
+Filename: "{app}\jaix\jaix.exe"; Parameters: "hermes login --model claude"; \
   Description: "Hermes AI 로그인 창 열기 (Claude)"; Flags: postinstall nowait skipifsilent; Check: HermesLogin('claude')
 
 [UninstallRun]
@@ -306,7 +308,8 @@ begin
   if ResultCode <> 0 then
   begin
     SetupFailed := True;
-    Log('jaix setup 종료 코드 ' + IntToStr(ResultCode));
+    // 아래 줄의 코드는 jaix 의 것(1 = 일부 실패, 2 = 멈춤)이다. 설치기 자신은 GetCustomSetupExitCode 로 10 을 낸다
+    Log('jaix setup 종료 코드 ' + IntToStr(ResultCode) + ' → 설치기 종료 코드 10');
   end;
 end;
 
