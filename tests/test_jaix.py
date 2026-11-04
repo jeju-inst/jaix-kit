@@ -1804,3 +1804,52 @@ def test_setup_updates_stale_claude_plugins(isolated, monkeypatch):
     monkeypatch.setattr(claude, "setup", lambda lock, log, **kw: seen.update(kw) or {"managed": None, "cli": False})
     assert cli.main(["setup", "--runtimes", "none", "--channels", "claude", "--no-autoupdate"]) == 0
     assert seen.get("update") is True
+# --- 로그온 작업 진단 (jaix-win 11/4 ④) ----------------------------------------------------------------------
+def test_logon_task_has_no_network_condition():
+    """'네트워크 연결 시만'은 로그온 트리거를 조용히 건너뛰게 할 수 있다. 오프라인은 jaix update 가 스스로 다룬다."""
+    xml = schedule.task_xml(["C:\\jaixw.exe", "update", "--quiet"], "u")
+    assert "<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>" in xml
+    assert "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" in xml
+
+
+def test_parse_last_run_reads_by_position():
+    line = '"PC","\\jaix-update","N/A","준비","대화형만","2026-11-03 오후 6:05:12","2147942402","PC\\u"'
+    assert schedule.parse_last_run(line) == ("2026-11-03 오후 6:05:12", 0x80070002)
+    assert schedule.run_failed(0x80070002)
+    assert schedule.parse_last_run('"PC","\\jaix-update","N/A","준비","대화형만","1999-11-30","267011","u"')[1] == 0x41303
+    assert schedule.parse_last_run('"PC","\\t","N/A","x","y","when","-2147024894","u"')[1] == 0x80070002
+    assert not schedule.run_failed(0x41303) and not schedule.run_failed(0) and not schedule.run_failed(None)
+    assert schedule.parse_last_run("") is None
+
+
+# jaix-win 11/4 실측 원문(한국어 Windows, chcp 949, jaix-test 대화형 세션). '실행할 작업' 열은 따옴표가 이스케이프되지
+# 않아 CSV 로 깨지지만 그 뒤라 5·6 열은 영향이 없다
+KO_SCHTASKS_ROW = (
+    '"NAMUN-JI","\\jaix-update","N/A","준비","대화형만","2026-11-04 오후 2:21:55","0","N/A",'
+    '""C:\\Users\\jaix-test\\AppData\\Local\\Programs\\jaix\\jaix\\jaixw.exe" update --quiet","N/A",'
+    '"JAIX 도구를 잠금 버전에 맞춤(로그온 때 jaix update). jaix-setup 제거 시 함께 지워짐","사용","사용 안 함","",'
+    '"jaix-test","사용 안 함","01:00:00","이 형식으로 데이터를 예약할 수 없습니다.","로그온 시","N/A","N/A","N/A",'
+    '"N/A","N/A","N/A","N/A","N/A","N/A"')
+
+
+def test_parse_last_run_real_korean_windows_row():
+    raw = (KO_SCHTASKS_ROW + "\r\n").encode("cp949")  # schtasks 가 내는 바이트 그대로
+    assert schedule.parse_last_run(raw.decode("cp949", errors="replace")) == ("2026-11-04 오후 2:21:55", 0)
+    # 코드페이지를 잘못 짚어도 판정(결과 코드)은 그대로다 — 날짜 속 한글만 깨진다
+    assert schedule.parse_last_run(raw.decode("utf-8", errors="replace"))[1] == 0
+
+
+def test_doctor_warns_when_logon_task_failed(monkeypatch):
+    monkeypatch.setattr(schedule, "supported", lambda: True)
+    monkeypatch.setattr(schedule, "registered", lambda: True)
+    monkeypatch.setattr(schedule, "run_mode", lambda: None)
+    monkeypatch.setattr(schedule, "last_status", lambda: {"ok": True, "time": "t", "by": "setup"})
+    monkeypatch.setattr(schedule, "last_run", lambda: ("2026-11-03 18:05", 0x80070002))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "warn" and "0x80070002" in c.message
+    monkeypatch.setattr(schedule, "last_run", lambda: ("2026-11-03 18:05", 0))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "작업 마지막 실행 2026-11-03 18:05" in c.message
+    monkeypatch.setattr(schedule, "last_run", lambda: ("1999-11-30 0:00:00", 0x41303))
+    c = doctor.check_autoupdate()[0]
+    assert c.status == "ok" and "작업은 아직 안 돎" in c.message and "1999" not in c.message
