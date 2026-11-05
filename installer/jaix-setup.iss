@@ -136,6 +136,62 @@ begin
     FileExists(ExpandConstant('{userappdata}\npm\codex.cmd'));
 end;
 
+// jaix 가 남긴 JSON 기록(%LOCALAPPDATA%\jaix\<Name>)을 통째로 읽는다. 없거나 못 읽으면 ''
+function JaixRecord(Name: string): string;
+var
+  Raw: AnsiString;
+begin
+  Result := '';
+  if LoadStringFromFile(ExpandConstant('{localappdata}\jaix\') + Name, Raw) then
+    Result := String(Raw);
+end;
+
+// 기록에서 "Key" 뒤 짧은 범위에 "Value" 가 있는가(json.dumps 의 ": " 나 indent 를 가리지 않게 느슨하게)
+function RecordSays(Rec, Key, Value: string; Span: Integer): Boolean;
+var
+  P: Integer;
+begin
+  P := Pos('"' + Key + '"', Rec);
+  Result := (P > 0) and (Pos('"' + Value + '"', Copy(Rec, P + Length(Key) + 2, Span)) > 0);
+end;
+
+// 다시 설치할 때 지난 선택을 체크 기본값으로(jaix setup 이 남긴 setup-choice.json). 그 기록이 없으면(예전 판)
+// jaix 가 Hermes 를 설정한 기록(hermes.json)이 있을 때만 Hermes 를 체크한다. 둘 다 없거나 깨졌으면 처음 설치와 같다
+procedure ApplyPreviousChoice();
+var
+  Rec, Channels: string;
+  P, Q: Integer;
+begin
+  Rec := JaixRecord('setup-choice.json');
+  P := Pos('"channels"', Rec);
+  if P > 0 then
+  begin
+    Channels := Copy(Rec, P, Length(Rec));
+    P := Pos('[', Channels);
+    Q := Pos(']', Channels);
+    if (P > 0) and (Q > P) then
+    begin
+      Channels := Copy(Channels, P, Q - P + 1);
+      if (Pos('"claude"', Channels) > 0) or (Pos('"codex"', Channels) > 0) or (Pos('"hermes"', Channels) > 0) then
+      begin
+        ChannelPage.Values[0] := Pos('"claude"', Channels) > 0;
+        ChannelPage.Values[1] := Pos('"codex"', Channels) > 0;
+        ChannelPage.Values[2] := Pos('"hermes"', Channels) > 0;
+        if RecordSays(Rec, 'hermes_model', 'claude', 16) then
+          ModelPage.Values[1] := True;
+        exit;
+      end;
+    end;
+  end;
+  Rec := JaixRecord('hermes.json');
+  if Pos('"status"', Rec) > 0 then
+  begin
+    ChannelPage.Values[2] := True;
+    if RecordSays(Rec, 'model', 'claude', 16) then
+      ModelPage.Values[1] := True;
+  end;
+end;
+
 function HermesChosen(): Boolean;
 begin
   Result := Pos('hermes', ExpandConstant('{param:CHANNELS|}')) > 0;
@@ -236,6 +292,7 @@ begin
   ModelPage.Add('ChatGPT 구독(Plus 이상)');
   ModelPage.Add('Claude 구독');
   ModelPage.Values[0] := True;
+  ApplyPreviousChoice();
 
   ProgressPage := CreateOutputProgressPage('도구 설치 중', '런타임을 내려받고 AI에 도구를 등록합니다. 몇 분 걸릴 수 있습니다.');
 
