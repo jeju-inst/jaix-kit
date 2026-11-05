@@ -3,6 +3,8 @@ import dataclasses
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,9 +25,28 @@ REAL_HERMES_SETUP = hermesbot.setup
 REAL_PLUGBIN_ENSURE = plugbin.ensure
 REAL_REMOVE_USER_ENV_UNDER = winenv.remove_user_env_under
 
+def _guard_real_hermes(tmp_path, monkeypatch):
+    """시험이 이 PC의 진짜 hermes 를 부르지 못하게 한다. HERMES_HOME 만 tmp 로 돌린 채 진짜 hermes 가 돌면, Hermes 가
+    자기 설치 폴더의 런처(~/.hermes/hermes-agent/.hermes/bin/hermes)를 tmp 의 파이썬으로 다시 써서 그 PC 의 hermes 가
+    깨진다(studio 11/5: find_hermes 를 "hermes" 로 둔 doctor 시험이 `hermes auth list` 를 PATH 의 진짜 것으로 불렀다)."""
+    real_popen = subprocess.Popen
+    tmp = os.path.normcase(os.path.realpath(tmp_path))
+
+    class GuardedPopen(real_popen):
+        def __init__(self, args, *a, **kw):
+            exe = args[0] if isinstance(args, (list, tuple)) and args else None
+            if exe and Path(str(exe)).stem.lower() in ("hermes", "hermes-acp"):
+                where = shutil.which(str(exe))
+                if where and not os.path.normcase(os.path.realpath(where)).startswith(tmp):
+                    raise AssertionError(f"시험이 진짜 hermes 를 부름: {where} {list(args)[1:3]}")
+            super().__init__(args, *a, **kw)
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """실제 사용자 설정을 건드리지 않게 모든 경로를 tmp로."""
+    _guard_real_hermes(tmp_path, monkeypatch)
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "JAIX_DATA", "HERMES_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
@@ -1294,6 +1315,8 @@ def _fake_windows(monkeypatch, isolated, calls):
     monkeypatch.setattr(hermesbot, "IS_WIN", True)
     monkeypatch.setattr(hermesbot, "install_hermes", lambda log, dry_run=False: True)
     monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    # 자격 목록(hermes auth list)은 _run 을 거치지 않는다 — 가짜로 막지 않으면 PATH 의 진짜 hermes 가 돈다
+    monkeypatch.setattr(hermesbot, "_auth", lambda hermes, args, timeout=60: (0, ""))
     monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
     monkeypatch.setattr(hermes, "install", lambda lock, log, dry_run=False: [])
 
@@ -1736,7 +1759,7 @@ def test_hermes_approval_mode_read_and_doctor_warns_off(isolated, monkeypatch):
     cfg.write_text("model:\n  mode: x\napprovals:\n  timeout: 60\n  mode: off\nother: 1\n", encoding="utf-8")
     assert hermesbot.approval_mode() == "off"
     hermesbot._save_record({"status": "connected", "slack": {"id": "a", "connected": "t"}})
-    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")  # 진짜 hermes 를 부르지 않게
     monkeypatch.setattr(hermesbot, "env_has", lambda k: True)
     monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
     assert [c.status for c in doctor.check_hermes_bot()] == ["ok", "warn"]
@@ -2627,3 +2650,18 @@ def test_installer_reads_previous_choice_written_by_setup(isolated):
     # 예전 판: hermes.json(indent=2) 의 model
     hermesbot._save_record({"model": "claude", "status": "linked"})
     assert _record_says(hermesbot._record_file().read_text(encoding="utf-8"), "model", "claude")
+
+def test_guard_blocks_real_hermes_outside_tmp(isolated, monkeypatch, tmp_path_factory):
+    """isolated 가 깐 가드: tmp 밖의 hermes 를 부르면 실행 전에 멈춘다(tmp 안의 가짜는 허용)."""
+    outside = tmp_path_factory.mktemp("realbin")
+    for d in (outside, isolated / "fakebin"):
+        d.mkdir(exist_ok=True)
+        f = d / ("hermes.cmd" if os.name == "nt" else "hermes")
+        f.write_text("@echo ok\r\n" if os.name == "nt" else "#!/bin/sh\necho ok\n", encoding="utf-8")
+        f.chmod(0o755)
+    monkeypatch.setenv("PATH", str(outside))
+    with pytest.raises(AssertionError, match="진짜 hermes"):
+        subprocess.run(["hermes", "auth", "list"], capture_output=True)
+    if os.name != "nt":  # Windows 는 .cmd 를 셸 없이 못 띄운다 — tmp 안의 가짜 허용은 맥·리눅스에서만 본다
+        monkeypatch.setenv("PATH", str(isolated / "fakebin"))
+        assert subprocess.run(["hermes"], capture_output=True).returncode == 0
