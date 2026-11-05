@@ -44,6 +44,7 @@ PC에 따라 이 창이 뜨지 않을 수 있습니다. 뜨면 [추가 정보] �
 - **Codex**: Codex를 완전히 닫았다가 다시 연다.
 - **왜 다시 여나**: jaix는 도구 위치를 사용자 환경변수로 알려 준다(예: `HWP2PDF_CLI` — 관리자가 따로 깐 낡은 hwp2pdf가 있어도 jaix 사본을 쓰게). 환경변수는 **새로 연 앱부터** 보이므로, 켜져 있던 Claude·Codex는 계속 예전 위치를 쓴다.
 - **명령창**(cmd · PowerShell)은 새로 연다. 이미 열려 있던 창에서는 새로 깐 `jaix` · `gw` 를 찾지 못한다.
+- **명령창에서 `claude` · `codex`**: 고른 채널(Claude·Codex)의 명령은 설치기가 챙긴다. 이미 있으면 그대로 두고, 깔려 있는데 명령창에서 안 잡히면(npm 전역 `%APPDATA%\npm`, `~\.local\bin` 이 PATH 에 없음) 사용자 PATH 에 올리고, 없으면 깐다(Claude Code는 공식 네이티브 설치와 같게 downloads.claude.ai 에서 받아 sha256 검증, Codex는 npm `@openai/codex`). 새 명령창을 열고 `claude`(또는 `codex`)를 한 번 입력해 로그인한다. `jaix doctor` 의 "claude 명령 · codex 명령" 줄이 새 창에서 잡히는지 보여 준다. Claude 데스크톱 앱 자체는 깔지 않는다(앱 설치는 관리자 권한이 필요할 수 있다 — https://claude.ai/download).
 
 ## 4-1. Claude 처음 쓸 때 — 모델 고르기 · 업무 계정 연결
 설치와 상관없이 Claude 앱에서 한 번만 하면 된다.
