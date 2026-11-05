@@ -2327,7 +2327,8 @@ def test_cleanup_removes_env_only_when_it_points_into_jaix(isolated, monkeypatch
     monkeypatch.setattr(winenv, "remove_user_env_under", lambda name, prefix: removed.append((name, prefix)) or True)
     msgs = []
     assert cli.cmd_cleanup(None, msgs.append) == 0
-    assert removed == [("HWP2PDF_CLI", paths.jaix_home())] and "환경변수 뺌: HWP2PDF_CLI" in msgs
+    assert sorted(removed) == [("CLAUDE_CODE_GIT_BASH_PATH", paths.jaix_home()), ("HWP2PDF_CLI", paths.jaix_home())]
+    assert "환경변수 뺌: HWP2PDF_CLI" in msgs and "환경변수 뺌: CLAUDE_CODE_GIT_BASH_PATH" in msgs
 
 
 def test_remove_user_env_under_keeps_user_value(monkeypatch, tmp_path):
@@ -2740,3 +2741,130 @@ def test_guide_cowork_line_depends_on_managed_deployment():
     assert "메일 도구는 Cowork 에서 쓸 수 없습니다" in personal
     org = cli.guide(["claude"], {"claude": {"cli": True, "managed": "remote-settings.json"}})
     assert "기관 관리자 배포로 내려옵니다" in org and "Add marketplace" not in org
+
+# --- Git·uv·age: winget 없이 고정 판을 직접(소모임 11/5: winget 경유 셋만 전부 실패) ----------------------------
+import hashlib  # noqa: E402
+import zipfile  # noqa: E402
+
+
+def _zip_bytes(files):
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def _serve_pinned(monkeypatch, key, files, sha=None):
+    data = _zip_bytes(files)
+    pin = dict(runtimes.PINNED[key], sha256=sha or hashlib.sha256(data).hexdigest())
+    monkeypatch.setitem(runtimes.PINNED, key, pin)
+    got = []
+
+    def fake_download(url, dest, timeout=120):
+        got.append(url)
+        Path(dest).write_bytes(data)
+        return Path(dest)
+    monkeypatch.setattr(runtimes.net, "download", fake_download)
+    return got
+
+
+def test_git_uv_age_pinned_without_winget():
+    for key in ("git", "uv", "age"):
+        rt = runtimes.BY_KEY[key]
+        assert rt.winget is None
+        name, url = rt.resolve()  # 네트워크 없이(API 를 부르지 않음 — 원내 한 IP 익명 한도와 무관)
+        pin = runtimes.PINNED[key]
+        assert (name, url) == (pin["name"], pin["url"]) and url.startswith("https://github.com/")
+        assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"])
+    assert runtimes.BY_KEY["git"].tree == "git" and runtimes.BY_KEY["git"].path_subdir == "cmd"
+
+
+def _fake_sfx(fail=False):
+    """PortableGit 자동 풀기 exe 흉내: -o<폴더> 에 cmd\\git.exe · bin\\bash.exe 를 만든다."""
+    seen = []
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        assert cmd[2] == "-y" and cmd[1].startswith("-o")
+        out = Path(cmd[1][2:])
+        if not fail:
+            (out / "cmd").mkdir(parents=True)
+            (out / "cmd" / "git.exe").write_bytes(b"g")
+            (out / "bin").mkdir()
+            (out / "bin" / "bash.exe").write_bytes(b"b")
+        return subprocess.CompletedProcess(cmd, 1 if fail else 0, b"", b"")
+    return run, seen
+
+
+def test_portablegit_unpacks_into_jaix_git_and_exports_bash(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    assert runtimes.PINNED["git"]["name"].startswith("PortableGit-") and runtimes.PINNED["git"]["name"].endswith(".7z.exe")
+    data = b"sfx"
+    monkeypatch.setitem(runtimes.PINNED, "git", dict(runtimes.PINNED["git"], sha256=hashlib.sha256(data).hexdigest()))
+    monkeypatch.setattr(runtimes.net, "download", lambda url, dest, timeout=120: (Path(dest).write_bytes(data), Path(dest))[1])
+    run, seen = _fake_sfx()
+    monkeypatch.setattr(runtimes.subprocess, "run", run)
+    old = paths.jaix_home() / "git" / "cmd"
+    old.mkdir(parents=True)
+    (old / "git.exe").write_bytes(b"mingit")  # 예전 MinGit 사본 → 바뀐다
+    where = runtimes.install_portable(rt, print)
+    assert where == paths.jaix_home() / "git" / "cmd" and (where / "git.exe").read_bytes() == b"g"
+    assert seen[0][1] == f"-o{paths.jaix_home() / 'git'}" and not (paths.jaix_home() / "git.old").exists()
+    # jaix 사본이면 Git Bash 위치를 알린다. 사용자가 다른 bash 를 가리켜 두었으면 그대로
+    env = {}
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: env.get(name))
+    monkeypatch.setattr(winenv, "set_user_env", lambda name, value: env.update({name: value}) or True)
+    found = runtimes.Found(str(where / "git.exe"), "2.56.0", 2, managed=True)
+    runtimes._export(rt, found, print)
+    assert env["CLAUDE_CODE_GIT_BASH_PATH"] == str(paths.jaix_home() / "git" / "bin" / "bash.exe")
+    mine = isolated / "MyGit" / "bin" / "bash.exe"
+    mine.parent.mkdir(parents=True)
+    mine.write_bytes(b"x")
+    env["CLAUDE_CODE_GIT_BASH_PATH"] = str(mine)
+    runtimes._export(rt, found, print)
+    assert env["CLAUDE_CODE_GIT_BASH_PATH"] == str(mine)
+    # 시스템 Git(jaix 사본 아님)이면 손대지 않는다
+    env.clear()
+    runtimes._export(rt, runtimes.Found(r"C:\Program Files\Git\cmd\git.exe", "2.50", 2), print)
+    assert env == {}
+
+
+def test_portablegit_failed_unpack_restores_previous_copy(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    prev = paths.jaix_home() / "git" / "cmd"
+    prev.mkdir(parents=True)
+    (prev / "git.exe").write_bytes(b"prev")
+    run, _ = _fake_sfx(fail=True)
+    with pytest.raises(RuntimeError, match="풀기 실패"):
+        runtimes._run_sfx(isolated / "PortableGit.7z.exe", rt, run=run)
+    assert (prev / "git.exe").read_bytes() == b"prev" and not (paths.jaix_home() / "git.old").exists()
+
+
+def test_pinned_sha_mismatch_refuses_to_install(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["uv"]
+    _serve_pinned(monkeypatch, "uv", {"uv.exe": b"evil"}, sha="0" * 64)
+    with pytest.raises(ValueError, match="sha256 불일치"):
+        runtimes.install_portable(rt, print)
+    assert not (paths.bin_dir() / "uv.exe").exists() and not runtimes._marker(rt).exists()
+
+
+def test_ensure_missing_git_never_calls_winget_and_reports_failure(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "_winget", lambda *a, **k: pytest.fail("winget 을 부름"))
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(None, None))
+    monkeypatch.setattr(runtimes, "install_portable", lambda r, log: (_ for _ in ()).throw(OSError("blocked")))
+    lines = []
+    found = runtimes.ensure(rt, lines.append)
+    assert found.path is None and any("설치 실패" in line for line in lines)  # setup 이 [실패]로 센다(#112)
+
+
+def test_ensure_keeps_existing_git(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(r"C:\Program Files\Git\cmd\git.exe", "2.50.1", 2))
+    monkeypatch.setattr(runtimes, "install_portable", lambda r, log: pytest.fail("이미 있는데 받음"))
+    assert runtimes.ensure(rt, print, upgrade=True).path.endswith("git.exe")

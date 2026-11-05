@@ -243,6 +243,27 @@ jobs:
           cmd /c "claude --version"
           if ($LASTEXITCODE -ne 0) { throw "cmd 에서 claude --version 종료 코드 $LASTEXITCODE" }
 
+      # Git·uv·age 는 winget 없이 고정 판을 직접 받는다(#118). 러너엔 Git 이 있어 setup 은 '그대로 둠'만 탄다 →
+      # 격리한 jaix 폴더에 같은 코드로 PortableGit(7z 자동 풀기 exe)·uv·age 를 받아 풀고 git·bash·uv·age 가 도는지 본다
+      - name: Pinned runtimes direct install (PortableGit · uv · age, isolated jaix home)
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $env:JAIX_HOME = Join-Path $env:RUNNER_TEMP 'pinnedhome'
+          $env:PYTHONIOENCODING = 'utf-8'
+          @'
+          from jaix import runtimes
+          for key in ("git", "uv", "age"):
+              rt = runtimes.BY_KEY[key]
+              print(key, "->", runtimes.install_portable(rt, print))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "고정 판 설치 실패" }
+          $h = $env:JAIX_HOME
+          & "$h\git\cmd\git.exe" --version; if ($LASTEXITCODE -ne 0) { throw "git 실패" }
+          & "$h\git\bin\bash.exe" -c 'echo bash ok; git --version'; if ($LASTEXITCODE -ne 0) { throw "bash 실패" }
+          & "$h\bin\uv.exe" --version; if ($LASTEXITCODE -ne 0) { throw "uv 실패" }
+          & "$h\bin\age.exe" --version; if ($LASTEXITCODE -ne 0) { throw "age 실패" }
+
       - name: Uninstall
         shell: pwsh
         run: |
