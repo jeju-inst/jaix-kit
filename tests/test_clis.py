@@ -40,7 +40,7 @@ def test_present_on_fresh_path_is_left_alone(env):
     found = _exe(tmp / "sysbin", "claude")
     state["fresh"] = str(tmp / "sysbin")
     res = clis.ensure("claude", lambda m="": None, installer=lambda log: pytest.fail("깔지 않아야 함"))
-    assert res["status"] == "present" and res["path"] == str(found) and not state["path"]
+    assert res["status"] == "present" and res["path"].lower() == str(found).lower() and not state["path"]
     assert not clis.recorded()
 
 
@@ -100,7 +100,7 @@ def test_install_claude_follows_official_script(env, monkeypatch):
         lambda m="": None, get_text=lambda url: seen.append(url) or "2.1.311",
         get_json=lambda url: seen.append(url) or {"platforms": {"win32-x64": {"checksum": want}}},
         download=download, run=run)
-    assert version == "2.1.311" and exe.endswith("claude")
+    assert version == "2.1.311" and Path(exe).stem.lower() == "claude"
     assert seen[:3] == [f"{clis.CLAUDE_DIST}/stable", f"{clis.CLAUDE_DIST}/2.1.311/manifest.json",
                         f"{clis.CLAUDE_DIST}/2.1.311/win32-x64/claude.exe"]
     assert seen[3] == ["install", "stable"]
