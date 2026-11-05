@@ -96,6 +96,8 @@ var
   LoginPage: TWizardPage;
   LoginButton: TNewButton;
   LoginResult: TNewStaticText;
+  // 이미 로그인돼 있다고 한 번 알린 뒤([다시 로그인])에는 --force 로 묻지 않고 새로 로그인한다
+  ForceLogin: Boolean;
   ProgressPage: TOutputProgressWizardPage;
   SetupLines: Integer;
   SetupFailed: Boolean;
@@ -157,7 +159,7 @@ end;
 procedure LoginButtonClick(Sender: TObject);
 var
   ResultCode: Integer;
-  Model, Again: string;
+  Model, Again, Params: string;
   WasBack: Boolean;
 begin
   Model := HermesModel();
@@ -168,8 +170,11 @@ begin
   WizardForm.BackButton.Enabled := False;
   WizardForm.CancelButton.Enabled := False;
   LoginResult.Caption := '로그인 창에서 진행 중입니다. 브라우저에서 승인하세요...';
+  Params := 'hermes login --model ' + Model + ' --no-wait';
+  if ForceLogin then
+    Params := Params + ' --force';
   try
-    if not Exec(ExpandConstant('{app}\jaix\jaix.exe'), 'hermes login --model ' + Model + ' --no-wait',
+    if not Exec(ExpandConstant('{app}\jaix\jaix.exe'), Params,
                 ExpandConstant('{app}'), SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode) then
       ResultCode := -1;
   finally
@@ -181,8 +186,16 @@ begin
   Log('jaix hermes login 종료 코드 ' + IntToStr(ResultCode));
   if ResultCode = 0 then
   begin
+    ForceLogin := True;
     LoginButton.Caption := '다시 로그인';
     LoginResult.Caption := '로그인했습니다. [다음]을 누르세요.';
+  end
+  else if ResultCode = 3 then
+  begin
+    // jaix 의 hermesbot.ALREADY: 이 구독 자격이 이미 있어 다시 로그인하지 않았다(자격이 쌓이지 않게)
+    ForceLogin := True;
+    LoginButton.Caption := '다시 로그인';
+    LoginResult.Caption := '이미 로그인돼 있습니다. [다음]을 누르면 됩니다(새로 로그인하려면 [다시 로그인]).';
   end
   else if ResultCode = 130 then
     LoginResult.Caption := '로그인을 취소했습니다. 다시 누르거나, 나중에 ' + Again

@@ -1914,13 +1914,34 @@ def test_hermes_login_ctrl_c_keeps_window_and_records(isolated, monkeypatch):
         def kill(self):
             raise AssertionError("자식이 스스로 끝났으면 죽이지 않는다")
 
+    monkeypatch.setattr(hermesbot, "credentials", lambda *a, **k: [])  # 자격 목록(hermes auth list)은 이 시험 밖
     monkeypatch.setattr(hermesbot.subprocess, "Popen", Child)
     seen, waited = [], []
-    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False), seen.append, wait=waited.append)
+    rc = hermesbot.cmd_login(argparse.Namespace(model="claude", no_wait=False), seen.append, wait=waited.append)
     assert rc == hermesbot.CANCELLED and Child.waits == 2 and waited
-    assert any("취소" in m and "jaix hermes login --model chatgpt" in m for m in seen)
+    assert any("취소" in m and "jaix hermes login --model claude" in m for m in seen)
     rec = (paths.data_dir() / "hermes-login.log").read_text(encoding="utf-8")
-    assert "model=chatgpt code=130" in rec
+    assert "model=claude code=130" in rec
+
+
+def test_hermes_login_tee_ctrl_c_is_cancel(monkeypatch):
+    """chatgpt(기기 코드)는 출력을 파이프로 읽는다 — 읽는 중 Ctrl+C 도 '취소'(130)."""
+    class Out:
+        def read1(self, n):
+            raise KeyboardInterrupt
+
+    class Child:
+        def __init__(self, cmd, env=None, stdout=None, stderr=None):
+            self.stdout = Out()
+            assert env.get("PYTHONUNBUFFERED") == "1"
+
+        def wait(self, timeout=None):
+            return 1
+
+        def kill(self):
+            raise AssertionError("스스로 끝났으면 죽이지 않는다")
+    monkeypatch.setattr(hermesbot.subprocess, "Popen", Child)
+    assert hermesbot._call_login_tee(["/x/hermes"], lambda t: None) == hermesbot.CANCELLED
 
 
 def test_hermes_login_opens_device_page_and_shows_result_before_closing(isolated, monkeypatch):
@@ -2288,3 +2309,147 @@ def test_remove_user_env_under_keeps_user_value(monkeypatch, tmp_path):
     store = {"HWP2PDF_CLI": r"C:\\Program Files\\hwp2pdf\\hwp2pdf-cli.exe"}
     monkeypatch.setattr(winenv, "get_user_env", lambda name: store.get(name))
     assert not REAL_REMOVE_USER_ENV_UNDER("HWP2PDF_CLI", tmp_path)  # 사용자가 바꾼 값은 둔다
+
+
+# --- Hermes 자격 누적(jaix-win v11.05.8: 설치기 2회+시작 메뉴 1회로 openai-codex 자격 #4) ----------------------------
+CRED_LIST = """openai-codex (2 credentials):
+  #1  a@ex.com             oauth   id=aaa111 priority=0 device_code ←
+  #2  a@ex.com             oauth   id=bbb222 priority=1 manual:device_code
+"""
+
+
+class FakeAuth:
+    def __init__(self, listing):
+        self.listing, self.calls = listing, []
+
+    def __call__(self, args):
+        self.calls.append(args)
+        if args[0] == "list":
+            return 0, self.listing
+        if args[0] == "remove":
+            return 0, f"Removed {args[1]} credential"
+        return 1, ""
+
+
+def _login_env(monkeypatch):
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 60)
+
+
+def test_credentials_parse_hermes_auth_list():
+    rows = hermesbot.credentials("/x/hermes", "openai-codex", FakeAuth(CRED_LIST))
+    assert [(r["index"], r["label"], r["id"]) for r in rows] == [(1, "a@ex.com", "aaa111"), (2, "a@ex.com", "bbb222")]
+    assert hermesbot.credentials("/x/hermes", "openai-codex", lambda a: (1, "boom")) is None
+    assert hermesbot.credentials("/x/hermes", "anthropic", FakeAuth("")) == []
+
+
+def test_login_when_already_logged_in(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    auth = FakeAuth(CRED_LIST)
+    seen, runs = [], []
+    # 설치기 페이지(--no-wait): 묻지 않고 건너뜀
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=False), seen.append,
+                             run=lambda cmd: runs.append(cmd) or 0, auth=auth, pause=lambda s, log: None)
+    assert rc == hermesbot.ALREADY and not runs and any("이미 로그인" in m for m in seen)
+    # 시작 메뉴: 묻고, N 이면 그대로
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=False), seen.append,
+                             run=lambda cmd: runs.append(cmd) or 0, auth=auth, ask=lambda q: "", wait=lambda q: None)
+    assert rc == hermesbot.ALREADY and not runs
+    assert not [c for c in auth.calls if c[0] == "remove"]
+
+
+def test_relogin_prunes_old_credentials_keeps_new(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    auth = FakeAuth(CRED_LIST)
+
+    def run(cmd):  # 로그인하면 새 자격 #3 이 생긴다
+        auth.listing = CRED_LIST.replace("(2 credentials)", "(3 credentials)") + \
+            "  #3  a@ex.com             oauth   id=ccc333 priority=2 manual:device_code\n"
+        return 0
+    seen = []
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=False), seen.append,
+                             run=run, auth=auth, ask=lambda q: "y", wait=lambda q: None)
+    assert rc == 0
+    removed = [c for c in auth.calls if c[0] == "remove"]
+    assert removed == [["remove", "openai-codex", "aaa111"], ["remove", "openai-codex", "bbb222"]]
+    assert any("2개를 정리" in m for m in seen)
+
+
+def test_prune_skipped_when_new_credential_not_seen(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    auth = FakeAuth(CRED_LIST)  # 로그인 '성공'인데 새 자격이 안 보임 → 아무것도 지우지 않는다
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=True), lambda m="": None,
+                             run=lambda cmd: 0, auth=auth, wait=lambda q: None)
+    assert rc == 0 and not [c for c in auth.calls if c[0] == "remove"]
+
+
+def test_prune_failure_keeps_going(isolated, monkeypatch):
+    seen = []
+
+    class Failing(FakeAuth):
+        def __call__(self, args):
+            if args[0] == "remove":
+                self.calls.append(args)
+                return 1, "error: locked"
+            return super().__call__(args)
+    auth = Failing(CRED_LIST + "  #3  a@ex.com             oauth   id=ccc333 priority=2 manual:device_code\n")
+    assert hermesbot.prune_credentials("/x/hermes", "openai-codex", {"aaa111", "bbb222"}, seen.append, auth) == 0
+    assert any("정리 실패(새 자격은 그대로)" in m for m in seen)
+
+
+def test_device_code_copied_to_clipboard(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    copied = []
+
+    def tee(cmd, on_text):  # hermes 출력이 조각나 와도 코드를 찾는다
+        for part in ["To continue, follow these steps:\n\n  1. Open this URL in your browser:\n",
+                     "     https://auth.openai.com/codex/device\n\n  2. Enter this ", "code:\n     0AR3-3DC",
+                     "KV\n\nWaiting for sign-in..."]:
+            on_text(part)
+        return 0
+    monkeypatch.setattr(hermesbot, "_call_login_tee", tee)
+    seen = []
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=True), seen.append,
+                        auth=FakeAuth(""), copy=lambda code: copied.append(code) or True, pause=lambda s, log: None)
+    assert copied == ["0AR3-3DCKV"] and any("Ctrl+V" in m for m in seen)
+    # 코드 둘째 마디가 4자 넘게 온 뒤 끊겨도 끝(줄바꿈)을 기다린다(Codex #109)
+    copied.clear()
+
+    def tee2(cmd, on_text):
+        for part in ["  2. Enter this code:\n     0AR3-3DCK", "V\n"]:
+            on_text(part)
+        return 0
+    monkeypatch.setattr(hermesbot, "_call_login_tee", tee2)
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=True), seen.append,
+                        auth=FakeAuth(""), copy=lambda code: copied.append(code) or True, pause=lambda s, log: None)
+    assert copied == ["0AR3-3DCKV"]
+
+
+def test_claude_login_keeps_console_tty(isolated, monkeypatch):
+    """anthropic 은 붙여넣기 입력을 받는다 — 파이프(tee)로 바꾸지 않는다."""
+    _login_env(monkeypatch)
+    used = []
+    monkeypatch.setattr(hermesbot, "_call_login_tee", lambda cmd, on_text: used.append("tee") or 0)
+    monkeypatch.setattr(hermesbot, "_call_login", lambda cmd: used.append("tty") or 0)
+    hermesbot.cmd_login(argparse.Namespace(model="claude", no_wait=True, force=True), lambda m="": None,
+                        auth=FakeAuth(""), pause=lambda s, log: None)
+    assert used == ["tty"]
+
+
+def test_doctor_warns_duplicate_credentials(isolated, monkeypatch):
+    monkeypatch.setattr(hermesbot, "duplicate_credentials", lambda: ("openai-codex", 4, "chatgpt"))
+    monkeypatch.setattr(hermesbot, "recorded", lambda: {"status": "connected", "slack": {"id": "x"}})
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "env_has", lambda k: True)
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["x"])
+    monkeypatch.setattr(hermesbot, "approval_mode", lambda: "smart")
+    rows = [c for c in doctor.check_hermes_bot() if c.area == "Hermes 자격"]
+    assert rows and rows[0].status == "warn" and "4개" in rows[0].message and "--force" in rows[0].fix
+
+
+def test_installer_handles_already_logged_in():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    click = iss.split("procedure LoginButtonClick", 1)[1].split("\nend;", 1)[0]
+    assert "ResultCode = 3" in click and "이미 로그인돼 있습니다" in click and "' --force'" in click

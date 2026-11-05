@@ -471,6 +471,7 @@ def build_parser():
     lg = hsub.add_parser("login", help="Hermes 의 AI 구독 로그인(설치기 마지막 화면이 부름)")
     lg.add_argument("--model", choices=sorted(hermesbot.PROVIDERS), default="chatgpt")
     lg.add_argument("--no-wait", action="store_true", help="끝나고 Enter 를 기다리지 않음")
+    lg.add_argument("--force", action="store_true", help="이미 로그인돼 있어도 묻지 않고 다시 로그인(예전 자격은 정리)")
     lg.set_defaults(func=hermesbot.cmd_login)
 
     w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
