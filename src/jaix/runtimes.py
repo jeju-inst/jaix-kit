@@ -108,6 +108,7 @@ class Found:
     raw: str = ""
     managed: bool = False           # jaix가 포터블로 깐 것(갱신 대상)
     notes: list = field(default_factory=list)
+    stale: bool = False             # 이 프로세스의 PATH 엔 없고 새 창(레지스트리 PATH)·winget 바로가기에서만 보임
 
 
 def _probe(rt, path, managed=False):
@@ -141,13 +142,19 @@ def copies(rt):
 
 
 def find(rt):
-    """jaix가 깐 위치 → PATH → winget 바로가기 폴더 순. 마지막은 winget이 방금 깔아 이 프로세스의
-    PATH엔 아직 없는 경우다(새 창부터 보인다)."""
+    """jaix가 깐 위치 → PATH → winget 바로가기 폴더 → 새 창의 PATH(레지스트리) 순. 뒤의 둘은 winget 이 깔아
+    사용자 PATH 에는 넣었지만 이 프로세스(설치 전부터 열린 명령창·Claude 앱)의 PATH 에는 아직 없는 경우다.
+    winget 사용자 범위 Git(Programs 폴더)과 개발자 모드가 꺼진 PC의 uv·age 는 바로가기 폴더에 없어 마지막에만
+    잡힌다 — 이것을 못 보면 doctor 가 깔린 것을 "없음"으로 보였다(소모임 11/5)."""
     own = shutil.which(rt.exe, path=str(rt.path_dir()))
-    path = own or shutil.which(rt.exe) or (IS_WIN and shutil.which(rt.exe, path=str(paths.winget_links())))
+    here = None if own else shutil.which(rt.exe)
+    path = own or here or (IS_WIN and (shutil.which(rt.exe, path=str(paths.winget_links()))
+                                      or shutil.which(rt.exe, path=winenv.fresh_path())))
     if not path:
         return Found(None, None)
-    return _probe(rt, path, managed=bool(own))
+    found = _probe(rt, path, managed=bool(own))
+    found.stale = bool(IS_WIN and not own and not here)
+    return found
 
 
 def _vtuple(v):
@@ -245,6 +252,9 @@ def ensure(rt, log, dry_run=False, upgrade=False):
             found = find(rt)
         if found.managed:  # 파일은 있는데 사용자 PATH에서 빠졌을 수 있다(doctor가 setup 재실행을 권하는 경우)
             winenv.add_to_path([rt.path_dir()], dry_run=dry_run)
+        if found.stale and not dry_run:  # 설치 전에 연 창에서 돈 setup: 뒤에 부르는 claude·uvx 가 Git·uv 를 찾게
+            winenv.refresh_process_path()
+            _process_path_add(Path(found.path).parent)
         log(f"  {rt.label}: {found.version or '있음'} ({found.path})")
         _export(rt, found, log, dry_run)
         return found
@@ -271,6 +281,14 @@ def ensure(rt, log, dry_run=False, upgrade=False):
     log(f"  {rt.label}: {found.version or '?'} ({found.path})")
     _export(rt, found, log, dry_run)
     return found
+
+
+def _process_path_add(folder):
+    """이 프로세스(와 자식)의 PATH 에만 folder 를 붙인다. 사용자 PATH 는 건드리지 않는다."""
+    cur = os.environ.get("PATH", "").split(os.pathsep)
+    norm = lambda p: os.path.normcase(os.path.normpath(p))  # noqa: E731
+    if norm(str(folder)) not in {norm(p) for p in cur if p}:
+        os.environ["PATH"] = os.pathsep.join([*cur, str(folder)])
 
 
 def _export(rt, found, log, dry_run=False):

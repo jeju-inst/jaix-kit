@@ -27,6 +27,26 @@ def user_path_entries():
     return [p for p in value.split(";") if p]
 
 
+def system_path_entries():
+    if not IS_WIN:
+        return []
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+            value, _ = winreg.QueryValueEx(key, "Path")
+    except OSError:
+        return []
+    return [p for p in value.split(";") if p]
+
+
+def fresh_path():
+    """새로 연 명령창이 보게 될 PATH(시스템 + 사용자, 레지스트리 기준). Windows 가 아니면 지금 PATH.
+    설치 전부터 떠 있던 창·앱(Claude 앱 포함)은 옛 PATH 를 물려받아 이것과 다를 수 있다."""
+    if not IS_WIN:
+        return os.environ.get("PATH", "")
+    return os.pathsep.join(os.path.expandvars(p) for p in [*system_path_entries(), *user_path_entries()])
+
+
 def _write_user_path(entries):
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
         winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, ";".join(entries))
