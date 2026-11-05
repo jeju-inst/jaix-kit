@@ -9,7 +9,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path, PureWindowsPath
 
-from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, runtimes, schedule, uvpython, winenv, works
+from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, runtimes, schedule, selfupdate, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -480,9 +480,15 @@ def check_autoupdate():
     return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()}){task}", "jaix update")]
 
 
+def check_self():
+    """jaix 본체(설치본) 새 판. 받는 법은 시작 메뉴 'JAIX 업데이트' 또는 jaix update --self."""
+    res = selfupdate.doctor_status()
+    return [Check(res[0], "jaix 본체", res[1], res[2])] if res else []
+
+
 def run(lock):
     return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
-            *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
+            *check_hermes(lock), *check_autoupdate(), *check_self(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
 def render(checks):

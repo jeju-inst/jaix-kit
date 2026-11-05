@@ -9,6 +9,9 @@
 ;             Hermes: /HERMESCODEFILE=<연결 코드 파일, jaix가 읽고 지움> [/HERMESMODEL=chatgpt|claude]
 ; 슬랙 연결 코드는 명령줄·설치 기록에 싣지 않는다 — 사용자 폴더의 파일로 넘기고 jaix가 읽자마자 지운다(docs/design-hermes-unattended.md §3.2)
 ; jaix setup이 실패하면 설치기는 종료 코드 10으로 끝난다(설치 자체는 남아 jaix doctor로 볼 수 있다).
+; 본체 자기 업데이트(src/jaix/selfupdate.py): 사용자가 [예]를 누르면 jaix 가
+;   jaix-setup.exe /SILENT /CURRENTUSER /JAIXAUTOUPDATE=1 /CHANNELS=<이전 선택> [/HERMESMODEL=…] /LOG=<updates\install-<판>.log>
+;   로 띄운다. 이전 선택은 jaix 가 넘기고, 로그인 페이지는 건너뛰며, 끝나면 결과를 %LOCALAPPDATA%\jaix\updates\history.log 에 남긴다.
 
 #define AppName "JAIX 원내 AI 도구"
 ; AppVer 는 릴리스 빌드가 jaix-kit 묶음 태그 값으로 바꿔 찍는다
@@ -96,6 +99,20 @@ var
   ProgressPage: TOutputProgressWizardPage;
   SetupLines: Integer;
   SetupFailed: Boolean;
+  JaixCode: Integer;
+
+function IsAutoUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:JAIXAUTOUPDATE|0}') = '1';
+end;
+
+// 자기 업데이트를 띄운 jaix(jaixw)가 끝나 jaix 폴더를 놓을 틈 — jaix 는 설치기를 띄우자마자 끝난다
+function InitializeSetup(): Boolean;
+begin
+  if IsAutoUpdate() then
+    Sleep(2000);
+  Result := True;
+end;
 
 function NeedsAddPath(Param: string): boolean;
 var
@@ -263,7 +280,7 @@ begin
   Result := ((PageID = HermesPage.ID) or (PageID = ModelPage.ID)) and not ChannelPage.Values[2];
   // 로그인 페이지: Hermes 를 골랐고 실제로 깔렸을 때만. 무인 설치는 페이지를 띄우지 않는다
   if PageID = LoginPage.ID then
-    Result := WizardSilent() or not HermesChosen() or
+    Result := WizardSilent() or IsAutoUpdate() or not HermesChosen() or
       not FileExists(ExpandConstant('{localappdata}\hermes\bin\hermes.exe'));
 end;
 
@@ -330,11 +347,33 @@ begin
   end;
 end;
 
+// 자기 업데이트 결과: updates\history.log 에 한 줄, 그리고 사용자에게 알린다(누르고 기다리던 사람이 있다)
+procedure AutoUpdateDone();
+var
+  Line: string;
+begin
+  if SetupFailed then
+    Line := '도구 등록 중 문제(jaix 코드 ' + IntToStr(JaixCode) + ')'
+  else
+    Line := '완료';
+  ForceDirectories(ExpandConstant('{localappdata}\jaix\updates'));
+  SaveStringToFile(ExpandConstant('{localappdata}\jaix\updates\history.log'),
+    GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + ' {#AppVer} ' + Line + #13#10, True);
+  Log('자기 업데이트 결과: ' + Line);
+  if SetupFailed then
+    SuppressibleMsgBox('JAIX {#AppVer} 로 바꿨지만 도구 등록 중 문제가 있었습니다.' + #13#10 +
+      '명령창에서 jaix doctor 를 실행해 결과를 AI센터에 보내 주세요.', mbError, MB_OK, IDOK)
+  else
+    SuppressibleMsgBox('JAIX {#AppVer} 로 업데이트했습니다.', mbInformation, MB_OK, IDOK);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Channels, ExePath, GuideFile, LogFile, Params, Guide, CodeFile: string;
   ResultCode: Integer;
 begin
+  if (CurStep = ssDone) and IsAutoUpdate() then
+    AutoUpdateDone();
   if CurStep <> ssPostInstall then
     exit;
   Channels := SelectedChannels();
@@ -392,6 +431,7 @@ begin
   if ResultCode <> 0 then
   begin
     SetupFailed := True;
+    JaixCode := ResultCode;
     // 아래 줄의 코드는 jaix 의 것(1 = 일부 실패, 2 = 멈춤)이다. 설치기 자신은 GetCustomSetupExitCode 로 10 을 낸다
     Log('jaix setup 종료 코드 ' + IntToStr(ResultCode) + ' → 설치기 종료 코드 10');
   end;
