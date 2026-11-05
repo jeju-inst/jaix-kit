@@ -92,10 +92,10 @@ RUNTIMES = [
             winget="OpenJS.NodeJS.LTS", min_major=18, hint="brew install node", purpose="웍스 도구(nworks)"),
     Runtime("himalaya", "himalaya", "himalaya", ["--version"], False,
             _github("pimalaya/himalaya", r"^himalaya\.x86_64-windows\.zip$"), hint="brew install himalaya",
-            needed_by="mail", purpose="메일 도구(mail 플러그인)"),
+            needed_by="mail-skill", purpose="메일 도구(mail-skill 플러그인)"),
     Runtime("age", "age", "age", ["--version"], False, _github("FiloSottile/age", r"-windows-amd64\.zip$"),
-            winget="FiloSottile.age", hint="brew install age", needed_by="mail",
-            purpose="메일 도구 비밀 암호화(mail 플러그인)"),
+            winget="FiloSottile.age", hint="brew install age", needed_by="mail-skill",
+            purpose="메일 도구 비밀 암호화(mail-skill 플러그인)"),
 ]
 BY_KEY = {rt.key: rt for rt in RUNTIMES}
 

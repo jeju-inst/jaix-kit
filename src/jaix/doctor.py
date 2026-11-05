@@ -82,7 +82,7 @@ def check_runtime_copies():
     return out
 
 
-MAIL_PLUGIN = "mail"
+MAIL_PLUGIN = "mail-skill"  # 잠금 entry 이름(plugin.json name)
 MAIL_PYTHON = uvpython.DEFAULT  # mail 스크립트는 PATH 의 python3 대신 uv 관리 Python 3.12 로 돈다(mail-skill-dev 설계)
 
 
