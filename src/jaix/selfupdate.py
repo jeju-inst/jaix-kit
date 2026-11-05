@@ -11,6 +11,7 @@
 import ctypes
 import hashlib
 import json
+import os
 import subprocess
 import time
 from datetime import datetime
@@ -228,16 +229,100 @@ def save_choice(channels, model):
         pass
 
 
+# --- 열려 있는 다른 jaix 창 ---------------------------------------------------------------------------
+# 'JAIX Hermes 로그인' 창(Enter 대기)·점검 중인 jaix.exe 가 열려 있으면 jaix 폴더 파일이 잠겨, 설치기가 /SILENT 인데도
+# Abort/Retry/Ignore 상자를 띄우고 멈췄다(jaix-win .8→.9, install-2026.11.05.9.log). 콘솔 프로그램은 재시작 관리자가
+# 점잖게 닫지 못한다 → 설치기를 띄우기 전에 jaix 가 알리고 닫는다(+ 설치기에 /FORCECLOSEAPPLICATIONS 안전망)
+JAIX_EXES = ("jaix.exe", "jaixw.exe")
+
+
+def _win_processes():
+    """[(pid, 실행파일 전체 경로)] — Toolhelp 스냅숏 + QueryFullProcessImageNameW(권한 없는 것은 건너뜀)."""
+    from ctypes import wintypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k.OpenProcess.restype = wintypes.HANDLE
+
+    class PE(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_void_p), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+    snap = k.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == wintypes.HANDLE(-1).value:
+        return []
+    out = []
+    try:
+        pe = PE()
+        pe.dwSize = ctypes.sizeof(PE)
+        ok = k.Process32FirstW(snap, ctypes.byref(pe))
+        while ok:
+            if pe.szExeFile.lower() in JAIX_EXES:
+                h = k.OpenProcess(0x1000, False, pe.th32ProcessID)  # PROCESS_QUERY_LIMITED_INFORMATION
+                if h:
+                    buf, size = ctypes.create_unicode_buffer(1024), wintypes.DWORD(1024)
+                    if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                        out.append((pe.th32ProcessID, buf.value))
+                    k.CloseHandle(h)
+            ok = k.Process32NextW(snap, ctypes.byref(pe))
+    finally:
+        k.CloseHandle(snap)
+    return out
+
+
+def other_jaix(processes=None):
+    """이 설치본 폴더의 jaix.exe·jaixw.exe 중 나 말고 떠 있는 것 [(pid, 이름)]."""
+    here = paths.exe_dir()
+    if not IS_WIN or here is None:
+        return []
+    try:
+        procs = (processes or _win_processes)()
+    except (OSError, AttributeError, ValueError):
+        return []
+    me = os.getpid()
+    norm = lambda p: os.path.normcase(os.path.abspath(str(p)))  # noqa: E731
+    return [(pid, Path(exe).name) for pid, exe in procs if pid != me and norm(Path(exe).parent) == norm(here)]
+
+
+def _terminate(pid):
+    from ctypes import wintypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.restype = wintypes.HANDLE
+    h = k.OpenProcess(0x0001 | 0x00100000, False, pid)  # PROCESS_TERMINATE | SYNCHRONIZE
+    if not h:
+        return False
+    try:
+        ok = bool(k.TerminateProcess(h, 1))
+        k.WaitForSingleObject(h, 3000)
+        return ok
+    finally:
+        k.CloseHandle(h)
+
+
+def close_others(log, find=None, kill=None):
+    """다른 jaix 창을 닫는다. 못 닫은 것이 있어도 진행(설치기의 /FORCECLOSEAPPLICATIONS 가 한 번 더 한다)."""
+    others = (find or other_jaix)()
+    for pid, name in others:
+        ok = (kill or _terminate)(pid)
+        log(f"jaix 업데이트: 열려 있던 {name}(pid {pid}) {'닫음' if ok else '닫지 못함'}")
+    return others
+
+
+def open_windows_note():
+    n = len(other_jaix())
+    return f"\n열려 있는 JAIX 창 {n}개(Hermes 로그인·점검 창 등)는 닫고 업데이트합니다." if n else ""
+
+
 def installer_args(state):
     channels, model = setup_choice()
-    args = ["/SILENT", "/CURRENTUSER", "/JAIXAUTOUPDATE=1", f"/CHANNELS={','.join(channels)}",
+    args = ["/SILENT", "/CURRENTUSER", "/FORCECLOSEAPPLICATIONS", "/JAIXAUTOUPDATE=1", f"/CHANNELS={','.join(channels)}",
             f"/LOG={updates_dir() / ('install-' + str(state.get('latest')) + '.log')}"]
     if "hermes" in channels:
         args.append(f"/HERMESMODEL={model}")
     return args
 
 
-def launch(state, log, popen=None):
+def launch(state, log, popen=None, close=None):
     """검증된 설치기를 띄우고 곧장 돌아온다(호출자는 바로 끝나야 설치기가 jaix 폴더를 바꿀 수 있다)."""
     path = verified(state)
     if not path:
@@ -245,6 +330,7 @@ def launch(state, log, popen=None):
         save_state(state)
         log(f"jaix 업데이트: {state['error']}")
         return False
+    (close or close_others)(log)
     cmd = [str(path), *installer_args(state)]
     flags = (0x00000008 | 0x00000200) if IS_WIN else 0  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     try:
@@ -265,7 +351,7 @@ def ask_dialog(state):
     if not IS_WIN:
         return False
     text = (f"JAIX 새 판이 있습니다.\n\n지금: {__version__}\n새 판: {state.get('latest')}\n\n"
-            "지금 업데이트할까요? 몇 분 걸리며, 끝나면 알려 드립니다.\n"
+            f"지금 업데이트할까요? 몇 분 걸리며, 끝나면 알려 드립니다.{open_windows_note()}\n"
             f"[아니요]를 누르면 다음 로그온 때 다시 묻습니다({GUIDE} 로도 할 수 있습니다).")
     MB_YESNO, MB_ICONINFORMATION, MB_SETFOREGROUND, MB_TOPMOST, IDYES = 0x4, 0x40, 0x10000, 0x40000, 6
     try:
@@ -328,6 +414,9 @@ def cmd_self(args, log, fetch=None, download=None, popen=None, ask=None):
         return 1
     if not getattr(args, "yes", False):
         try:
+            note = open_windows_note().strip()
+            if note:
+                log(note)
             answer = (ask or input)("지금 업데이트할까요? 설치기가 열리고 이 창의 jaix 는 끝납니다 [y/N] ")
         except (EOFError, KeyboardInterrupt):
             answer = ""

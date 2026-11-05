@@ -206,6 +206,43 @@ jobs:
           Write-Host "doctor: $($c.status) $($c.message)"
           if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
 
+      # Claude Code 네이티브 설치 경로(clis.install_claude: downloads.claude.ai → manifest sha256 → claude.exe install
+      # stable)는 러너에 npm 판 claude 가 이미 있어 위 설치에서는 '그대로 둠'만 탄다. 격리한 홈(USERPROFILE)에서 jaix 의
+      # 같은 코드로 새로 깔고, 러너의 claude 를 PATH 에서 뺀 새 PowerShell·cmd 에서 잡히는지 본다(사용자 요구 11/5)
+      - name: Claude Code native install (isolated home, runner claude hidden)
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $home2 = Join-Path $env:RUNNER_TEMP 'cleanhome'
+          New-Item -ItemType Directory -Force -Path $home2 | Out-Null
+          $env:USERPROFILE = $home2; $env:HOME = $home2
+          $env:JAIX_DATA = Join-Path $env:RUNNER_TEMP 'cleandata'
+          $env:PYTHONIOENCODING = 'utf-8'   # 러너 기본 cp1252 로는 한글 기록을 못 찍는다
+          @'
+          import sys
+          from jaix import clis
+          clis.find_installed = lambda name: (None, None)  # 러너의 npm claude 는 없는 것으로
+          res = clis.ensure("claude", print)
+          print(res)
+          print(open(clis.record_file(), encoding="utf-8").read())
+          sys.exit(0 if res["status"] == "installed" else 1)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "네이티브 설치 실패" }
+          $bin = Join-Path $home2 '.local\bin'
+          if (-not (Test-Path (Join-Path $bin 'claude.exe'))) { throw "런처 없음: $bin\claude.exe" }
+          # 새 창처럼: 레지스트리의 사용자+시스템 PATH 를 다시 읽고, 러너의 npm claude 폴더는 뺀다
+          $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $env:Path = (("$user;$machine" -split ';') | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'claude.cmd')) -and -not (Test-Path (Join-Path $_ 'claude.ps1')) }) -join ';'
+          $c = Get-Command claude -ErrorAction SilentlyContinue
+          if (-not $c) { throw "새 PowerShell 에서 claude 가 안 잡힘(사용자 PATH 에 $bin 이 없음?)" }
+          Write-Host "claude -> $($c.Source)"
+          if ($c.Source -notlike "$bin*") { throw "다른 claude 가 잡힘: $($c.Source)" }
+          & claude --version
+          if ($LASTEXITCODE -ne 0) { throw "claude --version 종료 코드 $LASTEXITCODE" }
+          cmd /c "claude --version"
+          if ($LASTEXITCODE -ne 0) { throw "cmd 에서 claude --version 종료 코드 $LASTEXITCODE" }
+
       - name: Uninstall
         shell: pwsh
         run: |
