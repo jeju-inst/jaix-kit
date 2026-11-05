@@ -233,6 +233,7 @@ def cmd_setup(args, log):
         res = steps.run("claude 명령", clis.ensure, "claude", log, dry_run=args.dry_run)
         if res is not None:
             result["claude_cli"] = res
+            _cli_failed(steps, "claude 명령", res)
         # 다시 설치할 때 이미 깔린 옛 판도 잠금에 맞춘다(update 와 같게). 빠뜨리면 Codex 만 맞고 Claude 는 옛 판으로
         # 남아 doctor 가 실패를 보였다(jaix-win 11/4 ③)
         res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run, update=True)
@@ -245,6 +246,7 @@ def cmd_setup(args, log):
         res = steps.run("codex 명령", clis.ensure, "codex", log, dry_run=args.dry_run)
         if res is not None:
             result["codex_cli"] = res
+            _cli_failed(steps, "codex 명령", res)
         res = steps.run("Codex", codex.setup, lock, log, dry_run=args.dry_run)
         if res is not None:
             result["codex"] = res
@@ -273,9 +275,18 @@ def cmd_setup(args, log):
     return steps.summary()
 
 
+def _cli_failed(steps, area, res):
+    """명령창 claude·codex 를 못 깔았으면 설치 실패로 센다(다른 단계는 계속) — 설치기 종료 코드 10, 지난 실패 기록 유지."""
+    if res.get("status") == "failed":
+        steps.failed.append(area)
+        steps.code = max(steps.code, 1)
+
+
 def _setup_problems(result):
     codex_res = result.get("codex") or {}
     return bool((result.get("hermes") or {}).get("status") == "failed"
+                or (result.get("claude_cli") or {}).get("status") == "failed"
+                or (result.get("codex_cli") or {}).get("status") == "failed"
                 or result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
                 or result.get("hancom_consent") is False
                 or codex_res.get("error") or codex_res.get("failed")

@@ -1,6 +1,7 @@
 """명령창 claude·codex: 있으면 그대로, PATH 밖이면 올리고, 없으면 깐다. 네트워크·설치·레지스트리는 가짜."""
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,7 @@ def env(tmp_path, monkeypatch):
 
 def _exe(folder, name):
     folder.mkdir(parents=True, exist_ok=True)
-    f = folder / name
+    f = folder / (name + (".exe" if os.name == "nt" else ""))  # Windows 의 which 는 PATHEXT 확장자만 찾는다
     f.write_bytes(b"x")
     f.chmod(0o755)
     return f
@@ -128,7 +129,7 @@ def test_cleanup_removes_only_what_jaix_installed(env):
     state["path"].append(str(home / ".local" / "bin"))
     clis.cleanup(lambda m="": None)
     assert not launcher.exists() and not (home / ".local" / "share" / "claude").exists()
-    assert (npm / "codex").exists()  # 원래 있던 것은 그대로
+    assert any(npm.glob("codex*"))  # 원래 있던 것은 그대로
     assert str(home / ".local" / "bin") not in state["path"]  # 비었으니 PATH 에서 뺌
     assert str(npm) in state["path"]  # 다른 것이 남은 폴더는 PATH 에 둔다
     assert not clis.record_file().exists()
@@ -150,3 +151,12 @@ def test_guide_tells_to_open_new_terminal():
     text = cli.guide(["claude", "codex"], {"claude_cli": {"status": "installed"}, "codex_cli": {"status": "failed"},
                                            "codex": {"cli": True}})
     assert "새 명령창(PowerShell·cmd)을 열고 claude 를 입력" in text and "codex 명령을 깔지 못했습니다" in text
+
+
+def test_failed_cli_install_marks_setup_failed():
+    from jaix import cli
+    steps = cli.Steps(lambda m="": None)
+    cli._cli_failed(steps, "claude 명령", {"status": "failed", "error": "x"})
+    assert steps.code == 1 and "claude 명령" in steps.failed
+    assert cli._setup_problems({"codex_cli": {"status": "failed"}})
+    assert not cli._setup_problems({"codex_cli": {"status": "installed"}})
