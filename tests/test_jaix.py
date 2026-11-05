@@ -2740,3 +2740,80 @@ def test_guide_cowork_line_depends_on_managed_deployment():
     assert "메일 도구는 Cowork 에서 쓸 수 없습니다" in personal
     org = cli.guide(["claude"], {"claude": {"cli": True, "managed": "remote-settings.json"}})
     assert "기관 관리자 배포로 내려옵니다" in org and "Add marketplace" not in org
+
+# --- Git·uv·age: winget 없이 고정 판을 직접(소모임 11/5: winget 경유 셋만 전부 실패) ----------------------------
+import hashlib  # noqa: E402
+import zipfile  # noqa: E402
+
+
+def _zip_bytes(files):
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def _serve_pinned(monkeypatch, key, files, sha=None):
+    data = _zip_bytes(files)
+    pin = dict(runtimes.PINNED[key], sha256=sha or hashlib.sha256(data).hexdigest())
+    monkeypatch.setitem(runtimes.PINNED, key, pin)
+    got = []
+
+    def fake_download(url, dest, timeout=120):
+        got.append(url)
+        Path(dest).write_bytes(data)
+        return Path(dest)
+    monkeypatch.setattr(runtimes.net, "download", fake_download)
+    return got
+
+
+def test_git_uv_age_pinned_without_winget():
+    for key in ("git", "uv", "age"):
+        rt = runtimes.BY_KEY[key]
+        assert rt.winget is None
+        name, url = rt.resolve()  # 네트워크 없이(API 를 부르지 않음 — 원내 한 IP 익명 한도와 무관)
+        pin = runtimes.PINNED[key]
+        assert (name, url) == (pin["name"], pin["url"]) and url.startswith("https://github.com/")
+        assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"])
+    assert runtimes.BY_KEY["git"].tree == "git" and runtimes.BY_KEY["git"].path_subdir == "cmd"
+
+
+def test_mingit_lands_in_jaix_git_cmd_and_sha_checked(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    got = _serve_pinned(monkeypatch, "git", {"cmd/git.exe": b"g", "mingw64/bin/git.exe": b"m"})
+    where = runtimes.install_portable(rt, print)
+    assert got == [runtimes.PINNED["git"]["url"]]
+    assert where == paths.jaix_home() / "git" / "cmd" and (where / "git.exe").read_bytes() == b"g"
+    # 같은 판이면 다시 받지 않는다(find 가 jaix 사본을 찾는다고 치고)
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(str(where / "git.exe"), "2.56", 2, managed=True))
+    runtimes.install_portable(rt, print)
+    assert len(got) == 1
+
+
+def test_pinned_sha_mismatch_refuses_to_install(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["uv"]
+    _serve_pinned(monkeypatch, "uv", {"uv.exe": b"evil"}, sha="0" * 64)
+    with pytest.raises(ValueError, match="sha256 불일치"):
+        runtimes.install_portable(rt, print)
+    assert not (paths.bin_dir() / "uv.exe").exists() and not runtimes._marker(rt).exists()
+
+
+def test_ensure_missing_git_never_calls_winget_and_reports_failure(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "_winget", lambda *a, **k: pytest.fail("winget 을 부름"))
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(None, None))
+    monkeypatch.setattr(runtimes, "install_portable", lambda r, log: (_ for _ in ()).throw(OSError("blocked")))
+    lines = []
+    found = runtimes.ensure(rt, lines.append)
+    assert found.path is None and any("설치 실패" in line for line in lines)  # setup 이 [실패]로 센다(#112)
+
+
+def test_ensure_keeps_existing_git(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(r"C:\Program Files\Git\cmd\git.exe", "2.50.1", 2))
+    monkeypatch.setattr(runtimes, "install_portable", lambda r, log: pytest.fail("이미 있는데 받음"))
+    assert runtimes.ensure(rt, print, upgrade=True).path.endswith("git.exe")

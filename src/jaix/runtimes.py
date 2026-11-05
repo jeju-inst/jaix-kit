@@ -1,9 +1,14 @@
 """도구가 쓰는 로컬 런타임: 찾기 · 버전 · 설치 · 갱신.
 
-Windows 설치 순서: winget 사용자 범위(--scope user) → 안 되면 포터블 zip을 jaix_home 아래에 풀고 사용자 PATH에 추가.
-둘 다 관리자 권한이 필요 없다. winget이 머신 범위 설치기만 있는 패키지(Git, Temurin MSI 등)는 --scope user가
-거절되므로 자연히 포터블로 넘어간다. 맥·리눅스는 설치하지 않고 설치 명령만 알려 준다(개발·AI센터용).
+Windows 설치 순서: 이미 쓸 만한 것(PATH · 새 창 PATH · winget 바로가기)이 있으면 그대로 쓴다. 없으면 포터블 zip 을
+jaix_home 아래에 풀고 사용자 PATH 에 추가한다. 관리자 권한이 필요 없다.
+- Git·uv·age 는 winget 을 쓰지 않고 GitHub 릴리스의 고정 판을 sha256 으로 확인해 직접 받는다(PINNED). winget 은 원내 PC
+  에서 막히거나 15분씩 멈춰 셋이 통째로 빠졌다(소모임 11/5, 직접 받는 himalaya·jar·rhwp 는 같은 PC에서 통과).
+- 나머지 winget ID 가 있는 것(Java·Node)은 winget 사용자 범위 → 안 되면 포터블. winget 이 머신 범위 설치기만 있는
+  패키지는 --scope user 가 거절되므로 자연히 포터블로 넘어간다.
+맥·리눅스는 설치하지 않고 설치 명령만 알려 준다(개발·AI센터용).
 """
+import hashlib
 import os
 import re
 import shutil
@@ -17,6 +22,25 @@ from jaix import net, paths, winenv
 from jaix.paths import IS_WIN
 
 ADOPTIUM_API = "https://api.adoptium.net/v3/assets/latest/21/hotspot?os=windows&architecture=x64&image_type=jre"
+
+
+# 직접 받는 고정 판. 올릴 때는 GitHub 릴리스 API 의 asset digest(sha256)를 그대로 옮긴다:
+#   gh api repos/<repo>/releases/latest --jq '.assets[] | select(.name=="<파일>") | .digest'
+PINNED = {
+    "uv": {"name": "uv-x86_64-pc-windows-msvc.zip",  # 0.13.7 (2026-11-03)
+           "url": "https://github.com/astral-sh/uv/releases/download/0.13.7/uv-x86_64-pc-windows-msvc.zip",
+           "sha256": "0cdc5b38fe5a8168ed6a25814f5ba43c21d313dd3187314fccb37b7cec46e021"},
+    "git": {"name": "MinGit-2.56.0.4-64-bit.zip",  # v2.56.0.windows.4 (2026-10-26)
+            "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/MinGit-2.56.0.4-64-bit.zip",
+            "sha256": "e3bf78351fe777fba47ddee5950082f8a98bb0f02604fdc7ba3ee2cb68ffa877"},
+    "age": {"name": "age-v1.3.2-windows-amd64.zip",  # v1.3.2 (2026-08-29)
+            "url": "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-windows-amd64.zip",
+            "sha256": "f48d8f8f9ebe903ab5027ed067652f2cc1db94bc206976430133b905dcd8e8c7"},
+}
+
+
+def _pinned(key):
+    return lambda: (PINNED[key]["name"], PINNED[key]["url"])
 
 
 def _github(repo, pattern):
@@ -70,11 +94,12 @@ class Runtime:
 
 
 RUNTIMES = [
-    Runtime("uv", "uv", "uv", ["--version"], True, _github("astral-sh/uv", r"^uv-x86_64-pc-windows-msvc\.zip$"),
-            winget="astral-sh.uv", hint="brew install uv", purpose="hwp-agent 등 플러그인 MCP 서버 실행(uvx)"),
-    Runtime("git", "Git", "git", ["--version"], True, _github("git-for-windows/git", r"^MinGit-[\d.]+-64-bit\.zip$"),
-            tree="git", path_subdir="cmd", winget="Git.Git", hint="xcode-select --install",
-            purpose="플러그인 내려받기"),
+    Runtime("uv", "uv", "uv", ["--version"], True, _pinned("uv"), hint="brew install uv",
+            purpose="hwp-agent 등 플러그인 MCP 서버 실행(uvx)"),
+    # MinGit 은 zip 맨 위에 cmd·mingw64 가 바로 있다 → jaix_home/git 에 통째로, PATH 엔 cmd(git.exe). Claude Code 의
+    # marketplace add 가 이 git 을 찾는다(없으면 'git not found' → Code 탭 / 에 jaix 가 안 보임, jaix-win 재현)
+    Runtime("git", "Git", "git", ["--version"], True, _pinned("git"), tree="git", path_subdir="cmd",
+            hint="xcode-select --install", purpose="플러그인 내려받기"),
     Runtime("java", "Java (Temurin JRE 21)", "java", ["-version"], True, _adoptium, tree="jre", path_subdir="bin",
             winget="EclipseAdoptium.Temurin.21.JRE", min_major=21, hint="brew install --cask temurin@21",
             purpose="hwp → hwpx 변환"),
@@ -93,8 +118,7 @@ RUNTIMES = [
     Runtime("himalaya", "himalaya", "himalaya", ["--version"], False,
             _github("pimalaya/himalaya", r"^himalaya\.x86_64-windows\.zip$"), hint="brew install himalaya",
             needed_by="mail-skill", purpose="메일 도구(mail-skill 플러그인)"),
-    Runtime("age", "age", "age", ["--version"], False, _github("FiloSottile/age", r"-windows-amd64\.zip$"),
-            winget="FiloSottile.age", hint="brew install age", needed_by="mail-skill",
+    Runtime("age", "age", "age", ["--version"], False, _pinned("age"), hint="brew install age", needed_by="mail-skill",
             purpose="메일 도구 비밀 암호화(mail-skill 플러그인)"),
 ]
 BY_KEY = {rt.key: rt for rt in RUNTIMES}
@@ -200,6 +224,14 @@ def _extract(archive, rt):
                     shutil.copyfileobj(src, out)
 
 
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def install_portable(rt, log):
     """최신 포터블을 받아 깐다. 지난번과 같은 파일이면 건너뛴다. PATH에 넣을 폴더를 돌려준다."""
     name, url = rt.resolve()
@@ -209,8 +241,13 @@ def install_portable(rt, log):
         return rt.path_dir()
     log(f"  {rt.label}: {name} 내려받는 중…")
     paths.jaix_home().mkdir(parents=True, exist_ok=True)
+    want = (PINNED.get(rt.key) or {}).get("sha256") if (PINNED.get(rt.key) or {}).get("name") == name else None
     with tempfile.TemporaryDirectory(dir=paths.jaix_home()) as tmp:
         file = net.download(url, Path(tmp) / name)
+        if want:
+            got = _sha256(file)
+            if got != want:  # 받은 것을 풀지 않는다 — 이전 사본(있으면)은 그대로
+                raise ValueError(f"{name} sha256 불일치 ({got[:12]}… ≠ {want[:12]}…)")
         if name.lower().endswith(".zip"):
             _extract(file, rt)
         else:  # 단일 exe (hwp2pdf-cli-<버전>.exe → hwp2pdf-cli.exe)
@@ -263,7 +300,8 @@ def ensure(rt, log, dry_run=False, upgrade=False):
             else f"  {rt.label}: {found.version} — {rt.min_major} 이상 필요 → {rt.hint}")
         return found
     if dry_run:
-        log(f"  {rt.label}: 설치 예정 (winget {rt.winget or '없음'} → 포터블)")
+        log(f"  {rt.label}: 설치 예정 ({f'winget {rt.winget} → ' if rt.winget else ''}"
+            f"{'고정 판 ' + PINNED[rt.key]['name'] if rt.key in PINNED else '포터블'})")
         return found
     if rt.winget and not found.managed and not rt.own_copy:
         log(f"  {rt.label}: winget({rt.winget}) 사용자 범위로 설치 시도")
