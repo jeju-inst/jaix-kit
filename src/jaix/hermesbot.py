@@ -36,10 +36,17 @@ CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
 SLACKBOT_SHA = "d3511e93d15b3150668b08eb327f8d22b49c6115"  # hermes-slackbot#18: 소유자 DM 을 홈 채널로
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
+    # open: hermes 의 openai-codex 로그인은 device code 방식이라 브라우저를 스스로 열지 않는다(주소와 코드만 찍음,
+    # hermes_cli/auth_codex.py) → jaix 가 그 주소를 연다(jaix-win 11/5). anthropic 은 hermes 가 직접 연다
     "chatgpt": {"provider": "openai-codex", "default": "gpt-6.1-sol",
-                "base_url": "https://chatgpt.com/backend-api/codex", "login": ["auth", "add", "openai-codex"]},
+                "base_url": "https://chatgpt.com/backend-api/codex", "login": ["auth", "add", "openai-codex"],
+                "open": "https://auth.openai.com/codex/device",
+                "how": ["잠시 뒤 브라우저에 OpenAI 로그인 페이지가 열립니다. ChatGPT 계정으로 로그인한 뒤,",
+                        "이 창에 나오는 코드(예: ABCD-12345)를 그 페이지에 넣으세요."]},
     "claude": {"provider": "anthropic", "default": "claude-sonnet-5-5",
-               "login": ["auth", "add", "anthropic", "--type", "oauth"]},
+               "login": ["auth", "add", "anthropic", "--type", "oauth"],
+               "how": ["브라우저에 Claude 승인 페이지가 열립니다(안 열리면 이 창에 나온 주소를 복사해 브라우저에 붙여 넣으세요).",
+                       "승인하면 나오는 코드를 복사해 이 창에 붙여 넣고 Enter 를 누르세요."]},
 }
 OFF_TOOLSETS = ["browser", "computer_use"]
 # 비개발자에게 소음·혼선이면 설치 때 막는다(jaix-kit-dev 10-30, jaix-win 2차 실측 관찰)
@@ -414,10 +421,45 @@ def _login_record(model, code):
         pass
 
 
-def cmd_login(args, log, run=None, wait=None):
-    """AI 구독 로그인 창: 설치기 마지막 화면이 이것을 연다(설치기가 cmd.exe 를 직접 띄우지 않게, #86).
-    hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다. 성공·실패·취소 모두
-    결과를 보이고 Enter 를 기다린다(Windows)."""
+OPEN_DELAY = 3  # 기기 코드가 창에 찍힌 뒤에 브라우저가 앞으로 오게
+CLOSE_AFTER = {0: 5}  # --no-wait(설치기 페이지): 결과를 읽을 틈. 성공 5초, 그 밖 15초
+CLOSE_AFTER_OTHER = 15
+
+
+def _open_url(url):
+    try:
+        if IS_WIN:
+            os.startfile(url)  # 기본 브라우저
+            return True
+        import webbrowser
+        return bool(webbrowser.open(url))
+    except OSError:
+        return False
+
+
+def _pause(seconds, log):
+    """Enter 를 누르거나 seconds 가 지나면 돌아온다(Windows 콘솔). 설치기 페이지가 결과를 다시 보여 주지만, 승인 직후
+    창이 바로 닫혀 무슨 일이 있었는지 못 봤다(jaix-win 11/5)."""
+    log(f"이 창은 {seconds}초 뒤 저절로 닫힙니다(Enter 를 누르면 바로).")
+    try:
+        import msvcrt
+    except ImportError:
+        return
+    import time
+    end = time.monotonic() + seconds
+    try:
+        while time.monotonic() < end:
+            if msvcrt.kbhit() and msvcrt.getwch() in ("\r", "\n"):
+                return
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+
+
+def cmd_login(args, log, run=None, wait=None, opener=None, pause=None):
+    """AI 구독 로그인 창: 설치기 'AI 구독 로그인' 페이지·시작 메뉴가 이것을 연다(설치기가 cmd.exe 를 직접 띄우지
+    않게, #86). hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다. 성공·실패·취소
+    모두 결과를 보이고, Enter 를 기다리거나(Windows) --no-wait 면 몇 초 보인 뒤 닫는다."""
     show_console()  # 숨은 창이면 안내·기기 코드·Enter 대기를 아무도 못 본다 — 무엇보다 먼저
     again = f"jaix hermes login --model {args.model}"
     hermes = find_hermes()
@@ -425,22 +467,42 @@ def cmd_login(args, log, run=None, wait=None):
         log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
         code = 1
     else:
-        log(f"Hermes AI 로그인 ({args.model}) — 브라우저가 열리면 승인하세요.")
+        prov = PROVIDERS[args.model]
+        log(f"Hermes AI 로그인 ({args.model})")
+        for line in prov.get("how", []):
+            log(f"  {line}")
         log("승인을 기다리는 동안에는 키를 눌러도 반응이 없습니다. 그만두려면 Ctrl+C.")
+        log("")
+        timer = None
+        if prov.get("open"):
+            import threading
+
+            def _open(url=prov["open"]):
+                if not (opener or _open_url)(url):
+                    log(f"\n브라우저를 열지 못했습니다. 브라우저 주소창에 {url} 을 붙여 넣고, 이 창의 코드를 넣으세요.")
+            timer = threading.Timer(OPEN_DELAY, _open)
+            timer.daemon = True
+            timer.start()
         try:
-            code = (run or _call_login)([hermes, *PROVIDERS[args.model]["login"]])
+            code = (run or _call_login)([hermes, *prov["login"]])
         except OSError as e:
             log(f"로그인을 시작하지 못함: {e}")
             code = 1
+        finally:
+            if timer:
+                timer.cancel()  # 곧바로 끝났으면(오류) 브라우저를 열지 않는다
+        log("")
         if code == 0:
-            log("로그인했습니다.")
+            log("로그인 완료.")
         elif code == CANCELLED:
             log(f"로그인을 취소했습니다. 나중에 새 명령창에서 `{again}` 로 다시 하세요.")
         else:
             log(f"로그인이 끝나지 않았습니다(코드 {code}). 새 명령창에서 `{again}` 로 다시 하세요.")
         _login_record(args.model, code)
-    if IS_WIN and not getattr(args, "no_wait", False):
-        try:  # 설치기가 띄운 창은 끝나면 바로 닫힌다 — 결과를 읽을 틈을 준다
+    if IS_WIN and getattr(args, "no_wait", False):  # 설치기 페이지: 결과를 잠깐 보이고 닫혀 페이지로 돌아간다
+        (pause or _pause)(CLOSE_AFTER.get(code, CLOSE_AFTER_OTHER), log)
+    elif IS_WIN:
+        try:  # 시작 메뉴로 연 창은 끝나면 바로 닫힌다 — 결과를 읽을 틈을 준다
             (wait or input)("창을 닫으려면 Enter 를 누르세요.")
         except (EOFError, KeyboardInterrupt):
             pass
