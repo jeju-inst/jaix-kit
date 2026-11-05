@@ -141,6 +141,25 @@
         }
       },
       "version": "2026.11.04.1"
+    },
+    {
+      "name": "hwp2pdf",
+      "displayName": "HWP → PDF 변환 (hwp2pdf)",
+      "description": "한컴오피스로 HWP/HWPX 파일·폴더를 PDF·DOCX·HWPX로 일괄 변환한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/z0nam/hwp2pdf.git",
+        "ref": "v2026.11.05.1",
+        "sha": "a883922472eebe0891faa70fab2dc1945bf03ddc"
+      },
+      "homepage": "https://github.com/z0nam/hwp2pdf",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.11.05.1"
     }
   ]
 }
