@@ -2473,6 +2473,11 @@ def test_quiet_sets_slack_home_to_owner_dm_when_missing(isolated, monkeypatch):
     assert hermesbot.quiet("hermes", print)
     assert ["hermes", "config", "set", "SLACK_HOME_CHANNEL", "D999"] in calls
     assert seen == [("conversations.open", {"users": "U123"})]
+    # .env 가 다시 만들어져 홈 채널이 빠지면(config.yaml 은 그대로) 다시 넣는다(Codex #111)
+    calls.clear()
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_APP_TOKEN=xapp-x\nSLACK_ALLOWED_USERS=U123\n")
+    assert hermesbot.quiet("hermes", print)
+    assert ["hermes", "config", "set", "SLACK_HOME_CHANNEL", "D999"] in calls
 
 
 def test_slack_home_falls_back_to_user_id_and_respects_existing(isolated, monkeypatch):

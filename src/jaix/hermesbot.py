@@ -711,6 +711,8 @@ def quiet(hermes, log):
     if env_has("SLACK_ALLOWED_USERS") and not env_has("SLACK_HOME_CHANNEL"):
         home = home_channel()
         if home:
+            # 지금 .env 에 없다는 것을 방금 확인했다 — 지난번에 넣은 값 기록(config.yaml 지문만 봄)으로 건너뛰지 않는다(Codex #111)
+            put.applied.pop("SLACK_HOME_CHANNEL", None)
             ok &= put("SLACK_HOME_CHANNEL", home, ["config", "set", "SLACK_HOME_CHANNEL", home])
             log("    슬랙 홈 채널: 본인과의 DM 으로 정함(첫 답의 'No home channel' 안내 없앰)")
     put.save()
