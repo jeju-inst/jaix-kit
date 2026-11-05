@@ -243,7 +243,8 @@ def check_works(lock):
 
 
 def check_plugin_bin(lock):
-    """플러그인 bin/ 명령(예: mailskill)이 PATH 에 잡히는가. Claude Code 말고는 jaix 가 올린 것만 보인다(TS-RUNTIME-4)."""
+    """플러그인 cli/(예전 bin/) 명령(예: mailskill)이 PATH 에 잡히는가. jaix 가 올린 것만 보인다(TS-RUNTIME-4) —
+    Claude Code 가 PATH 에 붙여 주던 것은 bin/ 뿐이라 cli/ 로 옮긴 뒤로는 맥·리눅스도 jaix 링크에 기댄다."""
     rec = plugbin.recorded()
     out = []
     for p in lock.plugins:
