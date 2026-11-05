@@ -157,6 +157,15 @@ end;
 
 // 다시 설치할 때 지난 선택을 체크 기본값으로(jaix setup 이 남긴 setup-choice.json). 그 기록이 없으면(예전 판)
 // jaix 가 Hermes 를 설정한 기록(hermes.json)이 있을 때만 Hermes 를 체크한다. 둘 다 없거나 깨졌으면 처음 설치와 같다
+// 지난번 Hermes 모델을 고른 상태로. 처음 설치는 둘 다 비워 둔다(미리 찍혀 있으면 "그걸 골라야 하는 것"처럼 보임)
+procedure SetModelChoice(Claude: Boolean);
+begin
+  if Claude then
+    ModelPage.Values[1] := True
+  else
+    ModelPage.Values[0] := True;
+end;
+
 procedure ApplyPreviousChoice();
 var
   Rec, Channels: string;
@@ -177,8 +186,8 @@ begin
         ChannelPage.Values[0] := Pos('"claude"', Channels) > 0;
         ChannelPage.Values[1] := Pos('"codex"', Channels) > 0;
         ChannelPage.Values[2] := Pos('"hermes"', Channels) > 0;
-        if RecordSays(Rec, 'hermes_model', 'claude', 16) then
-          ModelPage.Values[1] := True;
+        if ChannelPage.Values[2] then
+          SetModelChoice(RecordSays(Rec, 'hermes_model', 'claude', 16));
         exit;
       end;
     end;
@@ -187,8 +196,7 @@ begin
   if Pos('"status"', Rec) > 0 then
   begin
     ChannelPage.Values[2] := True;
-    if RecordSays(Rec, 'model', 'claude', 16) then
-      ModelPage.Values[1] := True;
+    SetModelChoice(RecordSays(Rec, 'model', 'claude', 16));
   end;
 end;
 
@@ -291,7 +299,7 @@ begin
     True, False);
   ModelPage.Add('ChatGPT 구독(Plus 이상)');
   ModelPage.Add('Claude 구독');
-  ModelPage.Values[0] := True;
+  // 기본 선택 없음 — 무인 설치·고르지 않은 경우의 chatgpt 는 HermesModel() 안의 내부 기본값일 뿐이다
   ApplyPreviousChoice();
 
   ProgressPage := CreateOutputProgressPage('도구 설치 중', '런타임을 내려받고 AI에 도구를 등록합니다. 몇 분 걸릴 수 있습니다.');
@@ -360,6 +368,13 @@ var
   Code: string;
 begin
   Result := True;
+  // 모델 화면은 Hermes 를 체크했을 때만 나온다(ShouldSkipPage). 무인 설치는 /HERMESMODEL 또는 내부 기본값
+  if (CurPageID = ModelPage.ID) and not WizardSilent() and not ModelPage.Values[0] and not ModelPage.Values[1] then
+  begin
+    MsgBox('Hermes가 쓸 AI 구독을 골라 주세요.', mbError, MB_OK);
+    Result := False;
+    exit;
+  end;
   if CurPageID = HermesPage.ID then
   begin
     Code := Uppercase(Trim(HermesPage.Values[0]));

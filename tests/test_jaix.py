@@ -2611,7 +2611,14 @@ def test_installer_reads_previous_choice_written_by_setup(isolated):
     code = iss.split("[Code]", 1)[1].replace("\r", "")
     wizard = code.split("procedure InitializeWizard", 1)[1].split("\nend;", 1)[0]
     # 페이지·기본값을 다 만든 뒤에 지난 선택으로 덮는다
-    assert wizard.index("ApplyPreviousChoice();") > wizard.index("ModelPage.Values[0] := True;")
+    apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
+    assert wizard.index("ApplyPreviousChoice();") > wizard.index("ModelPage.Add('Claude 구독');")
+    # 처음 설치는 Hermes 모델을 미리 고르지 않는다(사용자 결정 11/5) — 고르지 않고 [다음]이면 묻는다
+    assert "ModelPage.Values[" not in wizard
+    nxt = code.split("function NextButtonClick", 1)[1].split("\nend;", 1)[0]
+    assert "CurPageID = ModelPage.ID" in nxt and "not WizardSilent()" in nxt and "골라 주세요" in nxt
+    # 지난 선택은 Hermes 를 골랐을 때만 모델까지 채운다(chatgpt 도 채움)
+    assert "if ChannelPage.Values[2] then\n          SetModelChoice(" in apply
     apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
     assert "'setup-choice.json'" in apply and "'hermes.json'" in apply
     assert "RecordSays(Rec, 'hermes_model', 'claude', 16)" in apply and "RecordSays(Rec, 'model', 'claude', 16)" in apply
