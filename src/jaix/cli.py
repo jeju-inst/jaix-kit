@@ -68,6 +68,13 @@ class Log:
 def guide(channels, result):
     """채널별 "이렇게 쓰세요". 고른 채널만 보여 준다(ji-deploy-standards 3.1)."""
     out = []
+    missing = result.get("runtimes_missing") or []
+    if missing:
+        out += [f"※ [실패] 꼭 필요한 도구를 깔지 못했습니다: {', '.join(missing)}",
+                "  이대로는 일부 jaix 도구가 동작하지 않습니다"
+                + (" — Git 이 없으면 Claude 앱 Code 탭에 jaix 도구가 나타나지 않습니다." if "Git" in missing else "."),
+                "  잠시 뒤(다른 네트워크에서) jaix-setup 을 다시 실행하세요. 그래도 안 되면 새 명령창에서 `jaix doctor` 결과와",
+                f"  기록 파일 {paths.data_dir() / 'setup.log'} 을 AI센터에 보내 주세요.", ""]
     if "claude" in channels:
         quit_app = ("알림 영역(화면 오른쪽 아래 ^)에서 Claude 아이콘을 오른쪽 클릭 → Exit. "
                     "창의 X나 작업 표시줄에서 닫는 것만으로는 앱이 꺼지지 않습니다" if paths.IS_WIN
@@ -200,10 +207,17 @@ def cmd_setup(args, log):
         for old in steps.run("PATH 정리", winenv.drop_old_exe_dir) or []:
             log(f"  PATH에서 뺌(예전 설치 위치): {old}")
     log("\n[1/3] 런타임")
+    missing = []
     for rt in _runtimes(args.runtimes, lock):
-        steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
+        found = steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
+        if paths.IS_WIN and not args.dry_run and found is not None and not runtimes.ok(rt, found):
+            missing.append(rt.label)
     # Claude 앱(MSIX) 안에서 uvx가 Python을 처음 받으면 가상화로 깨진다(jaix-kit#14) → 앱 밖인 지금 깐다
     result = {}
+    if missing:  # 내려받기가 막혀도 다음 단계는 하지만, 조용히 넘어가지 않는다(소모임 11/5: uv·Git·age 가 다 빠졌는데 설치는 성공)
+        result["runtimes_missing"] = missing
+        steps.failed.append("런타임(" + ", ".join(missing) + ")")
+        steps.code = max(steps.code, 1)
     # ensure 들은 실패를 예외가 아니라 False 로 알린다 — 지난 실패 기록을 덮을지 판단에 쓴다
     result["uvpython"] = steps.run("uv 관리 Python", lambda: uvpython.ensure(uvpython.needed(lock, args.offline), log,
                                                                           dry_run=args.dry_run))
@@ -239,6 +253,8 @@ def cmd_setup(args, log):
         res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run, update=True)
         if res is not None:
             result["claude"] = res
+            if not args.dry_run:  # doctor 가 이보다 먼저 켜진 Claude 앱을 "완전 종료 후 다시 열기"로 알린다
+                steps.run("Claude 설정 시각", claude.mark_setup)
     else:
         log("  선택 안 함")
     log("\n[3/3] Codex · Hermes")
@@ -292,7 +308,8 @@ def _setup_problems(result):
                 or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed"
                 or (result.get("works") or {}).get("status") == "failed"
-                or (result.get("plugbin") or {}).get("status") == "failed")
+                or (result.get("plugbin") or {}).get("status") == "failed"
+                or bool(result.get("runtimes_missing")))
 
 
 def cmd_doctor(args, log):

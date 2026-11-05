@@ -25,6 +25,9 @@ class Check:
     fix: str = ""
 
 
+FIX_STALE = ("명령창은 새로 열어 다시 실행 · Claude 앱은 알림 영역(^)의 Claude 아이콘 오른쪽 클릭 → Exit 뒤 다시 열기")
+
+
 def check_runtimes(lock=None):
     out = []
     for rt in runtimes.RUNTIMES:
@@ -36,6 +39,9 @@ def check_runtimes(lock=None):
         if runtimes.ok(rt, found) and runtimes.outdated(rt, found):
             out.append(Check("warn", rt.label, f"{found.version} — 업데이트 필요: {rt.min_version} 이상({rt.min_reason})",
                              "jaix update (직접 설치했으면 새 설치기로)"))
+        elif runtimes.ok(rt, found) and found.stale:
+            out.append(Check("warn", rt.label, f"{found.version or '있음'} ({found.path}) — 새 창에서는 보이지만 "
+                                                "이 창(설치 전에 연 창·앱)에는 없음", FIX_STALE))
         elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
         elif not runtimes.required(rt, lock):
@@ -339,6 +345,9 @@ def check_load():
 
 def check_claude(lock):
     out = []
+    if claude.desktop_started_before_setup():
+        out.append(Check("warn", "Claude 앱", "jaix setup 전에 켜진 채로 떠 있음 — 새 도구·Git 위치를 몰라 Code 탭 `/`에 "
+                                             "jaix 도구가 안 보일 수 있음", FIX_STALE))
     managed = claude.managed_declaration()
     if managed:
         out.append(Check("ok", "Claude 등록", f"관리자 배포가 jaix 마켓플레이스를 내려줌 ({managed})"))

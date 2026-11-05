@@ -56,24 +56,8 @@ def _remember(name, **fields):
 
 
 # --- 새 창에서 잡히나 --------------------------------------------------------------------------------
-def _system_path_entries():
-    if not IS_WIN:
-        return []
-    import winreg
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
-            value, _ = winreg.QueryValueEx(key, "Path")
-    except OSError:
-        return []
-    return [p for p in value.split(";") if p]
-
-
 def fresh_path():
-    """새로 연 명령창이 보게 될 PATH(시스템 + 사용자, 레지스트리 기준). Windows 가 아니면 지금 PATH."""
-    if not IS_WIN:
-        return os.environ.get("PATH", "")
-    return os.pathsep.join(os.path.expandvars(p) for p in [*_system_path_entries(), *winenv.user_path_entries()])
+    return winenv.fresh_path()
 
 
 def on_fresh_path(name):

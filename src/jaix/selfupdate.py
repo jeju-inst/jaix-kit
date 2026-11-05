@@ -236,8 +236,9 @@ def save_choice(channels, model):
 JAIX_EXES = ("jaix.exe", "jaixw.exe")
 
 
-def _win_processes():
-    """[(pid, 실행파일 전체 경로)] — Toolhelp 스냅숏 + QueryFullProcessImageNameW(권한 없는 것은 건너뜀)."""
+def _win_processes(names=JAIX_EXES, with_start=False):
+    """[(pid, 실행파일 전체 경로)] — Toolhelp 스냅숏 + QueryFullProcessImageNameW(권한 없는 것은 건너뜀).
+    with_start 면 [(pid, 경로, 시작 시각 epoch 초)] (GetProcessTimes)."""
     from ctypes import wintypes
     k = ctypes.WinDLL("kernel32", use_last_error=True)
     k.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
@@ -257,12 +258,18 @@ def _win_processes():
         pe.dwSize = ctypes.sizeof(PE)
         ok = k.Process32FirstW(snap, ctypes.byref(pe))
         while ok:
-            if pe.szExeFile.lower() in JAIX_EXES:
+            if pe.szExeFile.lower() in names:
                 h = k.OpenProcess(0x1000, False, pe.th32ProcessID)  # PROCESS_QUERY_LIMITED_INFORMATION
                 if h:
                     buf, size = ctypes.create_unicode_buffer(1024), wintypes.DWORD(1024)
                     if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
-                        out.append((pe.th32ProcessID, buf.value))
+                        if not with_start:
+                            out.append((pe.th32ProcessID, buf.value))
+                        else:
+                            ft = [wintypes.FILETIME() for _ in range(4)]
+                            if k.GetProcessTimes(h, *(ctypes.byref(f) for f in ft)):
+                                ticks = (ft[0].dwHighDateTime << 32) | ft[0].dwLowDateTime
+                                out.append((pe.th32ProcessID, buf.value, (ticks - 116444736000000000) / 1e7))
                     k.CloseHandle(h)
             ok = k.Process32NextW(snap, ctypes.byref(pe))
     finally:

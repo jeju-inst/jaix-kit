@@ -47,6 +47,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("JAIX_LINK_DIR", str(tmp_path / "linkbin"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # 한컴 옵션 파일도 tmp 로
     monkeypatch.setattr(paths, "desktop_installed", lambda: False)
+    # 새 창의 PATH(레지스트리)는 이 시험의 PATH 로 — Windows 러너의 진짜 uv·git 을 잡지 않게
+    monkeypatch.setattr(winenv, "fresh_path", lambda: os.environ.get("PATH", ""))
     # 명령창 claude·codex 를 진짜로 받지 않는다(clis 시험은 test_clis.py)
     REAL_CLIS["ensure"] = REAL_CLIS.get("ensure", clis.ensure)
     monkeypatch.setattr(clis, "ensure", lambda name, log, dry_run=False, installer=None: {"status": "present", "path": name})
@@ -2513,3 +2515,55 @@ def test_prune_points_at_hermes_english_warning(isolated, monkeypatch):
     hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=True), seen.append,
                         auth=auth, copy=lambda c: True, wait=lambda q: None)
     assert any("위 영문 경고" in m and "신경 쓰지 마세요" in m and "2개" in m for m in seen)
+
+
+# --- 설치 전에 연 창·앱(옛 PATH) · 런타임 조용한 실패 (소모임 11/5) -------------------------------------------
+def test_find_sees_fresh_path_and_marks_stale(isolated, monkeypatch):
+    """winget 이 사용자 PATH 에만 넣은 것(Git Programs 폴더 등): 이 프로세스 PATH 엔 없어도 찾고, stale 로 표시."""
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    winget_dir = isolated / "Programs" / "hwp2pdf"
+    _fake_cli(winget_dir, "2026.11.5.1")
+    monkeypatch.setenv("PATH", str(isolated / "empty"))  # 설치 전에 연 창의 옛 PATH
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setenv("LOCALAPPDATA", str(isolated / "la"))
+    monkeypatch.setattr(winenv, "fresh_path", lambda: str(winget_dir))
+    found = runtimes.find(rt)
+    assert found.path and found.version == "2026.11.5.1" and found.stale
+    # 이 창 PATH 에도 있으면 stale 아님
+    monkeypatch.setenv("PATH", str(winget_dir))
+    assert not runtimes.find(rt).stale
+
+
+def test_doctor_warns_stale_runtime_instead_of_missing(isolated, monkeypatch, the_lock):
+    rt = runtimes.BY_KEY["uv"]
+    real = runtimes.find
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("C:/x/uv.exe", "0.9.1", 0, stale=True)
+                        if r is rt else real(r))
+    check = next(c for c in doctor.check_runtimes(the_lock) if c.area == rt.label)
+    assert check.status == "warn" and "새 창에서는 보이지만" in check.message
+    assert "Exit" in check.fix and "새로 열어" in check.fix
+
+
+def test_setup_counts_missing_required_runtime_as_failure(isolated, monkeypatch):
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "ensure", lambda rt, log, dry_run=False, upgrade=False:
+                        runtimes.Found(None, None) if rt.key == "git" else runtimes.Found("x", "1.0", 99))
+    guide = isolated / "guide.txt"
+    code = cli.main(["setup", "--channels", "claude", "--no-autoupdate", "--guide-out", str(guide),
+                     "--log", str(isolated / "s.log")])
+    assert code != 0
+    text = guide.read_text(encoding="utf-8-sig")
+    assert text.startswith("※ [실패]") and "Git" in text and "Code 탭" in text and "setup.log" in text
+    assert cli._setup_problems({"runtimes_missing": ["Git"]})
+
+
+def test_desktop_started_before_setup(isolated, monkeypatch):
+    msix = r"C:\Program Files\WindowsApps\Claude_1.0.0.0_x64__abc\app\claude.exe"
+    cli_exe = r"C:\Users\u\.local\bin\claude.exe"
+    assert not claude.desktop_started_before_setup([(1, msix, 100.0)])  # setup 기록 없음 → 모름
+    claude.mark_setup()
+    at = claude.setup_stamp().stat().st_mtime
+    assert claude.desktop_started_before_setup([(1, msix, at - 60), (2, msix, at + 5)])
+    assert not claude.desktop_started_before_setup([(1, msix, at + 60)])  # setup 뒤에 다시 켬
+    assert not claude.desktop_started_before_setup([(1, cli_exe, at - 60)])  # Claude Code CLI 는 앱이 아님
+    assert claude._is_desktop(r"C:\Users\u\AppData\Local\AnthropicClaude\app-0.9\claude.exe")

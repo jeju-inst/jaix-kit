@@ -25,6 +25,43 @@ from jaix.paths import IS_WIN
 MARKET_ENTRY = {"source": {"source": "git", "url": GIT_URL}, "autoUpdate": True}
 
 
+def setup_stamp():
+    """jaix setup 이 Claude 설정·플러그인을 마지막으로 맞춘 때(파일 수정 시각). 앱이 이보다 먼저 켜졌으면
+    새 플러그인·PATH(Git 등)를 모른다 — Code 탭 `/` 에 jaix 도구가 안 보인다(소모임 11/5)."""
+    return paths.data_dir() / "claude-setup-at.txt"
+
+
+def mark_setup():
+    f = setup_stamp()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + "\n", encoding="utf-8")
+
+
+def _is_desktop(exe):
+    """Claude 데스크톱 앱 본체인가(MSIX: WindowsApps\\Claude_…, 예전 설치기: AnthropicClaude). 같은 이름 claude.exe 인
+    Claude Code CLI(~\\.local\\bin, Claude-Data\\…\\claude-code)는 아니다."""
+    low = str(exe).lower().replace("/", "\\")
+    return "\\windowsapps\\claude_" in low or "\\anthropicclaude\\" in low
+
+
+def desktop_started_before_setup(processes=None):
+    """setup 이 Claude 설정을 맞춘 뒤로 다시 켜지지 않은 Claude 앱이 떠 있는가. 모르면 False."""
+    if not IS_WIN and processes is None:
+        return False
+    try:
+        at = setup_stamp().stat().st_mtime
+    except OSError:
+        return False
+    try:
+        if processes is None:
+            from jaix import selfupdate
+            processes = selfupdate._win_processes(("claude.exe",), with_start=True)
+        starts = [start for _, exe, start in processes if _is_desktop(exe)]
+    except (OSError, AttributeError, ValueError):
+        return False
+    return bool(starts) and min(starts) < at
+
+
 def settings_path():
     return paths.claude_dir() / "settings.json"
 

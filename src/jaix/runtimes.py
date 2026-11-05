@@ -108,6 +108,7 @@ class Found:
     raw: str = ""
     managed: bool = False           # jaix가 포터블로 깐 것(갱신 대상)
     notes: list = field(default_factory=list)
+    stale: bool = False             # 이 프로세스의 PATH 엔 없고 새 창(레지스트리 PATH)·winget 바로가기에서만 보임
 
 
 def _probe(rt, path, managed=False):
@@ -141,13 +142,19 @@ def copies(rt):
 
 
 def find(rt):
-    """jaix가 깐 위치 → PATH → winget 바로가기 폴더 순. 마지막은 winget이 방금 깔아 이 프로세스의
-    PATH엔 아직 없는 경우다(새 창부터 보인다)."""
+    """jaix가 깐 위치 → PATH → winget 바로가기 폴더 → 새 창의 PATH(레지스트리) 순. 뒤의 둘은 winget 이 깔아
+    사용자 PATH 에는 넣었지만 이 프로세스(설치 전부터 열린 명령창·Claude 앱)의 PATH 에는 아직 없는 경우다.
+    winget 사용자 범위 Git(Programs 폴더)과 개발자 모드가 꺼진 PC의 uv·age 는 바로가기 폴더에 없어 마지막에만
+    잡힌다 — 이것을 못 보면 doctor 가 깔린 것을 "없음"으로 보였다(소모임 11/5)."""
     own = shutil.which(rt.exe, path=str(rt.path_dir()))
-    path = own or shutil.which(rt.exe) or (IS_WIN and shutil.which(rt.exe, path=str(paths.winget_links())))
+    here = None if own else shutil.which(rt.exe)
+    path = own or here or (IS_WIN and (shutil.which(rt.exe, path=str(paths.winget_links()))
+                                      or shutil.which(rt.exe, path=winenv.fresh_path())))
     if not path:
         return Found(None, None)
-    return _probe(rt, path, managed=bool(own))
+    found = _probe(rt, path, managed=bool(own))
+    found.stale = bool(IS_WIN and not own and not here)
+    return found
 
 
 def _vtuple(v):
