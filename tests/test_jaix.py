@@ -2410,6 +2410,17 @@ def test_device_code_copied_to_clipboard(isolated, monkeypatch):
     hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=True), seen.append,
                         auth=FakeAuth(""), copy=lambda code: copied.append(code) or True, pause=lambda s, log: None)
     assert copied == ["0AR3-3DCKV"] and any("Ctrl+V" in m for m in seen)
+    # 코드 둘째 마디가 4자 넘게 온 뒤 끊겨도 끝(줄바꿈)을 기다린다(Codex #109)
+    copied.clear()
+
+    def tee2(cmd, on_text):
+        for part in ["  2. Enter this code:\n     0AR3-3DCK", "V\n"]:
+            on_text(part)
+        return 0
+    monkeypatch.setattr(hermesbot, "_call_login_tee", tee2)
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=True), seen.append,
+                        auth=FakeAuth(""), copy=lambda code: copied.append(code) or True, pause=lambda s, log: None)
+    assert copied == ["0AR3-3DCKV"]
 
 
 def test_claude_login_keeps_console_tty(isolated, monkeypatch):

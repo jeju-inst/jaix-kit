@@ -416,7 +416,8 @@ def _strip_ansi(text):
 
 
 # hermes_cli/auth_codex.py 의 기기 코드 안내: "2. Enter this code:\n     <코드>"
-DEVICE_CODE = re.compile(r"Enter this code:\s*([A-Z0-9]{4,}-[A-Z0-9]{4,})")
+# 코드 뒤에 공백·줄바꿈이 와야 받는다 — 파이프가 코드 중간에서 끊겨 오면 앞부분만 복사하게 된다(Codex #109)
+DEVICE_CODE = re.compile(r"Enter this code:\s*([A-Z0-9]{4,}-[A-Z0-9]{4,})(?=\s)")
 
 
 def _call_login_tee(cmd, on_text):
