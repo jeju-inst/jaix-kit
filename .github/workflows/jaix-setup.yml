@@ -217,6 +217,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $home2 | Out-Null
           $env:USERPROFILE = $home2; $env:HOME = $home2
           $env:JAIX_DATA = Join-Path $env:RUNNER_TEMP 'cleandata'
+          $env:PYTHONIOENCODING = 'utf-8'   # 러너 기본 cp1252 로는 한글 기록을 못 찍는다
           @'
           import sys
           from jaix import clis
