@@ -71,7 +71,7 @@ PC에 따라 이 창이 뜨지 않을 수 있습니다. 뜨면 [추가 정보] �
 - **Code 탭·명령창 Claude Code**: 설치기(1-4절)가 도구를 넣어 주므로 그대로 쓴다. 개인 계정이어도 같다.
 - **Cowork(채팅)에서 도구 쓰기**: 마켓을 직접 추가한다.
   1. 왼쪽 **Customize → Plugins** 탭으로 간다.
-  2. **Add → Add marketplace**를 누르고 `jeju-inst/jaix-kit` 를 넣는다.
+  2. **Add → Add marketplace**를 누르면 고르는 창이 뜬다. **Add from a repository**를 고르고 `jeju-inst/jaix-kit` 를 넣은 뒤 **Sync**를 누른다.
   3. GitHub 앱 접근을 물으면 허용한다.
   4. 목록에 나온 jaix 플러그인을 하나씩 **Add** 한다(업무일지 · HWP · 보고서 작성 · HWP→PDF 등. 목록은 계속 늘어난다). **메일 도구는 Cowork에서 쓸 수 없다** — Code 탭에서 쓴다.
   5. 입력창에 `/` 를 쳐서 jaix 스킬이 보이면 된다.

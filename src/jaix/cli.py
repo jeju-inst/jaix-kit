@@ -91,8 +91,9 @@ def guide(channels, result):
         if (result.get("claude") or {}).get("managed"):
             out.append("  4. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려옵니다.")
         else:  # 관리자 배포가 없는 PC(개인 구독 계정 — 11/10 전 베타 대부분, jaix-win .16 실측)
-            out += ["  4. Cowork(채팅)에서도 쓰려면 직접 추가하세요: 왼쪽 Customize → Plugins → Add marketplace 에",
-                    "     jeju-inst/jaix-kit 를 넣고, GitHub 앱 접근을 허용한 뒤 jaix 플러그인을 하나씩 Add 하세요.",
+            out += ["  4. Cowork(채팅)에서도 쓰려면 직접 추가하세요: 왼쪽 Customize → Plugins → Add → Add marketplace",
+                    "     → Add from a repository → jeju-inst/jaix-kit → Sync. GitHub 앱 접근을 허용한 뒤",
+                    "     jaix 플러그인을 하나씩 Add 하세요.",
                     "     (메일 도구는 Cowork 에서 쓸 수 없습니다 — Code 탭에서 쓰세요)"]
         if result.get("claude") and not result["claude"].get("cli") and not result["claude"].get("managed"):
             out += ["  ※ 아직 Claude Code를 찾지 못해 도구를 직접 깔지 못했습니다. Claude 앱에서 Code 탭을 열었다 닫고",
