@@ -4,6 +4,7 @@ Windows 설치 순서: winget 사용자 범위(--scope user) → 안 되면 포�
 둘 다 관리자 권한이 필요 없다. winget이 머신 범위 설치기만 있는 패키지(Git, Temurin MSI 등)는 --scope user가
 거절되므로 자연히 포터블로 넘어간다. 맥·리눅스는 설치하지 않고 설치 명령만 알려 준다(개발·AI센터용).
 """
+import os
 import re
 import shutil
 import subprocess
@@ -53,6 +54,10 @@ class Runtime:
     needed_by: str = ""             # 이 플러그인이 잠금에 있으면 필수(없으면 선택). 잠금이 곧 켜진 플러그인 목록이다
     hint: str = ""                  # 맥·리눅스 설치 안내
     purpose: str = ""
+    # 다른 곳(예: 관리자 설치 C:\\Program Files, 시스템 PATH 가 사용자 PATH 보다 앞)에 있어도 jaix 사본을 따로 두고
+    # 갱신한다. 그 사본 경로를 env_var(사용자 환경변수)에 적어 도구가 PATH 순서와 상관없이 그것을 쓰게 한다
+    own_copy: bool = False
+    env_var: str = ""
 
     @property
     def applies(self):
@@ -78,6 +83,9 @@ RUNTIMES = [
             # hwp-agent가 HWP2PDF_LOCAL=1(저장된 서버 무시, 이 PC 한컴으로 변환)을 넘긴다. 이 첫 지원판보다
             # 낮으면 그 값을 몰라 서버 설정이 있는 PC에서 로컬 렌더가 원격으로 샌다(z0nam/hwp2pdf#5)
             min_version="2026.10.30.1", min_reason="HWP2PDF_LOCAL 지원",
+            # 관리자가 깐 hwp2pdf 앱(HKLM PATH)이 있으면 그것이 먼저 잡혀 jaix 사본이 가려지고 낡은 판에 묶였다
+            # (namun-ji 실측 2026-11-05). hwp-agent 는 $HWP2PDF_CLI → PATH 순으로 찾는다(docs/handoff "hwp2pdf 위치")
+            own_copy=True, env_var="HWP2PDF_CLI",
             purpose="한컴오피스로 HWP 렌더(PDF)"),
     # 웍스 도구(nworks, npm 패키지)만 쓴다. 잠금에 jaix-works 가 있으면 works.ensure 가 부른다
     Runtime("node", "Node.js (LTS)", "node", ["--version"], False, _nodejs, tree="node",
@@ -102,6 +110,36 @@ class Found:
     notes: list = field(default_factory=list)
 
 
+def _probe(rt, path, managed=False):
+    try:
+        out = subprocess.run([path, *rt.version_args], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=30,
+                             encoding="utf-8", errors="replace")
+        raw = (out.stdout + out.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return Found(path, None, raw=str(e), managed=managed)
+    m = re.search(r"(\d+)(?:\.\d+)+", raw)
+    return Found(path, m.group(0) if m else None, int(m.group(1)) if m else None,
+                 raw.splitlines()[0] if raw else "", managed=managed)
+
+
+def copies(rt):
+    """PATH(이 프로세스의 순서: Windows 는 시스템 → 사용자) 와 jaix 설치 위치에 있는 rt 실행파일 전부, 잡히는 순서대로.
+    jaix 사본이 PATH 에 없거나 뒤에 있으면 마지막에 붙는다."""
+    seen, out = set(), []
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d] + [str(rt.path_dir())]
+    for d in dirs:
+        hit = shutil.which(rt.exe, path=d)
+        if not hit:
+            continue
+        key = os.path.normcase(os.path.realpath(hit))
+        if key in seen:
+            continue
+        seen.add(key)
+        own = shutil.which(rt.exe, path=str(rt.path_dir()))
+        out.append(_probe(rt, hit, managed=bool(own) and os.path.normcase(os.path.realpath(own)) == key))
+    return out
+
+
 def find(rt):
     """jaix가 깐 위치 → PATH → winget 바로가기 폴더 순. 마지막은 winget이 방금 깔아 이 프로세스의
     PATH엔 아직 없는 경우다(새 창부터 보인다)."""
@@ -109,15 +147,7 @@ def find(rt):
     path = own or shutil.which(rt.exe) or (IS_WIN and shutil.which(rt.exe, path=str(paths.winget_links())))
     if not path:
         return Found(None, None)
-    try:
-        out = subprocess.run([path, *rt.version_args], capture_output=True, creationflags=paths.NO_WINDOW, text=True, timeout=30,
-                             encoding="utf-8", errors="replace")
-        raw = (out.stdout + out.stderr).strip()
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return Found(path, None, raw=str(e), managed=bool(own))
-    m = re.search(r"(\d+)(?:\.\d+)+", raw)
-    return Found(path, m.group(0) if m else None, int(m.group(1)) if m else None,
-                 raw.splitlines()[0] if raw else "", managed=bool(own))
+    return _probe(rt, path, managed=bool(own))
 
 
 def _vtuple(v):
@@ -205,13 +235,18 @@ def _winget(args, log):
 def ensure(rt, log, dry_run=False, upgrade=False):
     """rt가 쓸 수 있는 상태가 되게 한다. 결과 Found를 돌려준다."""
     found = find(rt)
-    if ok(rt, found) and not (upgrade and found.managed):
+    # jaix 사본을 따로 두는 런타임: 밖의 사본이 쓸 만해도 jaix 사본이 없으면 깐다(밖의 것은 건드리지 않는다)
+    foreign = rt.own_copy and IS_WIN and found.path and not found.managed
+    if foreign:
+        log(f"  {rt.label}: jaix 밖의 사본 {found.version or '?'} ({found.path}) — 그대로 두고 jaix 사본을 따로 둠")
+    if ok(rt, found) and not (upgrade and found.managed) and not foreign:
         if upgrade and IS_WIN and rt.winget and not dry_run:
             _winget(["upgrade", "--id", rt.winget, "--scope", "user"], log)  # winget으로 안 깐 것이면 아무 일 없음
             found = find(rt)
         if found.managed:  # 파일은 있는데 사용자 PATH에서 빠졌을 수 있다(doctor가 setup 재실행을 권하는 경우)
             winenv.add_to_path([rt.path_dir()], dry_run=dry_run)
         log(f"  {rt.label}: {found.version or '있음'} ({found.path})")
+        _export(rt, found, log, dry_run)
         return found
     if not IS_WIN:
         log(f"  {rt.label}: 없음 → {rt.hint or '수동 설치'}" if not found.path
@@ -220,7 +255,7 @@ def ensure(rt, log, dry_run=False, upgrade=False):
     if dry_run:
         log(f"  {rt.label}: 설치 예정 (winget {rt.winget or '없음'} → 포터블)")
         return found
-    if rt.winget and not found.managed:
+    if rt.winget and not found.managed and not rt.own_copy:
         log(f"  {rt.label}: winget({rt.winget}) 사용자 범위로 설치 시도")
         if _winget(["install", "--id", rt.winget, "--scope", "user"], log):
             found = find(rt)
@@ -234,7 +269,16 @@ def ensure(rt, log, dry_run=False, upgrade=False):
         return find(rt)
     found = find(rt)
     log(f"  {rt.label}: {found.version or '?'} ({found.path})")
+    _export(rt, found, log, dry_run)
     return found
+
+
+def _export(rt, found, log, dry_run=False):
+    """jaix 사본 경로를 사용자 환경변수에 적는다(PATH 에서 다른 사본이 먼저 잡혀도 도구가 이것을 쓰게)."""
+    if not (rt.env_var and IS_WIN and found.managed and found.path) or dry_run:
+        return
+    if winenv.set_user_env(rt.env_var, found.path):
+        log(f"  {rt.label}: {rt.env_var}={found.path} (새로 연 앱·창부터 적용)")
 
 
 def hancom_installed():

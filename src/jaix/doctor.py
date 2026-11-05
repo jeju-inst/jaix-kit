@@ -51,6 +51,37 @@ def check_runtimes(lock=None):
     return out
 
 
+def check_runtime_copies():
+    """jaix 사본을 따로 두는 런타임(own_copy)이 두 벌 이상이면 알린다 — 지우지 않는다. 어느 것이 PATH 에서 먼저
+    잡히는지, 도구가 쓰는 환경변수가 jaix 사본을 가리키는지 함께 보인다."""
+    if not IS_WIN:
+        return []
+    out = []
+    for rt in runtimes.RUNTIMES:
+        if not rt.own_copy:
+            continue
+        found = runtimes.copies(rt)
+        mine = next((f for f in found if f.managed), None)
+        if mine and rt.env_var:
+            have = winenv.get_user_env(rt.env_var)
+            if not have or os.path.normcase(have) != os.path.normcase(mine.path):
+                out.append(Check("warn", f"{rt.label} 경로({rt.env_var})",
+                                 f"{have or '없음'} — jaix 사본({mine.path})을 가리키지 않음, 도구가 PATH 의 다른 사본을 쓸 수 있음",
+                                 "jaix setup"))
+        if len(found) < 2:
+            continue
+        def desc(i, f):
+            tags = ["PATH에서 먼저 잡힘"] if i == 0 else []
+            if f.managed:
+                tags.append("jaix 사본")
+            return f"{f.path} ({f.version or '판 모름'}{', ' + ', '.join(tags) if tags else ''})"
+        listing = "; ".join(desc(i, f) for i, f in enumerate(found))
+        how = (f"jaix·hwp-agent 는 {rt.env_var} 로 jaix 사본을 씀. " if rt.env_var else "")
+        out.append(Check("warn", f"{rt.label} 두 벌", listing,
+                         how + "다른 사본은 jaix 가 지우지 않음 — 안 쓰면 설정 → 앱에서 제거(관리자 설치면 관리자에게)"))
+    return out
+
+
 MAIL_PLUGIN = "mail-skill"  # 잠금 entry 이름(plugin.json name)
 MAIL_PYTHON = uvpython.DEFAULT  # mail 스크립트는 PATH 의 python3 대신 uv 관리 Python 3.12 로 돈다(mail-skill-dev 설계)
 
@@ -487,7 +518,7 @@ def check_self():
 
 
 def run(lock):
-    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_runtimes(lock), *check_runtime_copies(), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_autoupdate(), *check_self(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 

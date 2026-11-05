@@ -20,7 +20,7 @@
 
 ## 세션 사이의 약속 (인터페이스)
 
-- **hwp2pdf 위치**: `jaix-setup`이 hwp2pdf를 설치하고 `hwp2pdf-cli`를 사용자 PATH에 올린다. `hwp-render`(hwp-agent)는 `HWP2PDF_CLI` 환경변수 → PATH의 `hwp2pdf-cli` 순으로 찾는다. 둘 다 이 약속만 믿고 상대 저장소를 고치지 않는다.
+- **hwp2pdf 위치**: `jaix-setup`이 hwp2pdf를 설치하고 `hwp2pdf-cli`를 사용자 PATH에 올린다. 다른 곳(관리자 설치 `C:\Program Files\hwp2pdf` 등)에 있어도 jaix 사본을 따로 두고, 그 절대경로를 사용자 환경변수 **`HWP2PDF_CLI`** 에 적는다(시스템 PATH가 사용자 PATH보다 앞이라 PATH만으로는 jaix 사본이 가려진다, 2026-11-05 namun-ji). `hwp-render`(hwp-agent)는 `HWP2PDF_CLI` 환경변수 → PATH의 `hwp2pdf-cli` 순으로 찾는다. 스킬도 `HWP2PDF_CLI`가 있으면 그 경로를 쓴다. 둘 다 이 약속만 믿고 상대 저장소를 고치지 않는다.
 - **실측 결과**: `jaix-win`이 `docs/field-test-namun-ji.md`에 채널별 결과를 쓴다. `jaix-setup`은 그 결과가 머지되면 반영하고, 그 전에는 "Cowork에서 로컬 실행이 안 되는 경우"까지 대비해 만든다.
 - **잠금 파일** `.claude-plugin/marketplace.json`은 갱신 봇과 `scripts/jaixlock.py`만 고친다. 새 도구를 넣는 `jaix-intake`만 예외로 entry를 추가한다.
 

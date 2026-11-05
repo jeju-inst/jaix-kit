@@ -74,8 +74,9 @@ def guide(channels, result):
                     else "메뉴 막대의 Claude → Quit Claude(⌘Q). 창을 닫는 것만으로는 앱이 꺼지지 않습니다")
         out += [
             "■ Claude (데스크톱 앱의 Code 탭 · Claude Code)",
-            "  1. Claude 앱을 완전히 종료했다가 다시 여세요.",
+            "  1. Claude 앱을 완전히 종료했다가 다시 여세요(설치·업데이트 뒤마다).",
             f"     {quit_app}.",
+            "     켜져 있던 앱은 jaix가 새로 정한 도구 위치(예: HWP2PDF_CLI)를 모릅니다.",
             "  2. Code 탭에서 HWP 편집 · 업무일지 · 보고서 작성 표준 도구를 쓸 수 있습니다.",
             "     새 버전도 앱을 다시 열 때 저절로 받습니다.",
             "  3. 왼쪽 위 모델 선택에서 Sonnet을 고르세요. 사용량을 아낍니다.",
@@ -90,7 +91,8 @@ def guide(channels, result):
         if result.get("codex", {}).get("cli"):
             out += [
                 "■ Codex",
-                "  Codex를 다시 시작하세요. 플러그인 목록에 jaix 도구가 켜져 있습니다.",
+                "  Codex를 완전히 닫았다가 다시 여세요(설치·업데이트 뒤마다). 플러그인 목록에 jaix 도구가 켜져 있습니다.",
+                "  켜져 있던 Codex는 jaix가 새로 정한 도구 위치(예: HWP2PDF_CLI)를 모릅니다.",
             ]
             out.append("  새 버전은 로그온할 때 jaix가 저절로 맞춥니다." if result.get("autoupdate")
                        else "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.")
@@ -373,6 +375,10 @@ def cmd_cleanup(args, log):
         log("로그온 자동 갱신을 지움")
     for p in winenv.remove_from_path(paths.jaix_home()):
         log(f"PATH에서 뺌: {p}")
+    # 지워질 jaix 사본을 가리키는 환경변수(HWP2PDF_CLI 등)도 뺀다 — 남기면 플러그인이 없는 파일을 부른다
+    for rt in runtimes.RUNTIMES:
+        if rt.env_var and winenv.remove_user_env_under(rt.env_var, paths.jaix_home()):
+            log(f"환경변수 뺌: {rt.env_var}")
     return 0
 
 

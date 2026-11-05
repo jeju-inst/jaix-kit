@@ -20,6 +20,7 @@ LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplac
 
 REAL_HERMES_SETUP = hermesbot.setup
 REAL_PLUGBIN_ENSURE = plugbin.ensure
+REAL_REMOVE_USER_ENV_UNDER = winenv.remove_user_env_under
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
@@ -36,6 +37,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(hwpjar, "ensure", lambda lock, log, dry_run=False, offline=False: True)
     monkeypatch.setattr(hwpjar, "dest", lambda: tmp_path / "hwp-agent" / "hwp2hwpx.jar")
     monkeypatch.setattr(hwprhwp, "ensure", lambda lock, log, dry_run=False, offline=False: True)
+    # 사용자 환경변수(HKCU)는 진짜로 쓰지 않는다(Windows 러너)
+    monkeypatch.setattr(winenv, "set_user_env", lambda name, value: False)
+    monkeypatch.setattr(winenv, "remove_user_env_under", lambda name, prefix: False)
     # 플러그인 bin 명령: 소스를 진짜로 받지 않고, 링크는 tmp 에(시험은 REAL_PLUGBIN_ENSURE 를 부른다)
     monkeypatch.setattr(plugbin, "ensure", lambda lock, log, dry_run=False, offline=False:
                         {"status": "ok", "commands": [], "failed": []})
@@ -2206,3 +2210,77 @@ def test_hermes_skills_use_shared_fetch(isolated, monkeypatch, the_lock):
     _fake_plugin_source(monkeypatch)
     p = _lock_with_mail_skill(the_lock).plugins[-1]
     assert [d.name for d in hermes.plugin_skills(p, isolated / "w")] == ["mail-skill"]
+
+
+# --- own_copy 런타임(hwp2pdf-cli 두 벌) -----------------------------------------------------------------
+def _fake_cli(folder, version):
+    """--version 에 version 을 찍는 가짜 hwp2pdf-cli. Windows 는 .cmd 심(TS-TEST-3)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        f = folder / "hwp2pdf-cli.cmd"
+        f.write_text(f"@echo hwp2pdf {version}\r\n", encoding="utf-8")
+    else:
+        f = folder / "hwp2pdf-cli"
+        f.write_text(f"#!/bin/sh\necho hwp2pdf {version}\n", encoding="utf-8")
+        f.chmod(0o755)
+    return f
+
+
+def test_own_copy_installs_jaix_copy_beside_foreign_and_exports_env(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    foreign = isolated / "ProgramFiles" / "hwp2pdf"
+    _fake_cli(foreign, "2026.9.28.1")
+    monkeypatch.setenv("PATH", str(foreign))  # 러너의 실제 PATH 는 섞지 않는다
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    installed, env = [], {}
+    monkeypatch.setattr(runtimes, "install_portable",
+                        lambda r, log: (installed.append(r.key), _fake_cli(r.path_dir(), "2026.11.5.1"))[1].parent)
+    monkeypatch.setattr(winenv, "set_user_env", lambda name, value: env.update({name: value}) or True)
+    msgs = []
+    found = runtimes.ensure(rt, msgs.append)
+    assert installed == ["hwp2pdf"]  # 밖의 사본이 쓸 만해도 jaix 사본을 깐다
+    assert found.managed and found.version == "2026.11.5.1"
+    assert env == {"HWP2PDF_CLI": found.path}
+    assert any("jaix 밖의 사본" in m for m in msgs)
+    assert [f.name for f in foreign.iterdir()] == ["hwp2pdf-cli.cmd" if os.name == "nt" else "hwp2pdf-cli"]  # 밖의 사본은 그대로
+    # 다음 번: jaix 사본이 있으면 다시 깔지 않고 env 만 맞춘다
+    installed.clear()
+    runtimes.ensure(rt, msgs.append)
+    assert installed == []
+
+
+def test_doctor_warns_two_copies_and_env(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    foreign = isolated / "ProgramFiles" / "hwp2pdf"
+    _fake_cli(foreign, "2026.9.28.1")
+    mine = _fake_cli(rt.path_dir(), "2026.11.5.1")
+    monkeypatch.setenv("PATH", str(foreign))  # 러너의 실제 PATH 는 섞지 않는다
+    monkeypatch.setattr(doctor, "IS_WIN", True)
+    found = runtimes.copies(rt)
+    assert [f.managed for f in found] == [False, True]  # 시스템 PATH 쪽이 먼저 잡힘
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: str(found[1].path))
+    checks = doctor.check_runtime_copies()
+    assert [c.area for c in checks] == ["hwp2pdf-cli 두 벌"]
+    assert "PATH에서 먼저 잡힘" in checks[0].message and "jaix 사본" in checks[0].message
+    assert "2026.9.28.1" in checks[0].message and "지우지 않음" in checks[0].fix
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: None)
+    areas = [c.area for c in doctor.check_runtime_copies()]
+    assert "hwp2pdf-cli 경로(HWP2PDF_CLI)" in areas
+    # 한 벌이면 조용
+    monkeypatch.setenv("PATH", str(isolated / "empty"))
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: str(mine))
+    assert [c for c in doctor.check_runtime_copies() if c.area.endswith("두 벌")] == []
+
+
+def test_cleanup_removes_env_only_when_it_points_into_jaix(isolated, monkeypatch):
+    removed = []
+    monkeypatch.setattr(winenv, "remove_user_env_under", lambda name, prefix: removed.append((name, prefix)) or True)
+    msgs = []
+    assert cli.cmd_cleanup(None, msgs.append) == 0
+    assert removed == [("HWP2PDF_CLI", paths.jaix_home())] and "환경변수 뺌: HWP2PDF_CLI" in msgs
+
+
+def test_remove_user_env_under_keeps_user_value(monkeypatch, tmp_path):
+    store = {"HWP2PDF_CLI": r"C:\\Program Files\\hwp2pdf\\hwp2pdf-cli.exe"}
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: store.get(name))
+    assert not REAL_REMOVE_USER_ENV_UNDER("HWP2PDF_CLI", tmp_path)  # 사용자가 바꾼 값은 둔다
