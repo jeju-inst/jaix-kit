@@ -41,6 +41,28 @@ def _broadcast():
                                              SMTO_ABORTIFHUNG, 5000, ctypes.byref(result))
 
 
+def get_user_env(name):
+    """사용자 환경변수(HKCU\\Environment) 값. 없거나 Windows 가 아니면 None."""
+    if not IS_WIN:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except FileNotFoundError:
+        return None
+
+
+def set_user_env(name, value):
+    """사용자 환경변수를 쓰고 지금 프로세스에도 넣는다. 새로 연 앱·창부터 보인다. 바꿨으면 True."""
+    os.environ[name] = str(value)
+    if not IS_WIN or get_user_env(name) == str(value):
+        return False
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, str(value))
+    _broadcast()
+    return True
+
+
 def in_user_path(path):
     return _norm(path) in {_norm(p) for p in user_path_entries()}
 
