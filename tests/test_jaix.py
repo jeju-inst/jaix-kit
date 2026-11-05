@@ -1901,6 +1901,53 @@ def test_hermes_login_ctrl_c_keeps_window_and_records(isolated, monkeypatch):
     assert "model=chatgpt code=130" in rec
 
 
+def test_hermes_login_opens_device_page_and_shows_result_before_closing(isolated, monkeypatch):
+    """jaix-win 11/5: ① device code 방식이라 브라우저가 안 열림 → jaix 가 연다 ② 승인하자 창이 바로 닫힘 → 몇 초 보임."""
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 0)
+    import threading
+    import time as _t
+    opened, paused, seen = [], [], []
+    done = threading.Event()
+
+    def run(cmd):  # 로그인이 도는 동안 타이머가 브라우저를 연다
+        done.wait(2)
+        _t.sleep(0.05)  # 타이머가 안내 줄을 다 쓸 틈
+        return 0
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), seen.append, run=run,
+                             opener=lambda url: opened.append(url) or done.set() or True,
+                             pause=lambda sec, log: paused.append(sec),
+                             wait=lambda q: pytest.fail("--no-wait 는 Enter 를 기다리지 않는다"))
+    assert rc == 0 and opened == ["https://auth.openai.com/codex/device"] and paused == [5]
+    assert any("로그인 완료" in m for m in seen) and any("코드" in m for m in seen)
+    # 브라우저를 못 열면 주소를 붙여 넣으라고 안내
+    seen.clear()
+    done.clear()
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), seen.append, run=run,
+                        opener=lambda url: done.set() or False, pause=lambda sec, log: paused.append(sec))
+    assert any("https://auth.openai.com/codex/device" in m and "붙여 넣" in m for m in seen)
+    # 실패는 더 오래 보인다. claude 는 hermes 가 브라우저를 직접 연다 — jaix 는 열지 않는다
+    opened.clear()
+    hermesbot.cmd_login(argparse.Namespace(model="claude", no_wait=True), seen.append, run=lambda cmd: 1,
+                        opener=opened.append, pause=lambda sec, log: paused.append(sec))
+    _t.sleep(0.05)
+    assert not opened and paused[-1] == hermesbot.CLOSE_AFTER_OTHER
+
+
+def test_hermes_login_quick_failure_does_not_open_browser(isolated, monkeypatch):
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 0.3)
+    opened = []
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), lambda m="": None, run=lambda cmd: 2,
+                        opener=opened.append, pause=lambda sec, log: None)
+    import time as _t
+    _t.sleep(0.5)
+    assert not opened
+
+
 # --- 설치본 로그온 자동 갱신 = 설치기가 둔 시작프로그램 바로가기 (Defender Persistence.A!ml, jaix-win 11/4) ----------
 @pytest.fixture
 def managed(isolated, monkeypatch, tmp_path):
