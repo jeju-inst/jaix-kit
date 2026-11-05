@@ -503,7 +503,7 @@ def test_doctor_fails_when_plugins_missing(isolated, monkeypatch, the_lock):
     monkeypatch.setattr(paths, "desktop_installed", lambda: True)
     cowork = {c.area: c for c in doctor.check_claude(the_lock)}["Claude 데스크톱·Cowork"]
     # 관리자 배포 없음(개인 구독 계정): 직접 추가 안내. 있으면 관리자 배포 대상으로 생략
-    assert cowork.status == "info" and "Add marketplace → jeju-inst/jaix-kit" in cowork.message
+    assert cowork.status == "info" and "Add → Add marketplace → Add from a repository → jeju-inst/jaix-kit → Sync" in cowork.message
     assert "GitHub 앱 접근 허용" in cowork.message and "메일 제외" in cowork.message
     assert doctor.render([cowork]).startswith("[안내] Claude 데스크톱·Cowork:")
     monkeypatch.setattr(claude, "managed_declaration", lambda: "remote-settings.json")
@@ -2743,7 +2743,7 @@ def test_guide_cowork_line_depends_on_managed_deployment():
     """관리자 배포가 없는 PC(개인 구독 계정)는 Cowork 마켓을 직접 추가하라고 안내한다(jaix-win .16)."""
     personal = cli.guide(["claude"], {"claude": {"cli": True, "managed": None}})
     assert "기관 관리자 배포로 내려옵니다" not in personal
-    assert "Customize → Plugins → Add marketplace" in personal and "jeju-inst/jaix-kit" in personal
+    assert "Customize → Plugins → Add → Add marketplace" in personal and "Add from a repository → jeju-inst/jaix-kit → Sync" in personal
     assert "메일 도구는 Cowork 에서 쓸 수 없습니다" in personal
     org = cli.guide(["claude"], {"claude": {"cli": True, "managed": "remote-settings.json"}})
     assert "기관 관리자 배포로 내려옵니다" in org and "Add marketplace" not in org

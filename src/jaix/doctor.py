@@ -397,7 +397,7 @@ def check_claude(lock):
                              "관리자 배포 대상(조직 플러그인) — jaix는 Code 탭·Claude Code에만 등록함"))
         else:  # 관리자 배포가 없는 PC(개인 구독 계정) — 설치 완료 안내(#119)와 같은 말
             out.append(Check("info", "Claude 데스크톱·Cowork",
-                             "Cowork(채팅)는 직접 추가: Customize → Plugins → Add marketplace → jeju-inst/jaix-kit "
+                             "Cowork(채팅)는 직접 추가: Customize → Plugins → Add → Add marketplace → Add from a repository → jeju-inst/jaix-kit → Sync "
                              "(GitHub 앱 접근 허용 필요, 메일 제외) — jaix 는 Cowork 설치 여부를 확인하지 못함"))
     return out
 
