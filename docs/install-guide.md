@@ -69,8 +69,9 @@ PC에 따라 이 창이 뜨지 않을 수 있습니다. 뜨면 [추가 정보] �
 - **Cowork(채팅)에서 도구 쓰기**: 마켓을 직접 추가한다.
   1. 왼쪽 **Customize → Plugins** 탭으로 간다.
   2. **Add → Add marketplace**를 누르고 `jeju-inst/jaix-kit` 를 넣는다.
-  3. 목록에 나온 jaix 플러그인을 설치한다(업무일지 · HWP · 보고서 작성 · 과제 템플릿 · 산업연관 · 그룹웨어).
+  3. 목록에 나온 jaix 플러그인을 **모두** 설치한다(업무일지 · HWP · 보고서 작성 · 메일 · HWP→PDF 등. 목록은 계속 늘어난다).
   4. 입력창에 `/` 를 쳐서 jaix 스킬이 보이면 된다.
+  - 새 버전이나 새 플러그인이 안 보이면 Plugins 탭에서 jaix 마켓을 새로고침(업데이트)한다.
   - 자동 동기화를 켜라며 GitHub 앱 접근을 물으면 허용하지 않아도 된다(공개 저장소라 없이도 받아진다).
 - **모델**: 4-1절처럼 **Sonnet**을 직접 고른다. 명령창 Claude Code는 기관 기본값이 오지 않으므로 `/model sonnet` 으로 바꾼다.
 - **업무 계정 연결**: 4-1절 표 그대로 **Customize → Connectors**에서 각자 연결한다(Slack · Google Calendar/Drive=`@ji.re.kr` · Gmail=`@jri.re.kr` · monday).
