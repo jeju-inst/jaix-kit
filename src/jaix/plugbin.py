@@ -1,4 +1,8 @@
-"""플러그인 `bin/` 의 셸 명령을 PATH 에 올린다(TS-RUNTIME-4). 예: mail-skill 의 `mailskill`·`mail-secret`.
+"""플러그인 `cli/`(예전 `bin/`)의 셸 명령을 PATH 에 올린다(TS-RUNTIME-4). 예: mail-skill 의 `mailskill`·`mail-secret`.
+
+명령 폴더: Cowork 호스팅 플러그인 검사가 최상위 `bin/` 을 거부해 mail-skill 이 `cli/` 로 옮긴다(2026-11-05). 전환기에는
+둘 다 보고(CMD_DIRS 순서 = cli 우선), 같은 이름은 한 번만 올린다. `cli/` 는 Claude Code 도 PATH 에 넣어 주지 않으므로
+맥·리눅스에서도 jaix 의 link_dir 링크가 명령을 잡는 유일한 길이 된다.
 
 왜: 스킬이 "PATH의 셸 명령"을 부르는데(TS-SKILL-1), 플러그인 `bin/` 을 PATH 에 넣어 주는 호스트는 Claude Code 뿐이다
 (켜진 플러그인의 bin 을 Bash 도구 PATH 에 붙인다. 2.1.318 실측). Codex(0.160.0 실측)는 넣지 않고, Hermes 는 jaix 가
@@ -25,6 +29,7 @@ from jaix.paths import IS_WIN
 WIN_SCRIPT = {".cmd", ".bat", ".exe"}  # Windows 가 PATHEXT 로 이름만으로 찾는 것
 SKIP_POSIX = {".cmd", ".bat", ".ps1", ".exe"}
 SHIM_MARK = "jaix plugin-bin shim"
+CMD_DIRS = ("cli", "bin")  # 앞이 우선. bin 은 전환기 동안만(mail-skill 이 cli 로 옮긴 뒤 옛 커밋 잠금 호환)
 
 
 def codeload(url, sha):
@@ -99,8 +104,8 @@ def _ours(path):
 
 
 def _place(target, log):
-    """target(사본 bin 안의 파일)을 link_dir 에 올린다. 만든 경로, 못 만들었으면 None."""
-    dst = link_dir() / (target.stem + ".cmd" if IS_WIN and target.suffix else target.name)
+    """target(사본 cli·bin 안의 파일)을 link_dir 에 올린다. 만든 경로, 못 만들었으면 None."""
+    dst = link_dir() / _link_name(target)
     if (dst.exists() or dst.is_symlink()) and not _ours(dst):
         log(f"    {dst} 에 jaix 가 만들지 않은 파일이 있어 그대로 둠")
         return None
@@ -125,10 +130,31 @@ def _remove(cmds):
             p.unlink(missing_ok=True)
 
 
+def command_dirs(root):
+    """플러그인 루트에서 명령 폴더들(있는 것만, 우선순위 순)."""
+    return [root / d for d in CMD_DIRS if (root / d).is_dir()]
+
+
+def _link_name(target):
+    return target.stem + ".cmd" if IS_WIN and target.suffix else target.name
+
+
+def _all_commands(root):
+    """명령 폴더들의 명령. 같은 이름(올릴 이름 기준)은 앞 폴더(cli) 것만."""
+    seen, out = set(), []
+    for d in command_dirs(root):
+        for f in _commands(d):
+            key = _link_name(f).lower() if IS_WIN else _link_name(f)
+            if key not in seen:
+                seen.add(key)
+                out.append(f)
+    return out
+
+
 def _install_one(plugin, workdir, log):
     """사본을 바꿔 넣고 명령을 올린다. 만든 명령 경로 목록."""
     root = fetch_root(plugin, workdir)
-    if not (root / "bin").is_dir():
+    if not command_dirs(root):
         shutil.rmtree(plugins_dir() / plugin.name, ignore_errors=True)
         return []
     dst = plugins_dir() / plugin.name
@@ -136,12 +162,13 @@ def _install_one(plugin, workdir, log):
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.copytree(root, tmp, symlinks=False)
     if not IS_WIN:
-        for f in (tmp / "bin").iterdir():  # tar 의 실행 비트가 빠졌어도 부를 수 있게
-            if f.is_file() and f.suffix.lower() not in SKIP_POSIX:
-                f.chmod(f.stat().st_mode | 0o755)
+        for d in command_dirs(tmp):
+            for f in d.iterdir():  # tar 의 실행 비트가 빠졌어도 부를 수 있게
+                if f.is_file() and f.suffix.lower() not in SKIP_POSIX:
+                    f.chmod(f.stat().st_mode | 0o755)
     shutil.rmtree(dst, ignore_errors=True)
     tmp.rename(dst)
-    made = [_place(f, log) for f in _commands(dst / "bin")]
+    made = [_place(f, log) for f in _all_commands(dst)]
     return [str(m) for m in made if m]
 
 

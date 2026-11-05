@@ -2868,3 +2868,62 @@ def test_ensure_keeps_existing_git(isolated, monkeypatch):
     monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(r"C:\Program Files\Git\cmd\git.exe", "2.50.1", 2))
     monkeypatch.setattr(runtimes, "install_portable", lambda r, log: pytest.fail("이미 있는데 받음"))
     assert runtimes.ensure(rt, print, upgrade=True).path.endswith("git.exe")
+
+
+# --- mail-skill 이 bin/ → cli/ 로(Cowork 호스팅 검사가 최상위 bin/ 거부, 2026-11-05) ----------------------------
+def _fake_cmd_plugin(monkeypatch, layout):
+    """layout: {폴더: {파일: 출력 문자열}}. 확장자 없는 것은 sh 스크립트, scripts/mail-secret 는 cli 의 심링크 대상."""
+    def fake_fetch(plugin, workdir):
+        root = Path(workdir) / plugin.name / "root"
+        (root / "skills" / plugin.name).mkdir(parents=True, exist_ok=True)
+        (root / "skills" / plugin.name / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+        if plugin.name == "mail-skill":
+            (root / "scripts").mkdir(exist_ok=True)
+            (root / "scripts" / "mail-secret").write_text("#!/bin/sh\necho secret\n", encoding="utf-8")
+            for d, files in layout.items():
+                (root / d).mkdir(exist_ok=True)
+                for f, say in files.items():
+                    p = root / d / f
+                    if say == "->scripts" and os.name != "nt":
+                        p.symlink_to(Path("..") / "scripts" / f)
+                    else:
+                        p.write_text("@echo off\r\n" if "." in f else f"#!/bin/sh\necho {say}\n", encoding="utf-8")
+        return root
+    monkeypatch.setattr(plugbin, "fetch_root", fake_fetch)
+
+
+def test_plugbin_reads_cli_dir_and_prefers_it_over_bin(isolated, monkeypatch, the_lock):
+    _fake_cmd_plugin(monkeypatch, {
+        "cli": {"mailskill": "from-cli", "mailskill.cmd": "", "mail-secret": "->scripts", "mail-secret.cmd": ""},
+        "bin": {"mailskill": "from-bin", "mailskill.cmd": "", "old-only": "from-bin"},
+    })
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), print)
+    assert res["status"] == "ok"
+    copy = plugbin.plugins_dir() / "mail-skill"
+    link = plugbin.link_dir()
+    made = [Path(c) for c in plugbin.recorded()["mail-skill"]["commands"]]
+    names = [p.name for p in made]
+    assert len(names) == len(set(n.lower() for n in names))  # 같은 이름은 한 번만
+    if paths.IS_WIN:
+        assert str(copy / "cli" / "mailskill.cmd") in (link / "mailskill.cmd").read_text(encoding="utf-8")
+        assert "/cli/mailskill" in (link / "mailskill").read_text(encoding="utf-8").replace("\\", "/")
+        assert (link / "old-only").is_file()  # bin 에만 있는 것도 전환기엔 올린다
+    else:
+        assert (link / "mailskill").resolve() == (copy / "cli" / "mailskill").resolve()
+        assert (link / "old-only").resolve() == (copy / "bin" / "old-only").resolve()
+        # Claude Code 는 cli/ 를 PATH 에 넣어 주지 않는다 → jaix 링크만으로 이름이 잡히고 실행돼야 한다
+        monkeypatch.setenv("PATH", str(link))
+        assert Path(shutil.which("mailskill")).parent == link
+        out = subprocess.run(["mailskill"], capture_output=True, text=True).stdout.strip()
+        assert out == "from-cli"
+        out = subprocess.run(["mail-secret"], capture_output=True, text=True).stdout.strip()
+        assert out == "secret"  # cli 의 심링크(→ ../scripts) 도 사본에서 그대로 돈다
+        checks = doctor.check_plugin_bin(_lock_with_mail_skill(the_lock))
+        assert [c.status for c in checks] == ["ok"] and "mailskill" in checks[0].message
+
+
+def test_plugbin_cli_only_plugin_without_bin(isolated, monkeypatch, the_lock):
+    _fake_cmd_plugin(monkeypatch, {"cli": {"mailskill": "from-cli", "mailskill.cmd": ""}})
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), print)
+    assert res["status"] == "ok" and "mailskill" in res["commands"]
+    assert (plugbin.plugins_dir() / "mail-skill" / "cli").is_dir()
