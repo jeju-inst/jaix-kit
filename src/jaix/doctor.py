@@ -463,6 +463,12 @@ def check_hermes_bot():
     if hermesbot.approval_mode() == "off":
         out.append(Check("warn", area, "위험 명령 승인이 꺼져 있음(approvals.mode: off) — 에이전트가 묻지 않고 실행함",
                          "AI센터가 켠 것이 아니면 jaix hermes approvals smart"))
+    dup = hermesbot.duplicate_credentials()
+    if dup:
+        provider, n, model = dup
+        out.append(Check("warn", "Hermes 자격", f"{provider} 자격 {n}개(같은 구독 중복) — 같은 계정이면 예전 것은 이미 "
+                                               "폐기돼, Hermes 가 그것을 고르면 슬랙 봇이 실패할 수 있음",
+                         f"jaix hermes login --model {model} --force (새로 로그인하면 예전 자격을 정리)"))
     if rec.get("last_error"):
         out.append(Check("warn", area, f"마지막 다시 설치에서 실패(기존 연결은 그대로): {rec['last_error']}",
                          "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림"))

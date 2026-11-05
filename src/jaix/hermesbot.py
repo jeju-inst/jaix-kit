@@ -408,6 +408,112 @@ def _call_login(cmd):
 
 
 CANCELLED = 130
+ALREADY = 3  # 이미 로그인돼 있어 다시 하지 않음(설치기 페이지가 '이미 로그인됨'으로 보인다)
+
+
+def _strip_ansi(text):
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
+
+# hermes_cli/auth_codex.py 의 기기 코드 안내: "2. Enter this code:\n     <코드>"
+DEVICE_CODE = re.compile(r"Enter this code:\s*([A-Z0-9]{4,}-[A-Z0-9]{4,})")
+
+
+def _call_login_tee(cmd, on_text):
+    """chatgpt(기기 코드) 로그인만: 출력을 파이프로 받아 그대로 창에 쓰며 on_text 로 넘긴다(코드를 클립보드에).
+    표준 입력은 그대로 물려준다. 파이프면 Python 이 출력을 모아 두므로 PYTHONUNBUFFERED, 색 코드는 지우고 쓴다."""
+    import codecs
+    import sys
+    env = {**_child_env(), "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+    p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    dec = codecs.getincrementaldecoder("utf-8")("replace")
+    try:
+        while True:
+            chunk = p.stdout.read1(4096)
+            if not chunk:
+                break
+            text = _strip_ansi(dec.decode(chunk))
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            on_text(text)
+        return p.wait()
+    except KeyboardInterrupt:
+        try:
+            p.wait(timeout=10)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            p.kill()
+        return CANCELLED
+
+
+def _copy_clipboard(text):
+    if not IS_WIN:
+        return False
+    try:
+        return subprocess.run(["clip"], input=text.encode("ascii", "ignore"), creationflags=paths.NO_WINDOW,
+                              timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _auth(hermes, args, timeout=60):
+    """hermes auth 공식 명령(list·remove)을 창 없이. (종료 코드, 출력)."""
+    try:
+        r = subprocess.run([hermes, "auth", *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           stdin=subprocess.DEVNULL, env=_child_env(), creationflags=paths.NO_WINDOW, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, str(e)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+# `hermes auth list <provider>` 의 줄: "  #1  <label>   oauth   id=<id> priority=0 <source>..."
+CRED_ROW = re.compile(r"^\s*#(\d+)\s+(.+?)\s+(\S+)\s+id=(\S+)\s+priority=(-?\d+)")
+
+
+def credentials(hermes, provider, auth=None):
+    """provider 의 자격 목록 [{index, label, id}]. 목록을 못 읽으면 None(모름 — 정리하지 않는다)."""
+    code, out = (auth or (lambda a: _auth(hermes, a)))(["list", provider])
+    if code != 0:
+        return None
+    rows = []
+    for line in out.splitlines():
+        m = CRED_ROW.match(line)
+        if m:
+            rows.append({"index": int(m.group(1)), "label": m.group(2).strip(), "id": m.group(4)})
+    return rows
+
+
+def prune_credentials(hermes, provider, old_ids, log, auth=None):
+    """새로 로그인한 뒤 같은 provider 의 예전 자격을 지운다(공식 `hermes auth remove`, id 로). 새 자격이 목록에
+    있을 때만 한다 — 같은 OpenAI 계정이면 예전 것은 OpenAI 가 이미 폐기했고, Hermes 가 그것을 고르면 봇이 실패한다."""
+    run = auth or (lambda a: _auth(hermes, a))
+    after = credentials(hermes, provider, run)
+    if not after or not old_ids:
+        return 0
+    if not [c for c in after if c["id"] not in old_ids]:
+        log("  (새 자격을 목록에서 찾지 못해 예전 자격은 그대로 둡니다)")
+        return 0
+    removed = 0
+    for c in after:
+        if c["id"] in old_ids:
+            code, out = run(["remove", provider, c["id"]])
+            if code == 0:
+                removed += 1
+            else:
+                log(f"  예전 자격 #{c['index']} 정리 실패(새 자격은 그대로): {out.strip().splitlines()[-1:] or ''}")
+    if removed:
+        log(f"  예전 {provider} 자격 {removed}개를 정리했습니다(새로 로그인한 것만 남김).")
+    return removed
+
+
+def duplicate_credentials():
+    """doctor 용: 기록된 모델의 provider 자격이 둘 이상이면 (provider, 개수, 모델), 아니면 None."""
+    hermes = find_hermes()
+    if not hermes:
+        return None
+    model = recorded().get("model") or "chatgpt"
+    provider = PROVIDERS.get(model, PROVIDERS["chatgpt"])["provider"]
+    rows = credentials(hermes, provider)
+    return (provider, len(rows), model) if rows and len(rows) > 1 else None
 
 
 def _login_record(model, code):
@@ -422,7 +528,7 @@ def _login_record(model, code):
 
 
 OPEN_DELAY = 3  # 기기 코드가 창에 찍힌 뒤에 브라우저가 앞으로 오게
-CLOSE_AFTER = {0: 5}  # --no-wait(설치기 페이지): 결과를 읽을 틈. 성공 5초, 그 밖 15초
+CLOSE_AFTER = {0: 5, ALREADY: 5}  # --no-wait(설치기 페이지): 결과를 읽을 틈. 성공·이미 로그인 5초, 그 밖 15초
 CLOSE_AFTER_OTHER = 15
 
 
@@ -456,7 +562,7 @@ def _pause(seconds, log):
         pass
 
 
-def cmd_login(args, log, run=None, wait=None, opener=None, pause=None):
+def cmd_login(args, log, run=None, wait=None, opener=None, pause=None, auth=None, ask=None, copy=None):
     """AI 구독 로그인 창: 설치기 'AI 구독 로그인' 페이지·시작 메뉴가 이것을 연다(설치기가 cmd.exe 를 직접 띄우지
     않게, #86). hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다. 성공·실패·취소
     모두 결과를 보이고, Enter 를 기다리거나(Windows) --no-wait 면 몇 초 보인 뒤 닫는다."""
@@ -468,6 +574,22 @@ def cmd_login(args, log, run=None, wait=None, opener=None, pause=None):
         code = 1
     else:
         prov = PROVIDERS[args.model]
+        before = credentials(hermes, prov["provider"], auth)
+        code = None
+        if before and not getattr(args, "force", False):
+            who = ", ".join(c["label"] for c in before)
+            if getattr(args, "no_wait", False):  # 설치기 페이지: 묻지 않고 건너뜀(한 번 더 누르면 --force)
+                log(f"이미 로그인돼 있습니다({who}). 다시 로그인하려면 [다시 로그인]을 한 번 더 누르세요.")
+                code = ALREADY
+            else:
+                try:
+                    answer = (ask or input)(f"이미 로그인돼 있습니다({who}). 다시 로그인할까요? [y/N] ")
+                except (EOFError, KeyboardInterrupt):
+                    answer = ""
+                if str(answer).strip().lower() not in ("y", "yes", "예", "ㅛ"):
+                    log("그대로 둡니다.")
+                    code = ALREADY
+    if hermes and code is None:
         log(f"Hermes AI 로그인 ({args.model})")
         for line in prov.get("how", []):
             log(f"  {line}")
@@ -483,8 +605,24 @@ def cmd_login(args, log, run=None, wait=None, opener=None, pause=None):
             timer = threading.Timer(OPEN_DELAY, _open)
             timer.daemon = True
             timer.start()
+        seen = {"buf": "", "copied": False}
+
+        def on_text(text):  # 기기 코드를 클립보드에(chatgpt 만 — anthropic 은 붙여넣기 입력을 받으니 파이프로 바꾸지 않는다)
+            if seen["copied"]:
+                return
+            seen["buf"] = (seen["buf"] + text)[-400:]
+            m = DEVICE_CODE.search(seen["buf"])
+            if m:
+                seen["copied"] = True
+                if (copy or _copy_clipboard)(m.group(1)):
+                    log(f"\n  ▶ 코드 {m.group(1)} 를 복사해 두었습니다 — 브라우저 입력칸에서 Ctrl+V\n")
         try:
-            code = (run or _call_login)([hermes, *prov["login"]])
+            if run:
+                code = run([hermes, *prov["login"]])
+            elif prov.get("open"):
+                code = _call_login_tee([hermes, *prov["login"]], on_text)
+            else:
+                code = _call_login([hermes, *prov["login"]])
         except OSError as e:
             log(f"로그인을 시작하지 못함: {e}")
             code = 1
@@ -494,6 +632,8 @@ def cmd_login(args, log, run=None, wait=None, opener=None, pause=None):
         log("")
         if code == 0:
             log("로그인 완료.")
+            if before:
+                prune_credentials(hermes, prov["provider"], {c["id"] for c in before}, log, auth)
         elif code == CANCELLED:
             log(f"로그인을 취소했습니다. 나중에 새 명령창에서 `{again}` 로 다시 하세요.")
         else:
