@@ -157,6 +157,15 @@ end;
 
 // 다시 설치할 때 지난 선택을 체크 기본값으로(jaix setup 이 남긴 setup-choice.json). 그 기록이 없으면(예전 판)
 // jaix 가 Hermes 를 설정한 기록(hermes.json)이 있을 때만 Hermes 를 체크한다. 둘 다 없거나 깨졌으면 처음 설치와 같다
+// 지난번 Hermes 모델을 고른 상태로. 처음 설치는 둘 다 비워 둔다(미리 찍혀 있으면 "그걸 골라야 하는 것"처럼 보임)
+procedure SetModelChoice(Claude: Boolean);
+begin
+  if Claude then
+    ModelPage.Values[1] := True
+  else
+    ModelPage.Values[0] := True;
+end;
+
 procedure ApplyPreviousChoice();
 var
   Rec, Channels: string;
@@ -177,8 +186,8 @@ begin
         ChannelPage.Values[0] := Pos('"claude"', Channels) > 0;
         ChannelPage.Values[1] := Pos('"codex"', Channels) > 0;
         ChannelPage.Values[2] := Pos('"hermes"', Channels) > 0;
-        if RecordSays(Rec, 'hermes_model', 'claude', 16) then
-          ModelPage.Values[1] := True;
+        if ChannelPage.Values[2] then
+          SetModelChoice(RecordSays(Rec, 'hermes_model', 'claude', 16));
         exit;
       end;
     end;
@@ -187,8 +196,7 @@ begin
   if Pos('"status"', Rec) > 0 then
   begin
     ChannelPage.Values[2] := True;
-    if RecordSays(Rec, 'model', 'claude', 16) then
-      ModelPage.Values[1] := True;
+    SetModelChoice(RecordSays(Rec, 'model', 'claude', 16));
   end;
 end;
 
@@ -270,7 +278,7 @@ begin
     False, False);
   ChannelPage.Add('Claude (데스크톱 앱 · Claude Code) — Claude 유료 구독');
   ChannelPage.Add('Codex (데스크톱 앱 · CLI) — ChatGPT 유료 구독(Plus 이상)');
-  ChannelPage.Add('슬랙으로도 쓰기 (Hermes) — AI센터에서 받은 연결 코드 필요');
+  ChannelPage.Add('슬랙으로도 쓰기 (Hermes) — 연결 코드 + ChatGPT 유료 구독 또는 회사 Claude 계정 필요');
   ChannelPage.Values[0] := True;
   ChannelPage.Values[1] := IsCodexInstalled();
   ChannelPage.Values[2] := False;
@@ -287,11 +295,12 @@ begin
     HermesPage.ID,
     'Hermes가 쓸 AI',
     '이미 쓰고 있는 구독을 고르세요.',
+    'Hermes는 ChatGPT 유료 구독 또는 회사 Claude 계정(Team)이 있어야 씁니다. 개인 Claude Pro로는 동작하지 않습니다. ' +
     '설치 마지막에 로그인 창을 여는 단계가 있습니다. 브라우저에서 승인하면 됩니다.',
     True, False);
   ModelPage.Add('ChatGPT 구독(Plus 이상)');
-  ModelPage.Add('Claude 구독');
-  ModelPage.Values[0] := True;
+  ModelPage.Add('회사 Claude 계정(Team) — 개인 Pro 구독은 안 됨');
+  // 기본 선택 없음 — 무인 설치·고르지 않은 경우의 chatgpt 는 HermesModel() 안의 내부 기본값일 뿐이다
   ApplyPreviousChoice();
 
   ProgressPage := CreateOutputProgressPage('도구 설치 중', '런타임을 내려받고 AI에 도구를 등록합니다. 몇 분 걸릴 수 있습니다.');
@@ -360,6 +369,13 @@ var
   Code: string;
 begin
   Result := True;
+  // 모델 화면은 Hermes 를 체크했을 때만 나온다(ShouldSkipPage). 무인 설치는 /HERMESMODEL 또는 내부 기본값
+  if (CurPageID = ModelPage.ID) and not WizardSilent() and not ModelPage.Values[0] and not ModelPage.Values[1] then
+  begin
+    MsgBox('Hermes가 쓸 AI 구독을 골라 주세요.', mbError, MB_OK);
+    Result := False;
+    exit;
+  end;
   if CurPageID = HermesPage.ID then
   begin
     Code := Uppercase(Trim(HermesPage.Values[0]));
