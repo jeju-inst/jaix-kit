@@ -13,7 +13,7 @@ from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwp
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
-MARK = {"ok": "[통과]", "warn": "[주의]", "fail": "[실패]", "skip": "[생략]"}
+MARK = {"ok": "[통과]", "warn": "[주의]", "fail": "[실패]", "skip": "[생략]", "info": "[안내]"}
 FIX_SETUP = "jaix setup" if IS_WIN else "jaix setup (맥은 안내된 설치 명령)"
 
 
@@ -392,8 +392,13 @@ def check_claude(lock):
                          "jaix setup" if cli else
                          "Claude 앱에서 Code 탭을 열었다 닫고 한 번 더 열기(첫 번째에 등록, 두 번째에 설치)"))
     if paths.desktop_installed():
-        out.append(Check("skip", "Claude 데스크톱·Cowork",
-                         "관리자 배포 대상(조직 플러그인) — jaix는 Code 탭·Claude Code에만 등록함"))
+        if managed:
+            out.append(Check("skip", "Claude 데스크톱·Cowork",
+                             "관리자 배포 대상(조직 플러그인) — jaix는 Code 탭·Claude Code에만 등록함"))
+        else:  # 관리자 배포가 없는 PC(개인 구독 계정) — 설치 완료 안내(#119)와 같은 말
+            out.append(Check("info", "Claude 데스크톱·Cowork",
+                             "Cowork(채팅)는 직접 추가: Customize → Plugins → Add marketplace → jeju-inst/jaix-kit "
+                             "(GitHub 앱 접근 허용 필요, 메일 제외) — jaix 는 Cowork 설치 여부를 확인하지 못함"))
     return out
 
 

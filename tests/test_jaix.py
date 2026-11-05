@@ -501,6 +501,12 @@ def test_doctor_fails_when_plugins_missing(isolated, monkeypatch, the_lock):
     assert c.status == "fail" and f"{len(the_lock.plugins)}/{len(the_lock.plugins)}" in c.message
     assert "Code 탭" in c.fix
     monkeypatch.setattr(paths, "desktop_installed", lambda: True)
+    cowork = {c.area: c for c in doctor.check_claude(the_lock)}["Claude 데스크톱·Cowork"]
+    # 관리자 배포 없음(개인 구독 계정): 직접 추가 안내. 있으면 관리자 배포 대상으로 생략
+    assert cowork.status == "info" and "Add marketplace → jeju-inst/jaix-kit" in cowork.message
+    assert "GitHub 앱 접근 허용" in cowork.message and "메일 제외" in cowork.message
+    assert doctor.render([cowork]).startswith("[안내] Claude 데스크톱·Cowork:")
+    monkeypatch.setattr(claude, "managed_declaration", lambda: "remote-settings.json")
     assert {c.area: c for c in doctor.check_claude(the_lock)}["Claude 데스크톱·Cowork"].status == "skip"
 
 
