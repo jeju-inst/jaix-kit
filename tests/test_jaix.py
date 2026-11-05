@@ -2596,3 +2596,34 @@ def test_ensure_stale_runtime_reaches_child_processes(isolated, monkeypatch):
     found = runtimes.ensure(rt, print)
     assert found.stale and str(winget_dir) in os.environ["PATH"].split(os.pathsep)
     assert not runtimes.find(rt).stale
+
+
+# --- 다시 설치할 때 지난 선택을 체크 기본값으로(jaix-win 11/5) --------------------------------------------------
+def _record_says(rec, key, value, span=16):
+    """설치기 RecordSays 와 같은 판정(파스칼 Pos·Copy 를 그대로 옮김)."""
+    p = rec.find(f'"{key}"')
+    return p >= 0 and f'"{value}"' in rec[p + len(key) + 2:p + len(key) + 2 + span]
+
+
+def test_installer_reads_previous_choice_written_by_setup(isolated):
+    from jaix import selfupdate
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    code = iss.split("[Code]", 1)[1].replace("\r", "")
+    wizard = code.split("procedure InitializeWizard", 1)[1].split("\nend;", 1)[0]
+    # 페이지·기본값을 다 만든 뒤에 지난 선택으로 덮는다
+    assert wizard.index("ApplyPreviousChoice();") > wizard.index("ModelPage.Values[0] := True;")
+    apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
+    assert "'setup-choice.json'" in apply and "'hermes.json'" in apply
+    assert "RecordSays(Rec, 'hermes_model', 'claude', 16)" in apply and "RecordSays(Rec, 'model', 'claude', 16)" in apply
+    # jaix setup 이 쓰는 꼴을 설치기 판정이 알아본다
+    selfupdate.save_choice(["claude", "hermes"], "claude")
+    rec = selfupdate.choice_file().read_text(encoding="utf-8")
+    chans = rec[rec.index('"channels"'):]
+    chans = chans[chans.index("["):chans.index("]") + 1]
+    assert '"hermes"' in chans and '"codex"' not in chans
+    assert _record_says(rec, "hermes_model", "claude")
+    selfupdate.save_choice(["codex"], "chatgpt")
+    assert not _record_says(selfupdate.choice_file().read_text(encoding="utf-8"), "hermes_model", "claude")
+    # 예전 판: hermes.json(indent=2) 의 model
+    hermesbot._save_record({"model": "claude", "status": "linked"})
+    assert _record_says(hermesbot._record_file().read_text(encoding="utf-8"), "model", "claude")
