@@ -54,7 +54,7 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | 키 | 값 | 효과 |
 |---|---|---|
 | `extraKnownMarketplaces.jaix` | git URL + `autoUpdate: true` | jaix 자동 등록·자동 업데이트. `jaix setup` 이 사용자 설정에 넣던 것과 같은 값 |
-| `enabledPlugins` (jaix 6종) | `true` | **managed의 `true` 는 강제 켬이다** — 사용자가 꺼도 로드된다(①의 "Installed by default"와 다름). 아래 주의 참조 |
+| `enabledPlugins` (jaix 7종) | `true` | **managed의 `true` 는 강제 켬이다** — 사용자가 꺼도 로드된다(①의 "Installed by default"와 다름). 아래 주의 참조 |
 | `enabledPlugins` `claude-for-nonprofits@synced` | `false` | ①과 이중 차단. 계정 동기화 플러그인 하나를 끄는 공식 형식이 `"<name>@synced": false` 다(settings-reference `syncClaudeAiPlugins` 절) |
 | `model` | `sonnet` | 좌석이 대부분 Pro의 1.25배라 한도 방지. 사용자의 `/model` 선택보다 우선하지만 `--model` 은 이긴다 |
 | `permissions.disableBypassPermissionsMode` | `disable` | 비개발자 PC에서 "전부 허용" 모드를 막는다. 잠금이 아니라 사고 방지 |
