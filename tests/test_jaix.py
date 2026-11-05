@@ -2453,3 +2453,58 @@ def test_installer_handles_already_logged_in():
     iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
     click = iss.split("procedure LoginButtonClick", 1)[1].split("\nend;", 1)[0]
     assert "ResultCode = 3" in click and "이미 로그인돼 있습니다" in click and "' --force'" in click
+
+
+# --- 슬랙 홈 채널(jaix-win 11/5: 첫 DM 답 앞 "No home channel is set for Slack … /hermes sethome") ----------------
+def _hermes_env(text):
+    f = paths.hermes_home() / ".env"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text, encoding="utf-8")
+
+
+def test_quiet_sets_slack_home_to_owner_dm_when_missing(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_APP_TOKEN=xapp-x\nSLACK_ALLOWED_USERS=U123\n")
+    seen = []
+    monkeypatch.setattr(hermesbot, "slack_call",
+                        lambda method, token, **kw: seen.append((method, kw)) or {"ok": True, "channel": {"id": "D999"}})
+    assert hermesbot.quiet("hermes", print)
+    assert ["hermes", "config", "set", "SLACK_HOME_CHANNEL", "D999"] in calls
+    assert seen == [("conversations.open", {"users": "U123"})]
+
+
+def test_slack_home_falls_back_to_user_id_and_respects_existing(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_ALLOWED_USERS=U123\n")
+    monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: {"ok": False, "error": "missing_scope"})
+    assert hermesbot.quiet("hermes", print)
+    assert ["hermes", "config", "set", "SLACK_HOME_CHANNEL", "U123"] in calls
+    calls.clear()
+    _hermes_env("SLACK_ALLOWED_USERS=U123\nSLACK_HOME_CHANNEL=C777\n")  # 사용자가 /sethome 으로 고른 것
+    monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: pytest.fail("이미 있으면 묻지 않는다"))
+    assert hermesbot.quiet("hermes", print)
+    assert not [c for c in calls if "SLACK_HOME_CHANNEL" in c]
+
+
+def test_prune_points_at_hermes_english_warning(isolated, monkeypatch):
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 60)
+    auth = FakeAuth(CRED_LIST)
+
+    def tee(cmd, on_text):
+        auth.listing = CRED_LIST + "  #3  a@ex.com             oauth   id=ccc333 priority=2 manual:device_code\n"
+        on_text("Added openai-codex OAuth credential #3\nwarning: this login is the same OpenAI account as "
+                "openai-codex credential #1 (...). Log into a different account instead, or keep just one "
+                "(`hermes auth remove openai-codex 1`).\n")
+        return 0
+    monkeypatch.setattr(hermesbot, "_call_login_tee", tee)
+    seen = []
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=True), seen.append,
+                        auth=auth, copy=lambda c: True, wait=lambda q: None)
+    assert any("위 영문 경고" in m and "신경 쓰지 마세요" in m and "2개" in m for m in seen)

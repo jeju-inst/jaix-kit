@@ -87,8 +87,9 @@ def code_key(code):
     return hashlib.sha256(code.encode("ascii")).hexdigest()
 
 
-def slack_call(method, token, timeout=20):
-    req = urllib.request.Request(f"https://slack.com/api/{method}", data=b"",
+def slack_call(method, token, timeout=20, **params):
+    import urllib.parse
+    req = urllib.request.Request(f"https://slack.com/api/{method}", data=urllib.parse.urlencode(params).encode("ascii"),
                                  headers={"Authorization": f"Bearer {token}",
                                           "Content-Type": "application/x-www-form-urlencoded"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -420,6 +421,10 @@ def _strip_ansi(text):
 DEVICE_CODE = re.compile(r"Enter this code:\s*([A-Z0-9]{4,}-[A-Z0-9]{4,})(?=\s)")
 
 
+# hermes_cli/auth_commands.py _warn_same_codex_account 의 영문 경고
+SAME_ACCOUNT_WARNING = re.compile(r"same OpenAI account as openai-codex credential|keep just one", re.I)
+
+
 def _call_login_tee(cmd, on_text):
     """chatgpt(기기 코드) 로그인만: 출력을 파이프로 받아 그대로 창에 쓰며 on_text 로 넘긴다(코드를 클립보드에).
     표준 입력은 그대로 물려준다. 파이프면 Python 이 출력을 모아 두므로 PYTHONUNBUFFERED, 색 코드는 지우고 쓴다."""
@@ -483,7 +488,7 @@ def credentials(hermes, provider, auth=None):
     return rows
 
 
-def prune_credentials(hermes, provider, old_ids, log, auth=None):
+def prune_credentials(hermes, provider, old_ids, log, auth=None, warned=False):
     """새로 로그인한 뒤 같은 provider 의 예전 자격을 지운다(공식 `hermes auth remove`, id 로). 새 자격이 목록에
     있을 때만 한다 — 같은 OpenAI 계정이면 예전 것은 OpenAI 가 이미 폐기했고, Hermes 가 그것을 고르면 봇이 실패한다."""
     run = auth or (lambda a: _auth(hermes, a))
@@ -501,7 +506,10 @@ def prune_credentials(hermes, provider, old_ids, log, auth=None):
                 removed += 1
             else:
                 log(f"  예전 자격 #{c['index']} 정리 실패(새 자격은 그대로): {out.strip().splitlines()[-1:] or ''}")
-    if removed:
+    if removed and warned:  # Hermes 의 영문 경고가 'hermes auth remove …' 를 치라고 한다 — 연구원이 따라 치지 않게
+        log(f"  ↑ 위 영문 경고(warning: … keep just one / hermes auth remove …)는 신경 쓰지 마세요 — "
+            f"jaix 가 예전 {provider} 자격 {removed}개를 정리했습니다(새로 로그인한 것만 남김).")
+    elif removed:
         log(f"  예전 {provider} 자격 {removed}개를 정리했습니다(새로 로그인한 것만 남김).")
     return removed
 
@@ -606,12 +614,14 @@ def cmd_login(args, log, run=None, wait=None, opener=None, pause=None, auth=None
             timer = threading.Timer(OPEN_DELAY, _open)
             timer.daemon = True
             timer.start()
-        seen = {"buf": "", "copied": False}
+        seen = {"buf": "", "copied": False, "warned": False}
 
         def on_text(text):  # 기기 코드를 클립보드에(chatgpt 만 — anthropic 은 붙여넣기 입력을 받으니 파이프로 바꾸지 않는다)
+            seen["buf"] = (seen["buf"] + text)[-600:]
+            if SAME_ACCOUNT_WARNING.search(seen["buf"]):
+                seen["warned"] = True
             if seen["copied"]:
                 return
-            seen["buf"] = (seen["buf"] + text)[-400:]
             m = DEVICE_CODE.search(seen["buf"])
             if m:
                 seen["copied"] = True
@@ -634,7 +644,7 @@ def cmd_login(args, log, run=None, wait=None, opener=None, pause=None, auth=None
         if code == 0:
             log("로그인 완료.")
             if before:
-                prune_credentials(hermes, prov["provider"], {c["id"] for c in before}, log, auth)
+                prune_credentials(hermes, prov["provider"], {c["id"] for c in before}, log, auth, warned=seen["warned"])
         elif code == CANCELLED:
             log(f"로그인을 취소했습니다. 나중에 새 명령창에서 `{again}` 로 다시 하세요.")
         else:
@@ -695,6 +705,14 @@ def quiet(hermes, log):
         ok &= put("skills.disabled", value, ["config", "set", "skills.disabled", value])
         owned["skills"] = off
         log(f"    기본 스킬 {len(off)}개 끔(jaix 스킬만 켬)")
+    # 첫 DM 답 앞의 "No home channel is set for Slack … /hermes sethome" 안내를 없앤다(jaix-win 11/5). 처음 연결 때
+    # setup_pc.py 가 넣지만, 그보다 먼저 연결된 PC 는 다시 설치해도 연결을 건너뛰어 비어 있다. 이미 있으면(사용자가
+    # /sethome 으로 고른 것 포함) 건드리지 않는다. 공식 경로: `hermes config set SLACK_HOME_CHANNEL …` 은 .env 에 쓴다
+    if env_has("SLACK_ALLOWED_USERS") and not env_has("SLACK_HOME_CHANNEL"):
+        home = home_channel()
+        if home:
+            ok &= put("SLACK_HOME_CHANNEL", home, ["config", "set", "SLACK_HOME_CHANNEL", home])
+            log("    슬랙 홈 채널: 본인과의 DM 으로 정함(첫 답의 'No home channel' 안내 없앰)")
     put.save()
     rec = recorded()
     rec["quiet"] = owned
@@ -846,6 +864,35 @@ def startup_entries():
         return []
     d = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
     return sorted(d.glob("Hermes_Gateway*.vbs")) if d.is_dir() else []
+
+
+def env_value(key):
+    """Hermes .env 의 값(없으면 None). 토큰을 읽을 때도 쓰므로 값을 기록하지 않는다."""
+    try:
+        lines = (paths.hermes_home() / ".env").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        if "=" in line and line.split("=", 1)[0].strip() == key:
+            return line.split("=", 1)[1].strip().strip('"').strip("'") or None
+    return None
+
+
+def home_channel(call=None):
+    """SLACK_HOME_CHANNEL 로 쓸 값: 봇과 소유자의 DM(D…, conversations.open — setup_pc.py 와 같다). Slack 이 거절하면
+    (im:write 없음·오프라인) 소유자 멤버 ID(U…) — chat.postMessage 는 U… 를 그 사람과의 DM 으로 보낸다."""
+    user = (env_value("SLACK_ALLOWED_USERS") or "").split(",")[0].strip()
+    if not user:
+        return None
+    token = env_value("SLACK_BOT_TOKEN")
+    if token:
+        try:
+            r = (call or slack_call)("conversations.open", token, users=user)
+            if r.get("ok") and (r.get("channel") or {}).get("id"):
+                return r["channel"]["id"]
+        except (OSError, ValueError):
+            pass
+    return user
 
 
 def env_has(key):
