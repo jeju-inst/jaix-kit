@@ -10,7 +10,7 @@
 ; 슬랙 연결 코드는 명령줄·설치 기록에 싣지 않는다 — 사용자 폴더의 파일로 넘기고 jaix가 읽자마자 지운다(docs/design-hermes-unattended.md §3.2)
 ; jaix setup이 실패하면 설치기는 종료 코드 10으로 끝난다(설치 자체는 남아 jaix doctor로 볼 수 있다).
 ; 본체 자기 업데이트(src/jaix/selfupdate.py): 사용자가 [예]를 누르면 jaix 가
-;   jaix-setup.exe /SILENT /CURRENTUSER /JAIXAUTOUPDATE=1 /CHANNELS=<이전 선택> [/HERMESMODEL=…] /LOG=<updates\install-<판>.log>
+;   jaix-setup.exe /SILENT /CURRENTUSER /FORCECLOSEAPPLICATIONS /JAIXAUTOUPDATE=1 /CHANNELS=<이전 선택> [/HERMESMODEL=…] /LOG=<updates\install-<판>.log>
 ;   로 띄운다. 이전 선택은 jaix 가 넘기고, 로그인 페이지는 건너뛰며, 끝나면 결과를 %LOCALAPPDATA%\jaix\updates\history.log 에 남긴다.
 
 #define AppName "JAIX 원내 AI 도구"

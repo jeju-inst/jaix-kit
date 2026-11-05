@@ -227,3 +227,29 @@ def test_dry_run_never_downloads_or_launches(su):
                                popen=lambda cmd, **k: launched.append(cmd)) == 0
     assert not dl and not launched
     assert cli.build_parser().parse_args(["update", "--self", "--dry-run"]).dry_run
+
+
+def test_other_jaix_finds_same_folder_only(su, monkeypatch):
+    """jaix-win .8→.9: 'JAIX Hermes 로그인' 창이 열려 있어 설치기가 /SILENT 인데 Abort/Retry/Ignore 로 멈춤."""
+    here = su / "app" / "jaix"
+    import os
+    procs = [(os.getpid(), str(here / "jaixw.exe")),           # 나 — 빼야 함
+             (101, str(here / "jaix.exe")),                    # 로그인 창
+             (102, str(su / "other" / "jaix.exe"))]            # 다른 폴더의 jaix — 상관없음
+    assert selfupdate.other_jaix(lambda: procs) == [(101, "jaix.exe")]
+
+
+def test_launch_closes_other_windows_first_and_forces_close(su):
+    st = selfupdate.logon_prepare(lambda m="": None, fetch=release, download=fake_download())
+    order, seen = [], []
+    assert selfupdate.launch(st, seen.append, popen=lambda cmd, **k: order.append(("popen", cmd)),
+                             close=lambda log: order.append(("close",)))
+    assert order[0] == ("close",) and order[1][0] == "popen"
+    assert "/FORCECLOSEAPPLICATIONS" in order[1][1] and "/SUPPRESSMSGBOXES" not in order[1][1]
+
+
+def test_close_others_reports_each(su):
+    seen = []
+    others = selfupdate.close_others(seen.append, find=lambda: [(101, "jaix.exe"), (102, "jaixw.exe")],
+                                     kill=lambda pid: pid == 101)
+    assert len(others) == 2 and "닫음" in seen[0] and "닫지 못함" in seen[1]
