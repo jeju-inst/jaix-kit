@@ -240,10 +240,16 @@ def setup(lock, log, dry_run=False, update=False):
     # CLI의 marketplace add·install은 settings.json을 다시 쓴다. 손대기 전 원본을 백업해 둔다
     backup = None
     have = installed()
+    had_market = known_marketplace() is not None
     if not dry_run and find_cli() and (known_marketplace() is None or any(p.id not in have for p in plugins)):
         backup = backup_settings()
     cli_ok = cli_sync(plugins, log, dry_run=dry_run, update=update)
+    # 플러그인이 실제로 새로 깔리거나 바뀌었을 때만 시각을 남긴다 — 매일 로그온 갱신이 아무것도 안 바꿨는데 찍으면
+    # 로그온 때 먼저 켜진 Claude 앱을 doctor 가 매일 "setup 전에 켜짐"으로 오탐한다
+    touched = not dry_run and (installed() != have or (not had_market and known_marketplace() is not None))
     if managed:
+        if touched:
+            mark_setup()
         return {"managed": str(managed), "cli": cli_ok}
     current = read_json(settings_path())  # CLI가 고쳤을 수 있으니 다시 읽는다
     new, changes, warnings = merge_settings(current, plugins)
@@ -252,6 +258,9 @@ def setup(lock, log, dry_run=False, update=False):
     if changes and not dry_run:
         backup = backup or backup_settings()
         write_settings(new)
+        touched = True
+    if touched:
+        mark_setup()
     for c in changes:
         log(f"  {'(예정) ' if dry_run else ''}{c}")
     if backup:

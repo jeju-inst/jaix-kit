@@ -2567,3 +2567,16 @@ def test_desktop_started_before_setup(isolated, monkeypatch):
     assert not claude.desktop_started_before_setup([(1, msix, at + 60)])  # setup 뒤에 다시 켬
     assert not claude.desktop_started_before_setup([(1, cli_exe, at - 60)])  # Claude Code CLI 는 앱이 아님
     assert claude._is_desktop(r"C:\Users\u\AppData\Local\AnthropicClaude\app-0.9\claude.exe")
+
+
+def test_claude_setup_stamps_only_when_something_changed(isolated, monkeypatch, the_lock):
+    """로그온 자동 갱신이 아무것도 안 바꾸면 시각을 그대로 둔다(매일 '앱이 setup 전에 켜짐' 오탐 방지)."""
+    monkeypatch.setattr(claude, "find_cli", lambda: None)
+    claude.setup(the_lock, print)  # 처음: 설정에 마켓플레이스·플러그인을 넣음 → 찍음
+    stamp = claude.setup_stamp()
+    assert stamp.is_file()
+    os.utime(stamp, (1000, 1000))
+    claude.setup(the_lock, print)  # 바뀐 것 없음
+    assert stamp.stat().st_mtime == 1000
+    claude.setup(the_lock, print, dry_run=True)
+    assert stamp.stat().st_mtime == 1000

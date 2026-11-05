@@ -253,8 +253,6 @@ def cmd_setup(args, log):
         res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run, update=True)
         if res is not None:
             result["claude"] = res
-            if not args.dry_run:  # doctor 가 이보다 먼저 켜진 Claude 앱을 "완전 종료 후 다시 열기"로 알린다
-                steps.run("Claude 설정 시각", claude.mark_setup)
     else:
         log("  선택 안 함")
     log("\n[3/3] Codex · Hermes")
