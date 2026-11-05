@@ -2675,3 +2675,58 @@ def test_guard_blocks_real_hermes_outside_tmp(isolated, monkeypatch, tmp_path_fa
     if os.name != "nt":  # Windows 는 .cmd 를 셸 없이 못 띄운다 — tmp 안의 가짜 허용은 맥·리눅스에서만 본다
         monkeypatch.setenv("PATH", str(isolated / "fakebin"))
         assert subprocess.run(["hermes"], capture_output=True).returncode == 0
+
+
+# --- jaix hermes rename (사용자 결정 11/5: 베타 아이디를 나중에 바꿀 수 있게) -------------------------------------
+def _connected(monkeypatch, ident="namun"):
+    hermesbot._save_record({"status": "connected", "model": "chatgpt", "slack": {"id": ident, "connected": "t"}})
+    env = paths.hermes_home() / ".env"
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text(f"SLACK_BOT_TOKEN=xoxb-x\nSLACK_APP_TOKEN=xapp-x\nHERMES_SLACK_SLASH=hermes-{ident}\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(cmd, log, timeout=600):
+        calls.append(cmd[1:])
+        if cmd[1:3] == ["config", "set"]:  # hermes 는 UPPER_SNAKE 를 .env 에 쓴다
+            env.write_text(env.read_text(encoding="utf-8").replace(f"HERMES_SLACK_SLASH=hermes-{ident}",
+                                                                   f"HERMES_SLACK_SLASH={cmd[4]}"), encoding="utf-8")
+        return True, ""
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "_run", fake_run)
+    return calls
+
+
+def test_hermes_rename_sets_slash_restarts_and_records(isolated, monkeypatch):
+    calls = _connected(monkeypatch)
+    lines = []
+    assert cli.main(["hermes", "rename", "Hermes-NCho", "--dry-run"]) == 0
+    assert calls == []
+    assert hermesbot.cmd_rename(argparse.Namespace(id="Hermes-NCho", dry_run=False), lines.append) == 0
+    assert calls == [["config", "set", "HERMES_SLACK_SLASH", "hermes-ncho"], ["gateway", "restart"]]
+    slack = hermesbot.recorded()["slack"]
+    assert slack["id"] == "ncho" and slack["renamed_from"] == "namun" and slack["connected"] == "t"
+    assert any("/hermes-ncho" in line for line in lines)
+    # 다시 하면 바꿀 것 없음
+    calls.clear()
+    assert hermesbot.cmd_rename(argparse.Namespace(id="ncho", dry_run=False), print) == 0 and calls == []
+    # doctor: 기록과 슬래시가 맞으면 조용, 이름 바꾼 이력은 보임
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
+    monkeypatch.setattr(hermesbot, "duplicate_credentials", lambda: [])
+    checks = doctor.check_hermes_bot()
+    assert [c.status for c in checks] == ["ok"] and "Hermes-namun 에서 이름 바꿈" in checks[0].message
+
+
+def test_hermes_rename_refuses_bad_id_and_unlinked(isolated, monkeypatch):
+    assert hermesbot.cmd_rename(argparse.Namespace(id="Bad Name!", dry_run=False), print) == 2
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    assert hermesbot.cmd_rename(argparse.Namespace(id="ncho", dry_run=False), print) == 1  # 연결 기록 없음
+
+
+def test_doctor_warns_slash_differs_from_record(isolated, monkeypatch):
+    _connected(monkeypatch)
+    env = paths.hermes_home() / ".env"
+    env.write_text("SLACK_BOT_TOKEN=x\nSLACK_APP_TOKEN=y\nHERMES_SLACK_SLASH=hermes-old\n", encoding="utf-8")
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
+    monkeypatch.setattr(hermesbot, "duplicate_credentials", lambda: [])
+    warn = [c for c in doctor.check_hermes_bot() if c.status == "warn"]
+    assert len(warn) == 1 and "/hermes-old" in warn[0].message and warn[0].fix == "jaix hermes rename namun"

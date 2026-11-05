@@ -468,7 +468,12 @@ def check_hermes_bot():
                          "hermes gateway install"))
     else:
         slack = rec.get("slack") or {}
-        out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}"))
+        renamed = f" (Hermes-{slack['renamed_from']} 에서 이름 바꿈)" if slack.get("renamed_from") else ""
+        out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}{renamed}"))
+        slash, want = hermesbot.env_value("HERMES_SLACK_SLASH"), hermesbot.slash_command(slack.get("id"))
+        if slash and slash != want:
+            out.append(Check("warn", area, f"슬래시 명령 /{slash} 가 연결 기록(Hermes-{slack.get('id')})과 다름 — "
+                                           f"/{want} 가 '앱이 반응하지 않음'으로 실패함", f"jaix hermes rename {slack.get('id')}"))
     if hermesbot.approval_mode() == "off":
         out.append(Check("warn", area, "위험 명령 승인이 꺼져 있음(approvals.mode: off) — 에이전트가 묻지 않고 실행함",
                          "AI센터가 켠 것이 아니면 jaix hermes approvals smart"))

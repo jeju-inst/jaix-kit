@@ -377,6 +377,57 @@ def cmd_approvals(args, log):
     return 0
 
 
+# hermes-slackbot make_manifest.ID_RE 와 같다(슬랙 슬래시 명령: 소문자, "/hermes-" 포함 32자 이하)
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,20}$")
+
+
+def slash_command(ident):
+    return f"hermes-{ident}"
+
+
+def cmd_rename(args, log):
+    """관리자가 슬랙 앱을 Hermes-<새 아이디>로 바꾼 뒤(hermes-slackbot provision_app.py rename), 이 PC 쪽을 맞춘다:
+    HERMES_SLACK_SLASH → hermes-<새 아이디>, gateway 재시작, 연결 기록 갱신. 토큰·앱은 그대로다."""
+    new = (args.id or "").strip().lower().removeprefix("hermes-")
+    if not ID_RE.match(new):
+        log(f"아이디 '{args.id}' 는 쓸 수 없습니다 — 소문자·숫자·-·_ 로 21자 이하(AI센터가 알려 준 새 아이디 그대로)")
+        return 2
+    rec = recorded()
+    slack = rec.get("slack") or {}
+    old = slack.get("id")
+    if rec.get("status") != "connected" or not old:
+        log("이 PC의 Hermes 는 jaix 로 슬랙에 연결된 기록이 없습니다. 먼저 jaix-setup 으로 연결하세요.")
+        return 1
+    hermes = find_hermes()
+    if not hermes:
+        log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
+        return 1
+    want = slash_command(new)
+    if old == new and env_value("HERMES_SLACK_SLASH") == want:
+        log(f"이미 Hermes-{new} (/{want}) 입니다. 바꿀 것이 없습니다.")
+        return 0
+    if args.dry_run:
+        log(f"(예정) Hermes-{old} → Hermes-{new}: HERMES_SLACK_SLASH={want}, gateway 재시작, 연결 기록 갱신")
+        return 0
+    # UPPER_SNAKE 키는 hermes 가 .env 에 쓴다(공식 경로 — setup_pc·install.py 와 같은 값)
+    ok, _ = _run([hermes, "config", "set", "HERMES_SLACK_SLASH", want], log)
+    if not ok:
+        log("슬래시 명령을 바꾸지 못했습니다(위 기록). 아무것도 바꾸지 않았습니다.")
+        return 1
+    if old != new:
+        slack = dict(slack, id=new, renamed_from=old,
+                     renamed=datetime.datetime.now().isoformat(timespec="seconds"))
+        rec["slack"] = slack
+        _save_record(rec)
+    log(f"슬래시 명령: /{want} (Hermes-{old} → Hermes-{new})")
+    ok, _ = _run([hermes, "gateway", "restart"], log, timeout=180)
+    if not ok:
+        log("gateway 를 다시 시작하지 못했습니다. 새 명령창에서 `hermes gateway restart` 를 실행하세요.")
+        return 1
+    log(f"gateway 다시 시작함. 슬랙에서 /{want} help 를 쳐 보세요(DM 은 그대로 됩니다).")
+    return 0
+
+
 def show_console():
     """jaix.exe 는 hide_console="hide-early"(installer/jaix.spec)로 빌드돼, 설치기가 띄워 콘솔을 혼자 가지면 창이
     숨는다. 로그인은 기기 코드를 읽고 붙여 넣어야 하므로 다시 보이게 한다(Codex #86 P1). Windows 외·콘솔 없음은 그대로."""
