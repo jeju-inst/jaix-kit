@@ -2730,3 +2730,13 @@ def test_doctor_warns_slash_differs_from_record(isolated, monkeypatch):
     monkeypatch.setattr(hermesbot, "duplicate_credentials", lambda: [])
     warn = [c for c in doctor.check_hermes_bot() if c.status == "warn"]
     assert len(warn) == 1 and "/hermes-old" in warn[0].message and warn[0].fix == "jaix hermes rename namun"
+
+
+def test_guide_cowork_line_depends_on_managed_deployment():
+    """관리자 배포가 없는 PC(개인 구독 계정)는 Cowork 마켓을 직접 추가하라고 안내한다(jaix-win .16)."""
+    personal = cli.guide(["claude"], {"claude": {"cli": True, "managed": None}})
+    assert "기관 관리자 배포로 내려옵니다" not in personal
+    assert "Customize → Plugins → Add marketplace" in personal and "jeju-inst/jaix-kit" in personal
+    assert "메일 도구는 Cowork 에서 쓸 수 없습니다" in personal
+    org = cli.guide(["claude"], {"claude": {"cli": True, "managed": "remote-settings.json"}})
+    assert "기관 관리자 배포로 내려옵니다" in org and "Add marketplace" not in org

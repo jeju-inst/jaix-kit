@@ -87,8 +87,13 @@ def guide(channels, result):
             "  2. Code 탭에서 HWP 편집 · 업무일지 · 보고서 작성 표준 도구를 쓸 수 있습니다.",
             "     새 버전도 앱을 다시 열 때 저절로 받습니다.",
             "  3. 왼쪽 위 모델 선택에서 Sonnet을 고르세요. 사용량을 아낍니다.",
-            "  4. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려옵니다.",
         ]
+        if (result.get("claude") or {}).get("managed"):
+            out.append("  4. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려옵니다.")
+        else:  # 관리자 배포가 없는 PC(개인 구독 계정 — 11/10 전 베타 대부분, jaix-win .16 실측)
+            out += ["  4. Cowork(채팅)에서도 쓰려면 직접 추가하세요: 왼쪽 Customize → Plugins → Add marketplace 에",
+                    "     jeju-inst/jaix-kit 를 넣고, GitHub 앱 접근을 허용한 뒤 jaix 플러그인을 하나씩 Add 하세요.",
+                    "     (메일 도구는 Cowork 에서 쓸 수 없습니다 — Code 탭에서 쓰세요)"]
         if result.get("claude") and not result["claude"].get("cli") and not result["claude"].get("managed"):
             out += ["  ※ 아직 Claude Code를 찾지 못해 도구를 직접 깔지 못했습니다. Claude 앱에서 Code 탭을 열었다 닫고",
                     "     한 번 더 여세요(첫 번째에 도구 목록을 받고, 두 번째에 설치합니다)."]
