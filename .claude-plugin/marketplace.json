@@ -150,8 +150,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp2pdf.git",
-        "ref": "v2026.11.05.1",
-        "sha": "a883922472eebe0891faa70fab2dc1945bf03ddc"
+        "ref": "v2026.11.05.2",
+        "sha": "00a59212f9c237ef743625736ffe5150179f7594"
       },
       "homepage": "https://github.com/z0nam/hwp2pdf",
       "metadata": {
@@ -159,7 +159,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.05.1"
+      "version": "2026.11.05.2"
     }
   ]
 }
