@@ -206,3 +206,24 @@ def test_setup_records_choice(su, monkeypatch):
     selfupdate.save_choice(["claude", "hermes"], "claude")
     assert json.loads(selfupdate.choice_file().read_text(encoding="utf-8")) == {
         "channels": ["claude", "hermes"], "hermes_model": "claude"}
+
+
+def test_cached_state_is_rejudged_against_running_version(su, monkeypatch):
+    """Codex #100: 자기 업데이트 뒤 6시간 안에 다시 로그온해도 이미 깐 판을 권하지 않는다."""
+    calls = []
+    selfupdate.check(fetch=lambda: calls.append(1) or release(), now=1000.0)
+    monkeypatch.setattr(selfupdate, "__version__", "2026.11.05.1")  # 새 판으로 바뀜
+    assert not selfupdate.check(fetch=lambda: calls.append(1) or release(), now=1001.0)["newer"]
+    assert len(calls) == 2  # 판이 바뀌면 지난 판정을 버리고 다시 확인
+    monkeypatch.setattr(selfupdate, "__version__", "2026.11.06.1")  # 손으로 더 새 판을 깔았으면 내리지 않는다
+    assert not selfupdate.check(fetch=lambda: (_ for _ in ()).throw(OSError("offline")), now=1002.0)["newer"]
+    assert selfupdate.doctor_status(check_now=False)[0] == "ok"
+
+
+def test_dry_run_never_downloads_or_launches(su):
+    dl, launched = [], []
+    args = argparse.Namespace(yes=True, dry_run=True)
+    assert selfupdate.cmd_self(args, lambda m="": None, fetch=release, download=fake_download(calls=dl),
+                               popen=lambda cmd, **k: launched.append(cmd)) == 0
+    assert not dl and not launched
+    assert cli.build_parser().parse_args(["update", "--self", "--dry-run"]).dry_run

@@ -96,14 +96,16 @@ def check(force=False, fetch=None, now=None):
     """최신 릴리스를 확인해 상태에 남기고 돌려준다. 간격 안이면(force 아니면) 묻지 않고 지난 상태.
     상태: latest(태그)·newer·url·digest·critical·checked_at·error."""
     state = load_state()
+    if state.get("current") != __version__:  # 그사이 본체가 바뀜(자기 업데이트·수동 설치) — 지난 판정은 버린다
+        state.pop("checked_at", None)
     if not force and not due(state, now):
-        return state
+        return _rejudge(state)
     try:
         rel = (fetch or _fetch)()
     except Exception as e:  # 오프라인·한도·GitHub 장애 — checked_at 을 안 바꿔 다음 실행에 다시 한다
         state["error"] = f"확인 실패: {e}"
         save_state(state)
-        return state
+        return _rejudge(state)
     tag = str(rel.get("tag_name") or "")
     asset = next((a for a in rel.get("assets") or [] if a.get("name") == ASSET), None)
     cur = current()
@@ -119,6 +121,13 @@ def check(force=False, fetch=None, now=None):
         "error": None if asset else f"{tag} 에 {ASSET} 이 없음",
     })
     save_state(state)
+    return state
+
+
+def _rejudge(state):
+    """지난 상태의 newer 를 지금 도는 판에 대고 다시 판단한다(이미 깐 판·더 낮은 판을 권하지 않게)."""
+    cur = current()
+    state["newer"] = bool(cur and state.get("url") and parse_version(state.get("latest")) > cur)
     return state
 
 
@@ -301,12 +310,16 @@ def cmd_self(args, log, fetch=None, download=None, popen=None, ask=None):
     if current() is None:
         log(f"개발판(jaix {__version__})이라 본체 업데이트를 하지 않습니다.")
         return 1
+    dry_run = getattr(args, "dry_run", False)
     state = check(force=True, fetch=fetch)
     if state.get("error") and not state.get("newer"):
         log(f"새 판을 확인하지 못했습니다: {state['error']}")
         return 1
     if not state.get("newer"):
         log(f"jaix {__version__} — 최신입니다.")
+        return 0
+    if dry_run:
+        log(f"새 판 {state.get('latest')} 이 있습니다(지금 {__version__}). --dry-run 이라 받거나 설치하지 않습니다.")
         return 0
     log(f"새 판 {state.get('latest')} 이 있습니다(지금 {__version__}). 설치기를 받는 중…")
     if not fetch_installer(state, log, download):
