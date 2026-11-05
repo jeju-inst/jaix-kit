@@ -162,6 +162,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "jaix doctor 실패" }
           (Get-Command hwp2pdf-cli).Source
           Get-ChildItem "$env:APPDATA\uv\python"   # jaix-kit#14: 설치본이 uv 관리 Python을 앱 밖에서 깔았는지
+          # 명령창 claude·codex(사용자 요구 11/5): 새 창에서 바로 되는지 — PowerShell 과 cmd 둘 다
+          Get-Content "$env:LOCALAPPDATA\jaix\cli-installed.json" -ErrorAction SilentlyContinue
+          foreach ($n in 'claude','codex') {
+            $c = Get-Command $n -ErrorAction SilentlyContinue
+            if (-not $c) { throw "새 PowerShell 에서 $n 이 안 잡힘" }
+            Write-Host "$n -> $($c.Source)"
+            & $n --version
+            if ($LASTEXITCODE -ne 0) { throw "$n --version 종료 코드 $LASTEXITCODE" }
+            cmd /c "$n --version"
+            if ($LASTEXITCODE -ne 0) { throw "cmd 에서 $n --version 종료 코드 $LASTEXITCODE" }
+          }
 
       # 로그온 자동 갱신: 설치기가 둔 시작프로그램 바로가기(jaixw.exe update --quiet)가 있고, 예약 작업은 만들지 않으며
       # (Defender Persistence.A!ml, jaix-win 11/4), 그 명령이 돌아 상태를 남기는지

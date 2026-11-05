@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selfupdate, uvpython, winenv, works
+from jaix import __version__, claude, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -98,6 +98,14 @@ def guide(channels, result):
                        else "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.")
         else:
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
+    terms = [n for n in ("claude", "codex") if n in channels and (result.get(f"{n}_cli") or {}).get("status")
+             in ("present", "path-added", "installed")]
+    failed = [n for n in ("claude", "codex") if n in channels and (result.get(f"{n}_cli") or {}).get("status") == "failed"]
+    if terms:
+        out += ["■ 명령창에서 쓰기",
+                f"  새 명령창(PowerShell·cmd)을 열고 {' 또는 '.join(terms)} 를 입력하세요. 처음 한 번은 로그인을 묻습니다."]
+    if failed:
+        out += [f"  ※ {', '.join(failed)} 명령을 깔지 못했습니다. 잠시 뒤 jaix-setup 을 다시 실행하거나 jaix doctor 결과를 AI센터에 보내 주세요."]
     if "hermes" in channels:
         out += ["■ 슬랙으로도 쓰기 (Hermes)", *_hermes_guide(result.get("hermes") or {})]
     if (result.get("gw") or {}).get("status") in ("installed", "current"):
@@ -220,6 +228,12 @@ def cmd_setup(args, log):
         result["plugbin"] = pb_res
     log("\n[2/3] Claude")
     if "claude" in chosen:
+        # 명령창의 claude: 있으면 그대로, PATH 에 없으면 올리고, 없으면 공식 네이티브 설치(사용자 요구 11/5).
+        # 플러그인 설치(claude.setup)보다 먼저 — 새로 깐 CLI 로 플러그인을 넣는다
+        res = steps.run("claude 명령", clis.ensure, "claude", log, dry_run=args.dry_run)
+        if res is not None:
+            result["claude_cli"] = res
+            _cli_failed(steps, "claude 명령", res)
         # 다시 설치할 때 이미 깔린 옛 판도 잠금에 맞춘다(update 와 같게). 빠뜨리면 Codex 만 맞고 Claude 는 옛 판으로
         # 남아 doctor 가 실패를 보였다(jaix-win 11/4 ③)
         res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run, update=True)
@@ -229,6 +243,10 @@ def cmd_setup(args, log):
         log("  선택 안 함")
     log("\n[3/3] Codex · Hermes")
     if "codex" in chosen:
+        res = steps.run("codex 명령", clis.ensure, "codex", log, dry_run=args.dry_run)
+        if res is not None:
+            result["codex_cli"] = res
+            _cli_failed(steps, "codex 명령", res)
         res = steps.run("Codex", codex.setup, lock, log, dry_run=args.dry_run)
         if res is not None:
             result["codex"] = res
@@ -257,9 +275,18 @@ def cmd_setup(args, log):
     return steps.summary()
 
 
+def _cli_failed(steps, area, res):
+    """명령창 claude·codex 를 못 깔았으면 설치 실패로 센다(다른 단계는 계속) — 설치기 종료 코드 10, 지난 실패 기록 유지."""
+    if res.get("status") == "failed":
+        steps.failed.append(area)
+        steps.code = max(steps.code, 1)
+
+
 def _setup_problems(result):
     codex_res = result.get("codex") or {}
     return bool((result.get("hermes") or {}).get("status") == "failed"
+                or (result.get("claude_cli") or {}).get("status") == "failed"
+                or (result.get("codex_cli") or {}).get("status") == "failed"
                 or result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
                 or result.get("hancom_consent") is False
                 or codex_res.get("error") or codex_res.get("failed")
@@ -373,6 +400,7 @@ def cmd_cleanup(args, log):
     사용자 설정은 그대로 둔다."""
     if schedule.unregister():
         log("로그온 자동 갱신을 지움")
+    clis.cleanup(log)  # jaix 가 깐 claude·codex 명령과 넣은 PATH 만
     for p in winenv.remove_from_path(paths.jaix_home()):
         log(f"PATH에서 뺌: {p}")
     # 지워질 jaix 사본을 가리키는 환경변수(HWP2PDF_CLI 등)도 뺀다 — 남기면 플러그인이 없는 파일을 부른다
