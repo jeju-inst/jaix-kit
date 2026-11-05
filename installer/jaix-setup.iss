@@ -278,7 +278,7 @@ begin
     False, False);
   ChannelPage.Add('Claude (데스크톱 앱 · Claude Code) — Claude 유료 구독');
   ChannelPage.Add('Codex (데스크톱 앱 · CLI) — ChatGPT 유료 구독(Plus 이상)');
-  ChannelPage.Add('슬랙으로도 쓰기 (Hermes) — AI센터에서 받은 연결 코드 필요');
+  ChannelPage.Add('슬랙으로도 쓰기 (Hermes) — 연결 코드 + ChatGPT 유료 구독 또는 회사 Claude 계정 필요');
   ChannelPage.Values[0] := True;
   ChannelPage.Values[1] := IsCodexInstalled();
   ChannelPage.Values[2] := False;
@@ -295,10 +295,11 @@ begin
     HermesPage.ID,
     'Hermes가 쓸 AI',
     '이미 쓰고 있는 구독을 고르세요.',
+    'Hermes는 ChatGPT 유료 구독 또는 회사 Claude 계정(Team)이 있어야 씁니다. 개인 Claude Pro로는 동작하지 않습니다. ' +
     '설치 마지막에 로그인 창을 여는 단계가 있습니다. 브라우저에서 승인하면 됩니다.',
     True, False);
   ModelPage.Add('ChatGPT 구독(Plus 이상)');
-  ModelPage.Add('Claude 구독');
+  ModelPage.Add('회사 Claude 계정(Team) — 개인 Pro 구독은 안 됨');
   // 기본 선택 없음 — 무인 설치·고르지 않은 경우의 chatgpt 는 HermesModel() 안의 내부 기본값일 뿐이다
   ApplyPreviousChoice();
 

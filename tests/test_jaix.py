@@ -2612,13 +2612,16 @@ def test_installer_reads_previous_choice_written_by_setup(isolated):
     wizard = code.split("procedure InitializeWizard", 1)[1].split("\nend;", 1)[0]
     # 페이지·기본값을 다 만든 뒤에 지난 선택으로 덮는다
     apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
-    assert wizard.index("ApplyPreviousChoice();") > wizard.index("ModelPage.Add('Claude 구독');")
+    assert wizard.index("ApplyPreviousChoice();") > wizard.index("ModelPage.Add('회사 Claude 계정(Team)")
     # 처음 설치는 Hermes 모델을 미리 고르지 않는다(사용자 결정 11/5) — 고르지 않고 [다음]이면 묻는다
     assert "ModelPage.Values[" not in wizard
     nxt = code.split("function NextButtonClick", 1)[1].split("\nend;", 1)[0]
     assert "CurPageID = ModelPage.ID" in nxt and "not WizardSilent()" in nxt and "골라 주세요" in nxt
     # 지난 선택은 Hermes 를 골랐을 때만 모델까지 채운다(chatgpt 도 채움)
     assert "if ChannelPage.Values[2] then\n          SetModelChoice(" in apply
+    # 개인 Pro 로는 Hermes 가 안 된다(providers.md Subscription plans, studio 실측 11/5) — 화면에 밝힌다
+    assert "개인 Claude Pro로는 동작하지 않습니다" in wizard and "개인 Pro 구독은 안 됨" in wizard
+    assert "개인 Claude Pro 구독은 Hermes 에서 동작하지 않습니다" in hermesbot.PROVIDERS["claude"]["how"][0]
     apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
     assert "'setup-choice.json'" in apply and "'hermes.json'" in apply
     assert "RecordSays(Rec, 'hermes_model', 'claude', 16)" in apply and "RecordSays(Rec, 'model', 'claude', 16)" in apply
