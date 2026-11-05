@@ -63,6 +63,21 @@ def set_user_env(name, value):
     return True
 
 
+def remove_user_env_under(name, prefix):
+    """사용자 환경변수 name 이 prefix 아래를 가리킬 때만 지운다(사용자가 바꿔 둔 값은 둔다). 지웠으면 True."""
+    value = get_user_env(name)
+    if not value:
+        return False
+    root = _norm(prefix)
+    if not (_norm(value) == root or _norm(value).startswith(root + "\\")):
+        return False
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+        winreg.DeleteValue(key, name)
+    _broadcast()
+    os.environ.pop(name, None)
+    return True
+
+
 def in_user_path(path):
     return _norm(path) in {_norm(p) for p in user_path_entries()}
 
