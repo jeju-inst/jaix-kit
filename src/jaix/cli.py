@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, uvpython, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -177,6 +177,8 @@ def cmd_setup(args, log):
         return _setup_via_task(args)
     lock = lockmod.load(args.lock, args.channel, args.offline)
     chosen = _channels(args.channels)
+    if not args.dry_run:  # 본체 자기 업데이트가 설치기에 그대로 넘겨 이전 선택(Hermes 등)을 지킨다
+        selfupdate.save_choice(chosen, args.hermes_model)
     # --status-out 은 --via-task 가 작업에 넘길 때만 붙는다
     how = "via task" if args.status_out else "direct, task fallback" if getattr(args, "task_fallback", False) else "direct"
     log(_banner("setup", how))
@@ -279,27 +281,40 @@ def cmd_doctor(args, log):
 
 
 def cmd_update(args, log):
+    if getattr(args, "self_update", False):  # jaix update --self: 본체(설치본) 업데이트만
+        return selfupdate.cmd_self(args, log)
     if not args.quiet:
         log(_banner("update", "direct"))
         problems = _update(args, log)
         if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
             schedule.write_status(problems)
+        if selfupdate.applies() and not args.offline and not args.dry_run:
+            state = selfupdate.check()
+            if state.get("newer") and sys.stdin and sys.stdin.isatty():  # 시작 메뉴 'JAIX 업데이트' 창 — 그 자리에서 묻는다
+                log("")
+                selfupdate.cmd_self(argparse.Namespace(yes=False), log)
+            elif state.get("newer"):
+                log(f"\n※ jaix 새 판 {state.get('latest')} 이 있습니다(지금 {__version__}). 본체 업데이트: jaix update --self")
         return 1 if problems else 0
     # 로그온 자동 갱신(예약 작업·시작프로그램 바로가기)이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다
     if args.delay:  # 바로가기는 로그온 즉시 돈다 — 네트워크가 올라올 틈(예약 작업의 '지연 2분' 대신)
         time.sleep(args.delay)
     log = Log(schedule.open_log(), quiet=True)
     log(_banner("update", "logon task") + " — 로그온 자동 갱신")
+    # 첫 단계: 본체 새 판 확인·받기·검증(묻지 않음). 묻는 것은 도구 갱신이 끝난 뒤 — 답을 기다리느라 갱신이 밀리지 않게
+    pending = None if args.dry_run else selfupdate.logon_prepare(log)
     try:
         problems = _update(args, log)
     except Exception as e:  # 잠금을 못 받음(오프라인)·깨진 설정 등 — 다음 로그온에 다시 한다
         log(f"멈춤: {e}")
         log(traceback.format_exc().rstrip())
         schedule.write_status([], error=str(e))
+        selfupdate.logon_offer(pending, log)  # 새 판이 이 실패를 고친 것일 수도 있다
         return 1
     schedule.write_status(problems)
     for p in problems:
         log(f"문제: {p}")
+    selfupdate.logon_offer(pending, log)
     return 1 if problems else 0
 
 
@@ -403,6 +418,9 @@ def build_parser():
     u.add_argument("--quiet", action="store_true",
                    help="화면에 쓰지 않고 update.log·update-status.json에만 남김(로그온 자동 갱신용)")
     u.add_argument("--delay", type=int, default=0, help="--quiet 일 때 시작 전에 기다릴 초(시작프로그램 바로가기용)")
+    u.add_argument("--self", dest="self_update", action="store_true",
+                   help="jaix 본체(설치본) 새 판을 지금 확인하고, 있으면 받아 검증한 뒤 물어서 설치기를 띄움")
+    u.add_argument("--yes", action="store_true", help="--self 에서 묻지 않고 바로 설치기를 띄움")
     u.set_defaults(func=cmd_update)
 
     h = sub.add_parser("hermes", help="Hermes 관리자 명령")
