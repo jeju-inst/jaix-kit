@@ -209,10 +209,11 @@ begin
     wpWelcome,
     '어디에서 쓰시나요?',
     'JAIX 도구(HWP 편집 · 업무일지 · 보고서 작성 표준)를 연결할 AI를 고르세요.',
+    '쓰고 있는 구독에 맞춰 체크하세요. 둘 다 있으면 둘 다 체크해도 됩니다. ' +
     '고른 곳에 도구를 등록합니다. 기존 설정은 지우지 않고, 바꾸기 전에 백업합니다.',
     False, False);
-  ChannelPage.Add('Claude (데스크톱 앱 · Claude Code) — 권장');
-  ChannelPage.Add('Codex (데스크톱 앱 · CLI)');
+  ChannelPage.Add('Claude (데스크톱 앱 · Claude Code) — Claude 유료 구독');
+  ChannelPage.Add('Codex (데스크톱 앱 · CLI) — ChatGPT 유료 구독(Plus 이상)');
   ChannelPage.Add('슬랙으로도 쓰기 (Hermes) — AI센터에서 받은 연결 코드 필요');
   ChannelPage.Values[0] := True;
   ChannelPage.Values[1] := IsCodexInstalled();
@@ -232,7 +233,7 @@ begin
     '이미 쓰고 있는 구독을 고르세요.',
     '설치 마지막에 로그인 창을 여는 단계가 있습니다. 브라우저에서 승인하면 됩니다.',
     True, False);
-  ModelPage.Add('ChatGPT 구독 — 권장');
+  ModelPage.Add('ChatGPT 구독(Plus 이상)');
   ModelPage.Add('Claude 구독');
   ModelPage.Values[0] := True;
 
