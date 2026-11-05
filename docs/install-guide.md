@@ -62,6 +62,23 @@ PC에 따라 이 창이 뜨지 않을 수 있습니다. 뜨면 [추가 정보] �
   - Google Docs·Sheets·Slides 커넥터는 연결하지 않아도 된다(Drive로 충분하다).
   - 연결은 각자 계정으로 하고, 한 번 하면 명령창 Claude Code에도 같이 보인다.
 
+## 4-2. 개인 구독 계정으로 쓸 때 (11/10 전 베타)
+기관 Team 계정 좌석이 아직 없고 **본인 Pro/Max 구독**으로 로그인했다면, 기관 관리자가 내려보내는 설정(기본 모델, Cowork 도구, 기관 커넥터)이 오지 않는다. 아래를 직접 한다. Team 좌석을 받으면 이 절은 할 필요 없다.
+
+- **Code 탭·명령창 Claude Code**: 설치기(1-4절)가 도구를 넣어 주므로 그대로 쓴다. 개인 계정이어도 같다.
+- **Cowork(채팅)에서 도구 쓰기**: 마켓을 직접 추가한다.
+  1. 왼쪽 **Customize → Plugins** 탭으로 간다.
+  2. **Add → Add marketplace**를 누르고 `jeju-inst/jaix-kit` 를 넣는다.
+  3. 목록에 나온 jaix 플러그인을 **모두** 설치한다(업무일지 · HWP · 보고서 작성 · 메일 · HWP→PDF 등. 목록은 계속 늘어난다).
+  4. 입력창에 `/` 를 쳐서 jaix 스킬이 보이면 된다.
+  - 새 버전이나 새 플러그인이 안 보이면 Plugins 탭에서 jaix 마켓을 새로고침(업데이트)한다.
+  - 자동 동기화를 켜라며 GitHub 앱 접근을 물으면 허용하지 않아도 된다(공개 저장소라 없이도 받아진다).
+- **모델**: 4-1절처럼 **Sonnet**을 직접 고른다. 명령창 Claude Code는 기관 기본값이 오지 않으므로 `/model sonnet` 으로 바꾼다.
+- **업무 계정 연결**: 4-1절 표 그대로 **Customize → Connectors**에서 각자 연결한다(Slack · Google Calendar/Drive=`@ji.re.kr` · Gmail=`@jri.re.kr` · monday).
+- **규정 Q&A**: 준비되면 AI센터가 주소를 알려 준다. **Customize → Connectors → + Add → Add custom connector**에 그 주소를 넣고 웍스 계정으로 로그인한다. 아직은 없다.
+
+> 근거: Anthropic 도움말 "Use plugins in Claude"(Pro·Max 포함 모든 유료 요금제), "About custom connectors using remote MCP"(Pro·Max: Customize → Connectors), 2026-11-05 확인. 개인 계정에서 Cowork 마켓 추가가 실제로 되는지는 베타 때 확인한다.
+
 ## 5. 새 버전
 - Claude는 앱을 다시 열 때 새 버전을 저절로 받는다.
 - Codex 쪽은 로그온할 때 jaix가 저절로 맞춘다(시작프로그램의 `JAIX 갱신` 바로가기, 로그온 2분 뒤 창 없이 돈다). 작업 관리자 → 시작 앱에서 꺼 두면 저절로 맞추지 않으니 가끔 `jaix update`를 실행한다.
