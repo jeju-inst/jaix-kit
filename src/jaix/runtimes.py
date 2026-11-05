@@ -252,6 +252,9 @@ def ensure(rt, log, dry_run=False, upgrade=False):
             found = find(rt)
         if found.managed:  # 파일은 있는데 사용자 PATH에서 빠졌을 수 있다(doctor가 setup 재실행을 권하는 경우)
             winenv.add_to_path([rt.path_dir()], dry_run=dry_run)
+        if found.stale and not dry_run:  # 설치 전에 연 창에서 돈 setup: 뒤에 부르는 claude·uvx 가 Git·uv 를 찾게
+            winenv.refresh_process_path()
+            _process_path_add(Path(found.path).parent)
         log(f"  {rt.label}: {found.version or '있음'} ({found.path})")
         _export(rt, found, log, dry_run)
         return found
@@ -278,6 +281,14 @@ def ensure(rt, log, dry_run=False, upgrade=False):
     log(f"  {rt.label}: {found.version or '?'} ({found.path})")
     _export(rt, found, log, dry_run)
     return found
+
+
+def _process_path_add(folder):
+    """이 프로세스(와 자식)의 PATH 에만 folder 를 붙인다. 사용자 PATH 는 건드리지 않는다."""
+    cur = os.environ.get("PATH", "").split(os.pathsep)
+    norm = lambda p: os.path.normcase(os.path.normpath(p))  # noqa: E731
+    if norm(str(folder)) not in {norm(p) for p in cur if p}:
+        os.environ["PATH"] = os.pathsep.join([*cur, str(folder)])
 
 
 def _export(rt, found, log, dry_run=False):

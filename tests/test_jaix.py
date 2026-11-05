@@ -2580,3 +2580,19 @@ def test_claude_setup_stamps_only_when_something_changed(isolated, monkeypatch, 
     assert stamp.stat().st_mtime == 1000
     claude.setup(the_lock, print, dry_run=True)
     assert stamp.stat().st_mtime == 1000
+
+
+def test_ensure_stale_runtime_reaches_child_processes(isolated, monkeypatch):
+    """설치 전에 연 창에서 setup: 찾은 런타임 폴더를 이 프로세스 PATH 에 붙여 뒤의 claude·uvx 가 찾게(사용자 PATH 는 그대로)."""
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    winget_dir = isolated / "Programs" / "hwp2pdf"
+    _fake_cli(winget_dir, "2026.11.5.1")
+    monkeypatch.setenv("PATH", str(isolated / "empty"))
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(rt, "own_copy", False)
+    monkeypatch.setenv("LOCALAPPDATA", str(isolated / "la"))
+    monkeypatch.setattr(winenv, "fresh_path", lambda: str(winget_dir))
+    monkeypatch.setattr(winenv, "refresh_process_path", lambda: None)
+    found = runtimes.ensure(rt, print)
+    assert found.stale and str(winget_dir) in os.environ["PATH"].split(os.pathsep)
+    assert not runtimes.find(rt).stale
