@@ -425,8 +425,9 @@ def cmd_cleanup(args, log):
         log(f"PATH에서 뺌: {p}")
     # 지워질 jaix 사본을 가리키는 환경변수(HWP2PDF_CLI 등)도 뺀다 — 남기면 플러그인이 없는 파일을 부른다
     for rt in runtimes.RUNTIMES:
-        if rt.env_var and winenv.remove_user_env_under(rt.env_var, paths.jaix_home()):
-            log(f"환경변수 뺌: {rt.env_var}")
+        for name in ([rt.env_var] if rt.env_var else []) + list(rt.extra_env):
+            if winenv.remove_user_env_under(name, paths.jaix_home()):
+                log(f"환경변수 뺌: {name}")
     return 0
 
 

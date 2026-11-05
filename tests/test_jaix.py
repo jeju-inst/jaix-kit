@@ -2327,7 +2327,8 @@ def test_cleanup_removes_env_only_when_it_points_into_jaix(isolated, monkeypatch
     monkeypatch.setattr(winenv, "remove_user_env_under", lambda name, prefix: removed.append((name, prefix)) or True)
     msgs = []
     assert cli.cmd_cleanup(None, msgs.append) == 0
-    assert removed == [("HWP2PDF_CLI", paths.jaix_home())] and "환경변수 뺌: HWP2PDF_CLI" in msgs
+    assert sorted(removed) == [("CLAUDE_CODE_GIT_BASH_PATH", paths.jaix_home()), ("HWP2PDF_CLI", paths.jaix_home())]
+    assert "환경변수 뺌: HWP2PDF_CLI" in msgs and "환경변수 뺌: CLAUDE_CODE_GIT_BASH_PATH" in msgs
 
 
 def test_remove_user_env_under_keeps_user_value(monkeypatch, tmp_path):
@@ -2780,16 +2781,66 @@ def test_git_uv_age_pinned_without_winget():
     assert runtimes.BY_KEY["git"].tree == "git" and runtimes.BY_KEY["git"].path_subdir == "cmd"
 
 
-def test_mingit_lands_in_jaix_git_cmd_and_sha_checked(isolated, monkeypatch):
+def _fake_sfx(fail=False):
+    """PortableGit 자동 풀기 exe 흉내: -o<폴더> 에 cmd\\git.exe · bin\\bash.exe 를 만든다."""
+    seen = []
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        assert cmd[2] == "-y" and cmd[1].startswith("-o")
+        out = Path(cmd[1][2:])
+        if not fail:
+            (out / "cmd").mkdir(parents=True)
+            (out / "cmd" / "git.exe").write_bytes(b"g")
+            (out / "bin").mkdir()
+            (out / "bin" / "bash.exe").write_bytes(b"b")
+        return subprocess.CompletedProcess(cmd, 1 if fail else 0, b"", b"")
+    return run, seen
+
+
+def test_portablegit_unpacks_into_jaix_git_and_exports_bash(isolated, monkeypatch):
     rt = runtimes.BY_KEY["git"]
-    got = _serve_pinned(monkeypatch, "git", {"cmd/git.exe": b"g", "mingw64/bin/git.exe": b"m"})
+    assert runtimes.PINNED["git"]["name"].startswith("PortableGit-") and runtimes.PINNED["git"]["name"].endswith(".7z.exe")
+    data = b"sfx"
+    monkeypatch.setitem(runtimes.PINNED, "git", dict(runtimes.PINNED["git"], sha256=hashlib.sha256(data).hexdigest()))
+    monkeypatch.setattr(runtimes.net, "download", lambda url, dest, timeout=120: (Path(dest).write_bytes(data), Path(dest))[1])
+    run, seen = _fake_sfx()
+    monkeypatch.setattr(runtimes.subprocess, "run", run)
+    old = paths.jaix_home() / "git" / "cmd"
+    old.mkdir(parents=True)
+    (old / "git.exe").write_bytes(b"mingit")  # 예전 MinGit 사본 → 바뀐다
     where = runtimes.install_portable(rt, print)
-    assert got == [runtimes.PINNED["git"]["url"]]
     assert where == paths.jaix_home() / "git" / "cmd" and (where / "git.exe").read_bytes() == b"g"
-    # 같은 판이면 다시 받지 않는다(find 가 jaix 사본을 찾는다고 치고)
-    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(str(where / "git.exe"), "2.56", 2, managed=True))
-    runtimes.install_portable(rt, print)
-    assert len(got) == 1
+    assert seen[0][1] == f"-o{paths.jaix_home() / 'git'}" and not (paths.jaix_home() / "git.old").exists()
+    # jaix 사본이면 Git Bash 위치를 알린다. 사용자가 다른 bash 를 가리켜 두었으면 그대로
+    env = {}
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: env.get(name))
+    monkeypatch.setattr(winenv, "set_user_env", lambda name, value: env.update({name: value}) or True)
+    found = runtimes.Found(str(where / "git.exe"), "2.56.0", 2, managed=True)
+    runtimes._export(rt, found, print)
+    assert env["CLAUDE_CODE_GIT_BASH_PATH"] == str(paths.jaix_home() / "git" / "bin" / "bash.exe")
+    mine = isolated / "MyGit" / "bin" / "bash.exe"
+    mine.parent.mkdir(parents=True)
+    mine.write_bytes(b"x")
+    env["CLAUDE_CODE_GIT_BASH_PATH"] = str(mine)
+    runtimes._export(rt, found, print)
+    assert env["CLAUDE_CODE_GIT_BASH_PATH"] == str(mine)
+    # 시스템 Git(jaix 사본 아님)이면 손대지 않는다
+    env.clear()
+    runtimes._export(rt, runtimes.Found(r"C:\Program Files\Git\cmd\git.exe", "2.50", 2), print)
+    assert env == {}
+
+
+def test_portablegit_failed_unpack_restores_previous_copy(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    prev = paths.jaix_home() / "git" / "cmd"
+    prev.mkdir(parents=True)
+    (prev / "git.exe").write_bytes(b"prev")
+    run, _ = _fake_sfx(fail=True)
+    with pytest.raises(RuntimeError, match="풀기 실패"):
+        runtimes._run_sfx(isolated / "PortableGit.7z.exe", rt, run=run)
+    assert (prev / "git.exe").read_bytes() == b"prev" and not (paths.jaix_home() / "git.old").exists()
 
 
 def test_pinned_sha_mismatch_refuses_to_install(isolated, monkeypatch):
