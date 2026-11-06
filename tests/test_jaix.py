@@ -2968,3 +2968,35 @@ def test_doctor_flags_himalaya_2x(monkeypatch):
                         else runtimes.Found(None, None))
     lines = [c for c in doctor.check_runtimes() if c.area == "himalaya"]
     assert lines and "2.2.1" in lines[0].message and "1.x 필요" in lines[0].message
+
+
+# --- 백신(Defender)이 포터블을 격리했을 때: 어디서 확인할지 알린다(예외는 관리자 권한이라 jaix 가 넣지 않음) -----
+def test_av_blocked_detects_virus_errors():
+    e = OSError(22, "Operation did not complete successfully because the file contains a virus")
+    assert runtimes.av_blocked(e)
+    w = OSError("x")
+    w.winerror = 225
+    assert runtimes.av_blocked(w) and not runtimes.av_blocked(OSError("disk full"))
+
+
+def test_install_quarantined_right_after_unpack_raises_and_keeps_no_marker(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["age"]
+    _serve_pinned(monkeypatch, "age", {"age/age.exe": b"a"})
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    real = runtimes._extract
+    monkeypatch.setattr(runtimes, "_extract", lambda f, r: real(f, r) or (paths.bin_dir() / "age.exe").unlink())
+    with pytest.raises(RuntimeError, match="보호 기록"):
+        runtimes.install_portable(rt, print)
+    assert not runtimes._marker(rt).exists()
+
+
+def test_doctor_says_vanished_runtime_may_be_av(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["himalaya"]
+    paths.jaix_home().mkdir(parents=True, exist_ok=True)
+    runtimes._marker(rt).write_text(runtimes.PINNED["himalaya"]["name"], encoding="utf-8")
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(doctor, "IS_WIN", True, raising=False)
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(None, None))
+    assert runtimes.vanished(rt)
+    line = [c for c in doctor.check_runtimes() if c.area == "himalaya"][0]
+    assert "사라짐" in line.message and "보호 기록" in line.message + line.fix
