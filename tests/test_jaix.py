@@ -3000,3 +3000,26 @@ def test_doctor_says_vanished_runtime_may_be_av(isolated, monkeypatch):
     assert runtimes.vanished(rt)
     line = [c for c in doctor.check_runtimes() if c.area == "himalaya"][0]
     assert "사라짐" in line.message and "보호 기록" in line.message + line.fix
+
+
+def test_plugbin_copy_in_use_keeps_old_copy_and_record(isolated, monkeypatch, the_lock):
+    """옛 사본을 누가 쓰고 있으면(Windows 에서 mailskill·python 이 파일을 잡음) 반쯤 지우지 않고 그대로 두며,
+    기록도 옛 커밋으로 남겨 다음 update 가 다시 시도한다. 로그에 '닫고 다시' 를 알린다."""
+    _fake_plugin_source(monkeypatch)
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="a" * 40), print)
+    copy = plugbin.plugins_dir() / "mail-skill"
+    real_rename = Path.rename
+
+    def busy(self, target):
+        if self == copy:
+            raise PermissionError(5, "Access is denied")
+        return real_rename(self, target)
+    monkeypatch.setattr(Path, "rename", busy)
+    lines = []
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), lines.append)
+    assert res["failed"] == ["mail-skill"] and any("쓰는 중" in line for line in lines)
+    assert (copy / "scripts").is_dir() and plugbin.recorded()["mail-skill"]["sha"] == "a" * 40
+    assert not copy.with_name("mail-skill.jaix-new").exists() and not copy.with_name("mail-skill.jaix-old").exists()
+    monkeypatch.setattr(Path, "rename", real_rename)  # 닫고 다시 → 바뀐다
+    assert REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), print)["status"] == "ok"
+    assert plugbin.recorded()["mail-skill"]["sha"] == "b" * 40 and not copy.with_name("mail-skill.jaix-old").exists()
