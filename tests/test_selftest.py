@@ -29,6 +29,7 @@ def isolated(tmp_path, monkeypatch):
             super().__init__(args, *a, **kw)
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
     monkeypatch.setattr(hermesbot, "find_hermes", lambda: None)
+    monkeypatch.setattr(selftest, "korean_path_ok", lambda: True)  # 영문 Windows 러너에서도 같은 이름으로 시험
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "JAIX_DATA", "HERMES_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
@@ -129,6 +130,15 @@ def test_check_hwp_converts_in_korean_space_path(tmp_path, the_lock, monkeypatch
         assert [r.status for r in res] == ["ok", "ok"], selftest.render(res)
         assert "jaix 시험" in seen[0][-2] and seen[0][-2].endswith("공문.hwp")
         assert src.name == "공문.hwp"
+    finally:
+        shutil.rmtree(base)
+
+
+def test_english_codepage_uses_ascii_names(monkeypatch):
+    monkeypatch.setattr(selftest, "korean_path_ok", lambda: False)
+    base, work = selftest.make_workdir()
+    try:
+        assert work.name == "jaix test" and all(n.isascii() for n in selftest.names().values())
     finally:
         shutil.rmtree(base)
 

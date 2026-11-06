@@ -119,10 +119,41 @@ def get_sample(download=None):
     return dest
 
 
+# 시험 폴더·파일 이름. 한글 이름은 Windows 의 ANSI 코드 페이지가 한글을 담을 때만 쓴다 — 자바(hwp2hwpx)는 명령줄 인자를
+# ANSI 코드 페이지로 읽어, 영문 Windows(cp1252, CI 러너)에서는 한글이 '?' 로 깨져 변환이 실패한다(실측 2026-11-06).
+# 연구원 PC(한국어 Windows, cp949)는 한글 경로를 그대로 시험한다
+KO_NAMES = {"dir": "jaix 시험", "hwp": "공문.hwp", "hwpx": "변환 결과.hwpx", "md": "추출.md", "agent": "에이전트 시험"}
+EN_NAMES = {"dir": "jaix test", "hwp": "sample doc.hwp", "hwpx": "converted doc.hwpx", "md": "extracted.md",
+            "agent": "agent test"}
+
+
+def korean_path_ok():
+    """한글 경로를 자바 등 ANSI 프로그램에 넘겨도 깨지지 않는 PC 인가(맥·리눅스는 늘 그렇다)."""
+    if not IS_WIN:
+        return True
+    import ctypes
+
+    try:
+        acp = ctypes.windll.kernel32.GetACP()
+    except (AttributeError, OSError):
+        return True
+    if acp == 65001:  # 'UTF-8 사용' 베타 옵션
+        return True
+    try:
+        "".join(KO_NAMES.values()).encode(f"cp{acp}")
+        return True
+    except (LookupError, UnicodeEncodeError):
+        return False
+
+
+def names():
+    return KO_NAMES if korean_path_ok() else EN_NAMES
+
+
 def make_workdir():
-    """한글과 띄어쓰기가 든 경로 — 실제 연구원 폴더(바탕 화면\\내 문서 등)에서 깨지는 일을 잡으려고."""
+    """띄어쓰기(가능하면 한글도)가 든 경로 — 실제 연구원 폴더(바탕 화면 등)에서 깨지는 일을 잡으려고."""
     base = Path(tempfile.mkdtemp(prefix="jaix-selftest-"))
-    work = base / "jaix 시험"
+    work = base / names()["dir"]
     work.mkdir()
     return base, work
 
@@ -227,9 +258,10 @@ def check_hwp(lock, work, sample, runner=run):
     cmd, env = hwp_agent_command(lock)
     if not cmd:
         return [_fail(area_c, "hwp-agent 플러그인을 찾지 못함", "jaix setup")], None
-    src = work / "공문.hwp"
+    n = names()
+    src = work / n["hwp"]
     shutil.copyfile(sample, src)
-    out = work / "변환 결과.hwpx"
+    out = work / n["hwpx"]
     code, text = runner([*cmd, "convert", str(src), str(out)], FIRST_RUN_TIMEOUT, cwd=str(work), env=env)
     if code != 0 or not out.is_file():
         why = text if code is None else _why(text)
@@ -247,8 +279,10 @@ def check_hwp(lock, work, sample, runner=run):
         return [_fail(area_c, f"변환 실패: {why}", "jaix setup 뒤 다시 시험, 그래도 같으면 이 결과를 소모임 채널에")], None
     if not valid_hwpx(out):
         return [_fail(area_c, "만든 .hwpx 가 올바른 문서 묶음이 아님", "이 결과를 소모임 채널에 올려 주세요")], None
-    res = [_ok(area_c, f"한글·띄어쓰기 경로에서 변환됨 ({out.stat().st_size // 1024}KB)")]
-    md = work / "추출.md"
+    where = ("한글·띄어쓰기 경로에서" if n is KO_NAMES
+             else "띄어쓰기 경로에서(이 PC 의 문자 코드가 한글을 담지 못해 한글 경로는 시험 안 함)")
+    res = [_ok(area_c, f"{where} 변환됨 ({out.stat().st_size // 1024}KB)")]
+    md = work / n["md"]
     code, text = runner([*cmd, "extract", str(out), "-o", str(md)], FIRST_RUN_TIMEOUT, cwd=str(work), env=env)
     body = md.read_text(encoding="utf-8", errors="replace") if md.is_file() else ""
     if code != 0 or SAMPLE_WORD not in body:
@@ -615,10 +649,12 @@ def check_agent(work, sample, runner=run):
     if not sample:
         out.append(_skip(area, "시험용 HWP 없음"))
     else:
-        d = work / "에이전트 시험"
+        n = names()
+        d = work / n["agent"]
         d.mkdir(exist_ok=True)
-        shutil.copyfile(sample, d / "공문.hwp")
-        prompt = ("이 폴더의 '공문.hwp' 를 jaix HWP 도구(hwp-agent)로 HWPX 로 변환해 같은 폴더에 '공문.hwpx' 로 "
+        shutil.copyfile(sample, d / n["hwp"])
+        stem = Path(n["hwp"]).stem
+        prompt = (f"이 폴더의 '{n['hwp']}' 를 jaix HWP 도구(hwp-agent)로 HWPX 로 변환해 같은 폴더에 '{stem}.hwpx' 로 "
                   "저장해 주세요. 다른 일은 하지 말고, 끝나면 '완료' 한 낱말만 답하세요.")
         _, why = _claude_json(cli, prompt, d, 8, ALLOWED_TOOLS, runner)
         made = [f for f in d.glob("*.hwpx") if valid_hwpx(f)]
