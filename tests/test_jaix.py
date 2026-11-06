@@ -3040,3 +3040,20 @@ def test_update_drops_legacy_startup_link(managed, the_lock, monkeypatch):
     with pytest.raises(RuntimeError):
         cli._update(argparse.Namespace(lock=None, channel=None, offline=True, dry_run=False), print)
     assert not schedule.startup_link().exists()
+
+
+def test_via_task_runs_console_jaix_not_jaixw(isolated, monkeypatch, tmp_path):
+    """설치 중 한 번짜리 예약 작업은 콘솔 jaix.exe 를 부른다 — jaixw 를 예약 작업으로 띄우는 흐름이 Defender 에 걸렸다(11/4·11/7)."""
+    app = tmp_path / "app" / "jaix"
+    app.mkdir(parents=True)
+    (app / "jaix.exe").write_bytes(b"")
+    (app / "jaixw.exe").write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(app / "jaix.exe"))
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    seen = {}
+    monkeypatch.setattr(schedule, "run_via_task", lambda cmd, *a: seen.setdefault("cmd", cmd) and 0)
+    cli.main(["setup", "--via-task", "--log", str(isolated / "s.log")])
+    assert Path(seen["cmd"][0]).name == "jaix.exe"
+    assert "windowless=True" not in "".join(
+        ln for ln in Path(cli.__file__).read_text(encoding="utf-8").split("def _setup_via_task", 1)[1].split("\ndef ", 1)[0])

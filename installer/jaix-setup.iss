@@ -56,7 +56,7 @@ Type: filesandordirs; Name: "{app}\jaix"
 Type: files; Name: "{userstartup}\JAIX 갱신.lnk"
 
 [Files]
-; jaix.exe(콘솔)·jaixw.exe(창 없음, 예약 작업이 부름)·_internal(둘이 함께 씀)
+; jaix.exe(콘솔 — 설치 중 setup 의 한 번짜리 예약 작업도 이것)·jaixw.exe(창 없음, 자동으로 띄우는 곳 없음)·_internal
 Source: "payload\jaix\*"; DestDir: "{app}\jaix"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

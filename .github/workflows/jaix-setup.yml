@@ -160,6 +160,11 @@ jobs:
           # #27: jaix setup 본 실행이 작업 스케줄러(--via-task)로 돌았는지 — 그 길만 setup-status.json 을 남긴다
           if (-not (Test-Path "$data\setup-status.json")) { throw "jaix setup 이 작업 스케줄러로 돌지 않음(setup-status.json 없음)" }
           Get-Content "$data\setup-status.json"
+          # 작업이 띄운 것이 콘솔 jaix.exe 인지(창 없는 jaixw.exe 를 예약 작업으로 띄우는 흐름이 Defender 에 걸림, 11/4·11/7).
+          # setup 기록의 머리줄이 실행파일 이름을 남긴다(cli._banner)
+          $banner = Select-String -Path "$data\setup.log" -Pattern '^== .* setup \(' | Select-Object -Last 1
+          Write-Host "머리줄: $($banner.Line)"
+          if (-not $banner -or $banner.Line -notlike '*(via task) · jaix.exe') { throw "예약 작업의 setup 이 jaix.exe 로 돌지 않음: $($banner.Line)" }
           foreach ($f in 'setup.log','setup-status.json','guide.txt') {
             if (Test-Path "$app\$f") { throw "기록 $f 이 프로그램 폴더에 생김" }
           }
