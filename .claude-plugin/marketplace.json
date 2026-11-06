@@ -35,8 +35,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v2026.10.30.2",
-        "sha": "10a53b7151ab1592979f46dcbfe7a35f429e0161"
+        "ref": "v2026.11.06.1",
+        "sha": "8bca5e4113a7d1b7d0f130f57751bb631aa01d33"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
@@ -44,7 +44,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.2"
+      "version": "2026.11.06.1"
     },
     {
       "name": "ji-report-writing",
