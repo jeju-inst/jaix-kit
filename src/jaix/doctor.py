@@ -515,10 +515,13 @@ def check_autoupdate():
     area = "로그온 자동 갱신"
     if not schedule.supported():
         return [Check("skip", area, "이 OS는 지원 안 함 — 가끔 jaix update")]
+    if schedule.installer_managed():
+        if schedule.startup_link().is_file():
+            return [Check("warn", area, f"예전 시작프로그램 바로가기({schedule.STARTUP_LINK})가 남음 — Defender 가 jaix 를 "
+                                        "격리하는 원인", "jaix update (지움)")]
+        return [Check("info", area, "두지 않음(서명 없는 jaix 의 자동 시작이 Defender 오탐을 부름) — Claude 플러그인은 "
+                                    "Claude 가 저절로 갱신", "Codex·Hermes 도구·jaix 새 판: 가끔 시작 메뉴 'JAIX 업데이트'")]
     if not schedule.registered():
-        if schedule.installer_managed():
-            return [Check("warn", area, f"시작프로그램 바로가기({schedule.STARTUP_LINK})가 없음 — Codex·Hermes 도구가 "
-                                        "저절로 갱신되지 않음", "jaix-setup 을 다시 실행 (또는 가끔 jaix update)")]
         return [Check("warn", area, "등록 안 됨 — Codex·Hermes 도구가 저절로 갱신되지 않음", "jaix setup")]
     bad = schedule.run_mode()
     if bad:
@@ -530,8 +533,6 @@ def check_autoupdate():
         return [Check("warn", area, f"작업이 실패로 끝남({ran[0]}, 결과 0x{ran[1]:X}) — 기록: {schedule.log_file()}",
                       "jaix setup (다시 등록) 뒤 다시 로그온해 보고, 그래도 같으면 이 줄을 AI센터에 보내 주세요")]
     last = schedule.last_status()
-    if schedule.installer_managed():
-        task = " · 시작프로그램 바로가기"
     if not last:
         return [Check("ok", area, f"등록됨 (아직 돈 적 없음){task}")]
     if last.get("ok"):

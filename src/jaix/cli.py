@@ -108,7 +108,7 @@ def guide(channels, result):
                 "  켜져 있던 Codex는 jaix가 새로 정한 도구 위치(예: HWP2PDF_CLI)를 모릅니다.",
             ]
             out.append("  새 버전은 로그온할 때 jaix가 저절로 맞춥니다." if result.get("autoupdate")
-                       else "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.")
+                       else "  Codex는 저절로 갱신되지 않습니다. 가끔 시작 메뉴 'JAIX 업데이트'(또는 명령창에서 `jaix update`)를 실행하세요.")
         else:
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
     terms = [n for n in ("claude", "codex") if n in channels and (result.get(f"{n}_cli") or {}).get("status")

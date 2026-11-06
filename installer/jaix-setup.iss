@@ -52,6 +52,8 @@ Type: files; Name: "{app}\jaix.exe"
 Type: files; Name: "{app}\jaixw.exe"
 ; onedir 폴더는 판마다 통째로 바꾼다 — 빠진 모듈의 옛 파일이 _internal 에 남지 않게
 Type: filesandordirs; Name: "{app}\jaix"
+; 예전 판이 둔 로그온 자동 갱신 바로가기(이름은 src/jaix/schedule.py STARTUP_LINK). 이제 두지 않는다 — 아래 바로가기 절의 주석
+Type: files; Name: "{userstartup}\JAIX 갱신.lnk"
 
 [Files]
 ; jaix.exe(콘솔)·jaixw.exe(창 없음, 예약 작업이 부름)·_internal(둘이 함께 씀)
@@ -65,11 +67,10 @@ Name: "{autoprograms}\JAIX 자가시험 (jaix selftest)"; Filename: "{cmd}"; Par
 Name: "{autoprograms}\JAIX 계정 연결"; Filename: "{app}\jaix\jaix.exe"; Parameters: "connect"; \
   Comment: "그룹웨어·회사메일·웍스·Hermes 계정 연결(비밀번호는 뜨는 창에 직접 입력)"
 Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" update"; Comment: "런타임·도구를 잠금 버전에 맞춤"
-; 로그온 자동 갱신. jaix 가 schtasks 로 jaixw.exe 를 로그온 작업에 등록하던 것을 대신한다 — 서명 없는 창 없는 exe 의
-; 자기 등록이 Defender Behavior:Win32/Persistence.A!ml 로 잡혀 jaixw.exe·작업이 격리됐다(jaix-win 11/4). 설치기가
-; 선언한 시작프로그램 바로가기는 제거 때 함께 지워진다. 이름은 src/jaix/schedule.py STARTUP_LINK 와 같게
-Name: "{userstartup}\JAIX 갱신"; Filename: "{app}\jaix\jaixw.exe"; Parameters: "update --quiet --delay 120"; \
-  Comment: "로그온 때 JAIX 도구를 잠금 버전에 맞춤(jaix update)"
+; 로그온 자동 갱신은 두지 않는다(시작프로그램·Run 키·예약 작업 모두). 서명 없는 창 없는 jaixw.exe 를 가리키는
+; 자동 시작 항목이 있으면 만든 주체가 jaix 든 설치기든 Defender ML 이 jaixw.exe 를 Bearfoos.A!ml·Persistence.A!ml 로
+; 격리했다(jaix-win 11/4: jaix 의 schtasks 등록 / jaix-test 11/7 v2026.11.07.2: 설치기의 {userstartup} 바로가기).
+; 새 판은 jaix doctor 가 알리고, 받기는 위 'JAIX 업데이트'. 예전 바로가기는 [InstallDelete] 가 지운다
 ; Hermes AI 구독 로그인을 설치 뒤에도 다시 할 수 있게. 사용자가 탐색기에서 여는 것이라 설치기의 자식이 아니다
 Name: "{autoprograms}\JAIX Hermes 로그인"; Filename: "{app}\jaix\jaix.exe"; Parameters: "hermes login --model {code:HermesModelArg}"; \
   Comment: "Hermes 가 쓸 AI 구독에 로그인(브라우저에서 승인)"; Check: HermesChosen
