@@ -1,5 +1,9 @@
 # 설계: jaix-setup의 Hermes 무인 설치와 슬랙 토큰 경로
 
+> 이 문서는 2026-10-30 설계·결정 기록이다. 2026-11-04 코드 기준 현재 상태와
+> 공통 기능 편입의 미완료 항목은 [Hermes capability handoff](hermes-capability-handoff.md)를
+> 함께 본다. 아래의 당시 미검증 항목을 이후 구현 완료/실기 검증으로 소급 해석하지 않는다.
+
 상태: **설계안 2판, 사용자 승인(2026-10-30) — 구현 중.** jaix-kit `src/jaix/hermesbot.py`, ji-gw-ai#136(배포처), z0nam/hermes-slackbot#16(setup_pc 무인 옵션).
 요청: jaix-kit-dev 2026-10-30. 사용자 결정은 "jaix가 무인 설치", 목표는 11/5-6이다.
 
