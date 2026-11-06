@@ -436,12 +436,15 @@ def _win_cred_exists(prefix):
     from ctypes import wintypes
 
     count, creds = wintypes.DWORD(), ctypes.c_void_p()
-    adv = ctypes.windll.advapi32
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    adv.CredEnumerateW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+                                   ctypes.POINTER(ctypes.c_void_p)]
+    adv.CredEnumerateW.restype = wintypes.BOOL
     ok = adv.CredEnumerateW(f"{prefix}*", 0, ctypes.byref(count), ctypes.byref(creds))
     if ok:
         adv.CredFree(creds)
         return count.value > 0
-    return False if ctypes.GetLastError() == 1168 else None  # 1168 = ERROR_NOT_FOUND
+    return False if ctypes.get_last_error() == 1168 else None  # 1168 = ERROR_NOT_FOUND
 
 
 def check_gw(reachable=None, saved=None):
