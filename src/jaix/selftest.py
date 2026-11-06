@@ -4,7 +4,8 @@
 [통과] · [설정 필요] <무엇> — <하는 법> · [건너뜀] <이유> · [실패] <이유> — <고치는 법>.
 
 - 사용자가 직접 해야 하는 첫 설정(로그인·앱 비밀번호 등)은 실패가 아니라 [설정 필요]로 따로 센다.
-  자격 증명은 값을 읽지 않고 "있음/없음"만 본다. 로그인을 대신 시도하거나 입력 창을 띄우지 않는다.
+  자격 증명은 값을 읽지 않고 "있음/없음"만 본다. 로그인을 대신 시도하거나 입력 창을 띄우지 않는다
+  (입력 창은 jaix connect 가 연다 — [설정 필요] 줄이 그쪽을 가리킨다).
 - 그룹웨어는 로그인 없이 닿는지만 보고, 주소는 출력하지 않는다(원내 주소).
 - 슬랙 메시지는 보내지 않는다. Hermes 는 gateway 가 스스로 적는 상태 파일(gateway_state.json)만 읽는다.
 - --agent 만 사용자의 Claude 사용량을 쓴다(기본 꺼짐).
@@ -50,6 +51,8 @@ HERMES_STALE = 300                 # gateway 는 60초마다 상태 파일을 �
 FIRST_RUN_TIMEOUT = 300            # uvx 첫 실행은 패키지를 받느라 오래 걸린다
 MCP_TIMEOUT = 180
 AGENT_TIMEOUT = 300
+# [설정 필요] 줄의 "하는 법". 본인 비밀을 넣는 창은 jaix connect 가 연다(connect.py)
+CONNECT_HINT = "시작 메뉴 'JAIX 계정 연결' (또는 jaix connect {item})"
 
 
 @dataclass
@@ -517,7 +520,7 @@ def check_gw(reachable=None, saved=None):
     elif have is None:
         out.append(_skip("그룹웨어 로그인", "이 PC 에서는 저장 여부를 확인하지 못함"))
     else:
-        out.append(_setup("그룹웨어 로그인", "저장된 로그인 정보 없음", "명령창에서 gw login"))
+        out.append(_setup("그룹웨어 로그인", "저장된 로그인 정보 없음", CONNECT_HINT.format(item="gw")))
     return out
 
 
@@ -544,9 +547,7 @@ def check_mail(lock):
         accounts = {}
     if MAIL_ACCOUNT in accounts and secrets.is_file():
         return [_ok(area, "앱 비밀번호 설정 있음(로그인 시험은 안 함)")]
-    how = ("PowerShell 창에서 mailskill setup" if IS_WIN else "명령창에서 mailskill setup") + \
-          " (발급법: mail-skill docs/naver-works-app-password.md)"
-    return [_setup(area, "회사메일 앱 비밀번호 설정 안 됨", how)]
+    return [_setup(area, "회사메일 앱 비밀번호 설정 안 됨", CONNECT_HINT.format(item="mail"))]
 
 
 def check_works(lock):
@@ -554,7 +555,7 @@ def check_works(lock):
         return []
     if works.logged_in():
         return [_ok("웍스", "로그인돼 있음")]
-    return [_setup("웍스", "아직 로그인 안 함", "jaix works login")]
+    return [_setup("웍스", "아직 로그인 안 함", CONNECT_HINT.format(item="works"))]
 
 
 # --- 5. Hermes ----------------------------------------------------------------------------------------
@@ -594,7 +595,7 @@ def check_hermes(credentials=None):
     elif rows:
         out.append(_ok("Hermes AI 구독 로그인", f"{model} 로그인돼 있음"))
     else:
-        out.append(_setup("Hermes AI 구독 로그인", f"{model} 에 아직 로그인 안 함", "시작 메뉴의 'JAIX Hermes 로그인'"))
+        out.append(_setup("Hermes AI 구독 로그인", f"{model} 에 아직 로그인 안 함", CONNECT_HINT.format(item="hermes")))
     return out
 
 

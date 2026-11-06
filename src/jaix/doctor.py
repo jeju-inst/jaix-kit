@@ -236,7 +236,7 @@ def check_works(lock):
     if not works.saved_client():
         out.append(Check("warn", "웍스 기관 앱 정보", "없음 — 원내망에서 받아야 함", "원내망(사무실·VPN)에서 jaix setup"))
     elif not works.logged_in():
-        out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix works login"))
+        out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix connect works"))
     else:
         out.append(Check("ok", "웍스 로그인", "됨"))
     return out
