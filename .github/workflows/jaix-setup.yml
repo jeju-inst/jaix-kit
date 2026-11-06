@@ -245,7 +245,9 @@ jobs:
 
       # Git·uv·age 는 winget 없이 고정 판을 직접 받는다(#118). 러너엔 Git 이 있어 setup 은 '그대로 둠'만 탄다 →
       # 격리한 jaix 폴더에 같은 코드로 PortableGit(7z 자동 풀기 exe)·uv·age 를 받아 풀고 git·bash·uv·age 가 도는지 본다
-      - name: Pinned runtimes direct install (PortableGit · uv · age, isolated jaix home)
+      # install_portable 은 푼 뒤 rt.path_dir() 에 rt.exe 가 있는지 본다(#134, 백신 격리 감지) → 포터블로 깔리는 런타임마다
+      # 그 구조가 맞는지도 여기서 실제로 확인한다(himalaya·Java·Node 추가)
+      - name: Portable runtimes direct install (PortableGit · uv · age · himalaya · Java · Node, isolated jaix home)
         shell: pwsh
         run: |
           [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -253,7 +255,7 @@ jobs:
           $env:PYTHONIOENCODING = 'utf-8'
           @'
           from jaix import runtimes
-          for key in ("git", "uv", "age"):
+          for key in ("git", "uv", "age", "himalaya", "java", "node"):
               rt = runtimes.BY_KEY[key]
               print(key, "->", runtimes.install_portable(rt, print))
           '@ | python -
@@ -263,6 +265,9 @@ jobs:
           & "$h\git\bin\bash.exe" -c 'echo bash ok; git --version'; if ($LASTEXITCODE -ne 0) { throw "bash 실패" }
           & "$h\bin\uv.exe" --version; if ($LASTEXITCODE -ne 0) { throw "uv 실패" }
           & "$h\bin\age.exe" --version; if ($LASTEXITCODE -ne 0) { throw "age 실패" }
+          & "$h\bin\himalaya.exe" --version; if ($LASTEXITCODE -ne 0) { throw "himalaya 실패" }
+          & "$h\jre\bin\java.exe" -version; if ($LASTEXITCODE -ne 0) { throw "java 실패" }
+          & "$h\node\node.exe" --version; if ($LASTEXITCODE -ne 0) { throw "node 실패" }
 
       - name: Uninstall
         shell: pwsh
