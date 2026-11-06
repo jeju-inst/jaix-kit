@@ -60,6 +60,10 @@ Source: "payload\jaix\*"; DestDir: "{app}\jaix"; Flags: ignoreversion recursesub
 [Icons]
 Name: "{autoprograms}\JAIX 점검 (jaix doctor)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" doctor"; Comment: "도구 설치 상태 점검"
 Name: "{autoprograms}\JAIX 자가시험 (jaix selftest)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" selftest"; Comment: "도구를 실제로 한 번씩 돌려 봄(결과를 소모임 채널에)"
+; 본인 비밀이 필요한 첫 설정(그룹웨어·회사메일·웍스·Hermes). jaix.exe 를 바로 띄운다(Hermes 로그인과 같게) —
+; 콘솔을 혼자 가져 숨는 창(hide-early)은 jaix connect 가 다시 보이게 한다. 비밀번호는 각 항목이 띄운 창에 사용자가 직접
+Name: "{autoprograms}\JAIX 계정 연결"; Filename: "{app}\jaix\jaix.exe"; Parameters: "connect"; \
+  Comment: "그룹웨어·회사메일·웍스·Hermes 계정 연결(비밀번호는 뜨는 창에 직접 입력)"
 Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" update"; Comment: "런타임·도구를 잠금 버전에 맞춤"
 ; 로그온 자동 갱신. jaix 가 schtasks 로 jaixw.exe 를 로그온 작업에 등록하던 것을 대신한다 — 서명 없는 창 없는 exe 의
 ; 자기 등록이 Defender Behavior:Win32/Persistence.A!ml 로 잡혀 jaixw.exe·작업이 격리됐다(jaix-win 11/4). 설치기가
