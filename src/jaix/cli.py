@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
+from jaix import __version__, claude, clis, codex, connect, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -126,6 +126,10 @@ def guide(channels, result):
                 "  gw 를 처음 쓰기 전에 한 번 로그인하세요. 아이디·비밀번호는 이 PC에 안전하게 저장됩니다.",
                 "  Claude·Codex 에게 'gw 로그인해 줘'라고 하면 입력 창이 뜹니다.",
                 "  새 명령창에서 직접 `gw login` 을 치면 그 자리에서 묻습니다."]
+    where = "시작 메뉴 'JAIX 계정 연결'(명령창이면 `jaix connect`)" if paths.IS_WIN else "명령창에서 `jaix connect`"
+    out += ["■ 계정 연결 (그룹웨어·회사메일·웍스·Hermes)",
+            f"  처음 한 번 본인 계정을 연결하세요: {where}.",
+            "  항목마다 입력 창이 뜨고, 비밀번호는 그 창에 직접 넣습니다(jaix·AI 는 값을 받지 않습니다)."]
     if net.rate_limit_hit:
         out += ["", f"※ {net.RATE_LIMIT_HINT}."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
@@ -477,6 +481,13 @@ def cmd_works(args, log):
     return 2
 
 
+def cmd_connect(args, log):
+    """본인 비밀이 필요한 첫 설정을 여는 곳(시작 메뉴 'JAIX 계정 연결'). 값은 사용자가 뜨는 창에 직접 넣는다."""
+    if not args.item:
+        return connect.connect_all(lockmod.load(args.lock, args.channel, args.offline), log)
+    return connect.connect_one(args.item, log, here=args.here, result_file=args.result_file)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="jaix", description="제주연구원 JAIX 도구 설치·점검·갱신")
     ap.add_argument("--version", action="version", version=f"jaix {__version__}")
@@ -550,6 +561,13 @@ def build_parser():
     wsub = w.add_subparsers(dest="works_cmd", required=True)
     wsub.add_parser("login", help="브라우저로 웍스 로그인(처음 한 번, 본인 계정 권한)")
     w.set_defaults(func=cmd_works)
+
+    cn = sub.add_parser("connect", parents=[common],
+                        help="계정 연결(그룹웨어·회사메일·웍스·Hermes): 항목 없이 부르면 상태를 보이고 안 된 것을 물어 연결")
+    cn.add_argument("item", nargs="?", choices=connect.ITEMS, help="연결할 항목(입력 창이 뜨고 본인이 직접 입력)")
+    cn.add_argument("--here", action="store_true", help=argparse.SUPPRESS)  # 새 창 안에서 도는 자식
+    cn.add_argument("--result-file", help=argparse.SUPPRESS)  # 자식이 종료 코드를 남기는 파일(부모가 기다림)
+    cn.set_defaults(func=cmd_connect)
 
     c = sub.add_parser("cleanup", parents=[common], help=argparse.SUPPRESS)
     c.set_defaults(func=cmd_cleanup)

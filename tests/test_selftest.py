@@ -264,7 +264,7 @@ def test_gw(monkeypatch):
     assert selftest.check_gw(reachable=lambda u: False)[0].message == "원내망 아님"
     monkeypatch.setattr(gw, "installed_version", lambda: "2026.10.30")
     res = selftest.check_gw(reachable=lambda u: True, saved=lambda: False)
-    assert [r.status for r in res] == ["ok", "setup"] and res[1].fix == "명령창에서 gw login"
+    assert [r.status for r in res] == ["ok", "setup"] and res[1].fix == "시작 메뉴 'JAIX 계정 연결' (또는 jaix connect gw)"
     assert "10.1.2.3" not in selftest.render(res) and "10.1.2.3" not in json.dumps(selftest.as_dicts(res))
     assert selftest.check_gw(reachable=lambda u: True, saved=lambda: True)[1].status == "ok"
     assert selftest.check_gw(reachable=lambda u: True, saved=lambda: None)[1].status == "skip"
@@ -288,7 +288,7 @@ def test_gw_login_saved_mac_uses_attributes_only(monkeypatch):
 # --- 메일 · 웍스 -----------------------------------------------------------------------------------
 def test_mail(the_lock):
     res = selftest.check_mail(the_lock)
-    assert res[0].status == "setup" and "mailskill setup" in res[0].fix
+    assert res[0].status == "setup" and "jaix connect mail" in res[0].fix
     conf = Path(os.environ["HIMALAYA_CONFIG"])
     conf.parent.mkdir(parents=True)
     conf.write_text('[accounts.ji]\nemail = "a@b"\n', encoding="utf-8")
@@ -302,7 +302,7 @@ def test_mail(the_lock):
 def test_works(the_lock, monkeypatch):
     monkeypatch.setattr(works, "plugin", lambda lock: object())
     monkeypatch.setattr(works, "logged_in", lambda: False)
-    assert selftest.check_works(the_lock)[0].fix == "jaix works login"
+    assert selftest.check_works(the_lock)[0].fix.endswith("(또는 jaix connect works)")
     monkeypatch.setattr(works, "plugin", lambda lock: None)
     assert selftest.check_works(the_lock) == []
 
@@ -316,7 +316,7 @@ def test_hermes(tmp_path, monkeypatch):
     no_creds = lambda h, p: []  # noqa: E731
     res = selftest.check_hermes(no_creds)
     assert res[0].status == "fail" and "한 번도" in res[0].message  # 상태 파일 없음
-    assert res[1].status == "setup" and "JAIX Hermes 로그인" in res[1].fix
+    assert res[1].status == "setup" and "jaix connect hermes" in res[1].fix
     state = paths.hermes_home() / "gateway_state.json"
     state.parent.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc)
