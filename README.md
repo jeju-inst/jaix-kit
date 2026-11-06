@@ -66,6 +66,7 @@ _(화면 예시는 실기 시험 뒤 추가)_
 |---|---|
 | `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, himalaya·age 는 mail 플러그인이 잠금에 있을 때 필수·없으면 선택)을 사용자 범위로 설치(이미 있으면 그대로. Git·uv·age 는 GitHub 고정 판을 sha256 확인해 직접, 그 밖은 winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
 | `jaix doctor [--json]` | 런타임 버전·사용자 PATH·마켓플레이스 등록·플러그인 버전이 잠금과 맞는지. 어긋나면 고치는 방법 한 줄. 실패가 있으면 종료 코드 1 |
+| `jaix selftest [--json] [--agent]` | 도구를 실제로 한 번씩 돌려 본다: 시험용 HWP 를 한글·띄어쓰기 경로에서 HWPX 로 변환·추출, (한컴 PC면) PDF 변환, 플러그인 MCP 서버 주고받기, 그룹웨어 접속(원내망일 때, 로그인 없이). 사용자가 직접 할 첫 설정(gw 로그인·회사메일 앱 비밀번호·Hermes 구독 로그인 등)은 `[설정 필요]` 로 따로 센다(자격 증명은 있음/없음만 봄). `--agent` 는 `claude -p` 로 두 번 요청해 본다(본인 사용량을 씀). 실패가 있으면 종료 코드 1. 시작 메뉴 'JAIX 자가시험' |
 | `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
 | `jaix works login` | 웍스(NAVER WORKS) 브라우저 로그인, 처음 한 번. 잠금에 jaix-works 가 있으면 `jaix setup` 이 Node.js·nworks(버전·무결성 고정)를 깔고 기관 앱 정보를 원내 위치에서 받아 둔다(`docs/works.md`) |
 | `jaix setup --channels hermes --hermes-code-file <f> [--hermes-model chatgpt\|claude]` | (Windows) Hermes 무인 설치 + 슬랙 연결. 아래 "Hermes" |

@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selfupdate, uvpython, winenv, works
+from jaix import __version__, claude, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -330,6 +330,45 @@ def cmd_doctor(args, log):
     return 1 if failed else 0
 
 
+def cmd_selftest(args, log):
+    """도구를 실제로 한 번씩 돌려 본다(doctor 는 앞에서 한 번 돌려 실패 수만 알린다)."""
+    lock = lockmod.load(args.lock, args.channel, args.offline)
+    say = (lambda msg: print(msg, file=sys.stderr, flush=True)) if args.json else log  # --json 이면 진행 줄은 stderr 로
+    say(f"jaix {__version__} 자가시험 · 잠금: {lock.source}")
+    if args.agent:
+        say("※ --agent: Claude 에게 실제로 두 번 요청합니다 — 본인 Claude 사용량을 조금 씁니다.")
+    try:
+        doc_failed = sum(1 for c in doctor.run(lock) if c.status == "fail")
+    except Exception as e:  # noqa: BLE001 — doctor 가 막혀도 시험은 한다
+        doc_failed, doc_error = None, f"{type(e).__name__}: {e}"
+    else:
+        doc_error = None
+    results = selftest.run_all(lock, agent=args.agent, keep=args.keep, log=say)
+    failed = any(r.status == "fail" for r in results)
+    if args.json:
+        print(json.dumps({"version": __version__, "lock": lock.source, "ok": not failed,
+                          "doctor_failed": doc_failed, "summary": selftest.counts(results),
+                          "checks": selftest.as_dicts(results)}, ensure_ascii=False, indent=2))
+        return 1 if failed else 0
+    log("")
+    if doc_failed is None:
+        log(f"{selftest.MARK['info']} jaix doctor: 돌리지 못함({doc_error})")
+    elif doc_failed:
+        log(f"{selftest.MARK['info']} jaix doctor: 실패 {doc_failed}건 — 자세히는 새 명령창에서 jaix doctor")
+    else:
+        log(f"{selftest.MARK['info']} jaix doctor: 실패 없음")
+    log(selftest.render(results))
+    log("\nPC 밖에서 직접 확인할 것:")
+    for line in selftest.OUTSIDE:
+        log(f"  - {line}")
+    log("\n" + selftest.summary_line(results))
+    if any(r.status == "setup" for r in results):
+        log("[설정 필요] 줄은 처음 한 번 직접 하는 설정입니다. 줄 끝의 방법대로 한 뒤 다시 시험하세요.")
+    if failed:
+        log("이 결과 전체를 소모임 채널에 올려 주세요.")
+    return 1 if failed else 0
+
+
 def cmd_update(args, log):
     if getattr(args, "self_update", False):  # jaix update --self: 본체(설치본) 업데이트만
         return selfupdate.cmd_self(args, log)
@@ -468,6 +507,13 @@ def build_parser():
     d = sub.add_parser("doctor", parents=[common], help="런타임·등록·플러그인 버전이 잠금과 맞는지 점검")
     d.add_argument("--json", action="store_true")
     d.set_defaults(func=cmd_doctor)
+
+    t = sub.add_parser("selftest", parents=[common], help="도구를 실제로 한 번씩 돌려 봄(HWP 변환·MCP 서버·그룹웨어 접속 등)")
+    t.add_argument("--json", action="store_true")
+    t.add_argument("--agent", action="store_true",
+                   help="Claude 에게 실제로 두 번 요청해 도구를 쓰는지까지 봄(본인 Claude 사용량을 씀, 기본 꺼짐)")
+    t.add_argument("--keep", action="store_true", help="시험 폴더를 지우지 않고 남김")
+    t.set_defaults(func=cmd_selftest)
 
     u = sub.add_parser("update", parents=[common], help="런타임 갱신 + 플러그인·Hermes 스킬을 잠금에 맞춤")
     u.add_argument("--dry-run", action="store_true")

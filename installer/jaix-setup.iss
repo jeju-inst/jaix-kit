@@ -59,6 +59,7 @@ Source: "payload\jaix\*"; DestDir: "{app}\jaix"; Flags: ignoreversion recursesub
 
 [Icons]
 Name: "{autoprograms}\JAIX 점검 (jaix doctor)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" doctor"; Comment: "도구 설치 상태 점검"
+Name: "{autoprograms}\JAIX 자가시험 (jaix selftest)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" selftest"; Comment: "도구를 실제로 한 번씩 돌려 봄(결과를 소모임 채널에)"
 Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" update"; Comment: "런타임·도구를 잠금 버전에 맞춤"
 ; 로그온 자동 갱신. jaix 가 schtasks 로 jaixw.exe 를 로그온 작업에 등록하던 것을 대신한다 — 서명 없는 창 없는 exe 의
 ; 자기 등록이 Defender Behavior:Win32/Persistence.A!ml 로 잡혀 jaixw.exe·작업이 격리됐다(jaix-win 11/4). 설치기가
