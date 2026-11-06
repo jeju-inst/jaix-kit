@@ -151,6 +151,30 @@ def _all_commands(root):
     return out
 
 
+IN_USE = "다른 프로그램이 쓰는 중이라 바꾸지 못함 — 그 명령(mailskill 등)을 쓰는 창·Claude 세션을 닫고 jaix update 다시"
+
+
+def _swap(new, dst):
+    """new 폴더를 dst 자리에 넣는다. 옛 사본은 먼저 이름을 바꿔 두고(쓰는 중이면 여기서 멈춤 — 옛 사본·기록은 그대로),
+    실패하면 되돌린다. 예전에는 rmtree(ignore_errors) 뒤 rename 이라, Windows 에서 실기 중인 mailskill·python 이 파일을
+    잡고 있으면 반쯤 지워진 채 rename 이 실패해 기록이 옛 커밋에 머물렀다(namun-ji 2026-11-06)."""
+    old = dst.with_name(dst.name + ".jaix-old")
+    shutil.rmtree(old, ignore_errors=True)
+    if dst.exists():
+        try:
+            dst.rename(old)
+        except OSError as e:
+            shutil.rmtree(new, ignore_errors=True)
+            raise RuntimeError(f"{dst} 를 {IN_USE} ({e})") from e
+    try:
+        new.rename(dst)
+    except OSError:
+        if old.exists() and not dst.exists():
+            old.rename(dst)
+        raise
+    shutil.rmtree(old, ignore_errors=True)  # 남으면 다음 번에 지운다
+
+
 def _install_one(plugin, workdir, log):
     """사본을 바꿔 넣고 명령을 올린다. 만든 명령 경로 목록."""
     root = fetch_root(plugin, workdir)
@@ -166,8 +190,7 @@ def _install_one(plugin, workdir, log):
             for f in d.iterdir():  # tar 의 실행 비트가 빠졌어도 부를 수 있게
                 if f.is_file() and f.suffix.lower() not in SKIP_POSIX:
                     f.chmod(f.stat().st_mode | 0o755)
-    shutil.rmtree(dst, ignore_errors=True)
-    tmp.rename(dst)
+    _swap(tmp, dst)
     made = [_place(f, log) for f in _all_commands(dst)]
     return [str(m) for m in made if m]
 
