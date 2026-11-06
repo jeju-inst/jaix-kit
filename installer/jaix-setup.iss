@@ -66,6 +66,10 @@ Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Param
 ; 선언한 시작프로그램 바로가기는 제거 때 함께 지워진다. 이름은 src/jaix/schedule.py STARTUP_LINK 와 같게
 Name: "{userstartup}\JAIX 갱신"; Filename: "{app}\jaix\jaixw.exe"; Parameters: "update --quiet --delay 120"; \
   Comment: "로그온 때 JAIX 도구를 잠금 버전에 맞춤(jaix update)"
+; JAIX 도우미: 명령창에서 claude 를 도우미 스킬 사본과 함께 연다(Code 탭 플러그인이 안 깔렸을 때의 안전망).
+; jaix.exe 를 바로 띄우고, 숨는 창(hide-early)은 jaix helper 가 다시 보이게 한다
+Name: "{autoprograms}\JAIX 도우미"; Filename: "{app}\jaix\jaix.exe"; Parameters: "helper"; \
+  Comment: "jaix 도구가 안 될 때 Claude 가 점검·안내(jaix 점검해줘)"
 ; Hermes AI 구독 로그인을 설치 뒤에도 다시 할 수 있게. 사용자가 탐색기에서 여는 것이라 설치기의 자식이 아니다
 Name: "{autoprograms}\JAIX Hermes 로그인"; Filename: "{app}\jaix\jaix.exe"; Parameters: "hermes login --model {code:HermesModelArg}"; \
   Comment: "Hermes 가 쓸 AI 구독에 로그인(브라우저에서 승인)"; Check: HermesChosen

@@ -122,3 +122,26 @@ def test_add_refuses_seed_and_pins_valid_tag(tmp_path, monkeypatch, gen_repo):
     entry = jaixlock.load()["plugins"][0]
     assert entry["source"] == {"source": "url", "url": url, "ref": "v2026.10.27.2", "sha": good}
     assert entry["version"] == "2026.10.27.2" and entry["metadata"]["jaix"]["refKind"] == "tag"
+
+
+def test_self_plugin_moves_to_tag_once_then_only_when_folder_changes(tmp_path, monkeypatch, gen_repo):
+    """jaix-kit 안의 플러그인(jaix-help): 잠금 갱신이 새 태그를 부르고 그 태그로 또 옮기는 순환을 막는다."""
+    repo, seed = gen_repo
+    files = {"plugins/jaix-help/.claude-plugin/plugin.json": "{}", "plugins/jaix-help/skills/jaix-help/SKILL.md": "x"}
+    first = _commit(repo, files, "v2026.11.06.1")
+    market = tmp_path / "marketplace.json"
+    entry = {"name": "jaix-help", "source": {"source": "git-subdir", "url": jaixlock.SELF_URL, "path": "plugins/jaix-help",
+                                             "ref": "main", "sha": first}, "metadata": {"jaix": {"refKind": "branch"}}}
+    market.write_text(json.dumps({"plugins": [entry]}), encoding="utf-8")
+    monkeypatch.setattr(jaixlock, "MARKET", market)
+    assert jaixlock.is_self(entry["source"])
+    monkeypatch.setattr(jaixlock, "is_self", lambda src: True)
+    monkeypatch.setattr(jaixlock, "git_url", lambda src: repo.as_uri())  # 조회만 로컬 저장소로
+    jaixlock.update()  # 브랜치 고정 → 첫 태그로
+    assert jaixlock.load()["plugins"][0]["source"]["ref"] == "v2026.11.06.1"
+    _commit(repo, {".claude-plugin/marketplace.json": "{}"}, "v2026.11.06.2")  # 잠금만 바뀐 묶음 태그
+    jaixlock.update()
+    assert jaixlock.load()["plugins"][0]["source"]["ref"] == "v2026.11.06.1"  # 폴더가 그대로라 옮기지 않음
+    _commit(repo, {"plugins/jaix-help/skills/jaix-help/SKILL.md": "y"}, "v2026.11.06.3")
+    jaixlock.update()
+    assert jaixlock.load()["plugins"][0]["source"]["ref"] == "v2026.11.06.3"

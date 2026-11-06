@@ -22,6 +22,8 @@ packages = ["src/jaix"]
 # 네트워크가 막혀도 doctor·setup이 돌게 잠금 사본을 패키지 안에 묶는다(lock.py가 마지막에 본다)
 [tool.hatch.build.targets.wheel.force-include]
 ".claude-plugin/marketplace.json" = "jaix/marketplace.json"
+# JAIX 도우미 스킬 사본(jaix helper 가 플러그인이 없을 때 씀)
+"plugins/jaix-help/skills/jaix-help/SKILL.md" = "jaix/jaix-help.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

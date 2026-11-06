@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
+from jaix import __version__, claude, clis, codex, doctor, gw, hancom, helper, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -126,6 +126,11 @@ def guide(channels, result):
                 "  gw 를 처음 쓰기 전에 한 번 로그인하세요. 아이디·비밀번호는 이 PC에 안전하게 저장됩니다.",
                 "  Claude·Codex 에게 'gw 로그인해 줘'라고 하면 입력 창이 뜹니다.",
                 "  새 명령창에서 직접 `gw login` 을 치면 그 자리에서 묻습니다."]
+    if "claude" in channels:
+        where = "시작 메뉴 'JAIX 도우미'" if paths.IS_WIN else "명령창에서 `jaix helper`"
+        out += ["■ 막히면 (JAIX 도우미)",
+                "  Claude 에게 'jaix 점검해 줘'라고 하면 자가시험을 돌려 고칠 것을 알려 줍니다(/jaix-help).",
+                f"  Claude 앱에서 도구가 안 보이면 {where} 를 여세요."]
     if net.rate_limit_hit:
         out += ["", f"※ {net.RATE_LIMIT_HINT}."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
@@ -369,6 +374,11 @@ def cmd_selftest(args, log):
     return 1 if failed else 0
 
 
+def cmd_helper(args, log):
+    """시작 메뉴 'JAIX 도우미': 명령창에서 claude 를 도우미 스킬과 함께 띄운다(플러그인이 안 깔린 PC 의 안전망)."""
+    return helper.run(log)
+
+
 def cmd_update(args, log):
     if getattr(args, "self_update", False):  # jaix update --self: 본체(설치본) 업데이트만
         return selfupdate.cmd_self(args, log)
@@ -514,6 +524,9 @@ def build_parser():
                    help="Claude 에게 실제로 두 번 요청해 도구를 쓰는지까지 봄(본인 Claude 사용량을 씀, 기본 꺼짐)")
     t.add_argument("--keep", action="store_true", help="시험 폴더를 지우지 않고 남김")
     t.set_defaults(func=cmd_selftest)
+
+    hp = sub.add_parser("helper", help="JAIX 도우미: 명령창에서 claude 를 도우미 안내와 함께 열고 'jaix 점검해줘'로 시작")
+    hp.set_defaults(func=cmd_helper)
 
     u = sub.add_parser("update", parents=[common], help="런타임 갱신 + 플러그인·Hermes 스킬을 잠금에 맞춤")
     u.add_argument("--dry-run", action="store_true")
