@@ -2,8 +2,9 @@
 
 플러그인 jaix-help(plugins/jaix-help)가 깔리지 않은 PC 의 안전망이다. 스킬 사본은 설치본(PyInstaller)·휠에 묶여 있어
 플러그인 설치가 실패해도 있다. 깔린 플러그인 사본이 있으면 그것(더 새 판)을 먼저 쓴다.
-`--append-system-prompt-file` 은 Claude Code 2.1.318 에서 확인했다. 데스크톱 앱 로그인이 명령창 claude 로 이어지는지는
-아직 Windows 실기로 확인하지 않았다 — 처음이면 claude 가 로그인을 묻는다.
+`--append-system-prompt-file` 은 Claude Code 2.1.318 에서 확인했다. 데스크톱 앱 로그인은 명령창 claude 로 **이어지지 않는다**
+(Windows 실기 2026-11-06, jaix v2026.11.06.2: 빈 설정에서 `claude -p` → "Not logged in"). 그래서 처음 한 번은 명령창 claude 가
+로그인을 묻는다 — 안내문으로 무엇을 고를지 미리 알려 준다.
 """
 import subprocess
 import sys
@@ -50,7 +51,9 @@ def run(log, call=None, pause=None):
         log("JAIX 도우미 안내문을 찾지 못했습니다 → jaix-setup 을 다시 실행하세요.")
         code = 1
     else:
-        log("JAIX 도우미를 엽니다. 처음이면 Claude 로그인을 물을 수 있습니다(브라우저에서 승인).")
+        log("JAIX 도우미를 엽니다.")
+        log("처음 한 번은 Claude 로그인을 묻습니다(데스크톱 앱 로그인과 따로입니다):")
+        log("  로그인 방법을 고르라고 하면 1번 'Claude account with subscription' → 브라우저에서 회사 계정(@ji.re.kr)으로 승인.")
         log("비밀번호는 이 창에 쓰지 마세요 — 계정 연결은 따로 뜨는 창에 직접 넣습니다. 끝내려면 /exit")
         log("")
         try:

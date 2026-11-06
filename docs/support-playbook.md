@@ -98,4 +98,4 @@
 - **Code 탭·Cowork**: jaix 플러그인 `jaix-help`(이 저장소 `plugins/jaix-help`). `/jaix-help` 또는 "jaix 점검해 줘", "메일 연결", "로그인 안 됨" 같은 말로 불린다. Hermes(슬랙)에도 다른 jaix 스킬처럼 복사된다(입력 창은 PC 화면에 뜬다).
 - 흐름: `jaix selftest --json` → 쉬운 말로 설명 → 고칠 수 있는 것은 **물어본 뒤** `jaix update`·`jaix setup`, Claude 앱 완전 종료 안내 → `[설정 필요]` 는 `jaix connect <항목>`(새 창에 본인이 입력) → 다시 자가시험 → 그래도 실패면 소모임 채널용 보고 초안을 **사용자에게 먼저 보여 줌**(비밀번호·토큰·내부 IP 없음) → 3〜5단계(원격·방문)로.
 - 비밀번호는 대화로 받지 않는다. 사용자가 대화에 적으면 쓰지 않고 바꾸라고 안내한다.
-- **플러그인이 안 깔린 PC의 안전망**: 시작 메뉴 **JAIX 도우미**(`jaix helper`)가 명령창에서 `claude` 를 도우미 스킬 사본(설치본에 묶음)과 함께 열고 "jaix 점검해줘"로 시작한다(`--append-system-prompt-file`, `jaix selftest`·`jaix connect` 만 묻지 않고 실행 허용). 처음이면 명령창 claude 의 로그인을 물을 수 있다 — **데스크톱 앱 로그인이 이어지는지는 Windows 실기 미확인.**
+- **플러그인이 안 깔린 PC의 안전망**: 시작 메뉴 **JAIX 도우미**(`jaix helper`)가 명령창에서 `claude` 를 도우미 스킬 사본(설치본에 묶음)과 함께 열고 "jaix 점검해줘"로 시작한다(`--append-system-prompt-file`, `jaix selftest`·`jaix connect` 만 묻지 않고 실행 허용). **데스크톱 앱 로그인은 명령창 claude 로 이어지지 않는다**(Windows 실기 11/6). 처음 한 번 로그인 방법을 묻는데, 1번 'Claude account with subscription' → 브라우저에서 회사 계정으로 승인한다(창에 안내가 뜬다).
