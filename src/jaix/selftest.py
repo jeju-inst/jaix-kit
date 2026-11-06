@@ -81,6 +81,14 @@ def _tail(text, n=1, width=200):
     return " / ".join(lines[-n:])[:width]
 
 
+def _why(text, width=300):
+    """실패 출력의 요지: 예외 이름이 든 첫 줄(자바 stack trace 의 원인) + 마지막 줄."""
+    lines = [ln.strip() for ln in (text or "").strip().splitlines() if ln.strip()]
+    cause = next((ln for ln in lines if re.search(r"(Exception|Error)\b", ln) and not ln.startswith("at ")), None)
+    picked = [cause] if cause and cause != (lines[-1] if lines else None) else []
+    return " / ".join(picked + lines[-1:])[:width]
+
+
 # --- 공통: 시험 폴더·샘플 ------------------------------------------------------------------------------
 def sample_cache():
     return paths.data_dir() / "selftest" / "sample.hwp"
@@ -224,10 +232,19 @@ def check_hwp(lock, work, sample, runner=run):
     out = work / "변환 결과.hwpx"
     code, text = runner([*cmd, "convert", str(src), str(out)], FIRST_RUN_TIMEOUT, cwd=str(work), env=env)
     if code != 0 or not out.is_file():
-        why = text if code is None else _tail(text, 2)
-        fix = ("새 명령창에서 다시 실행(그래도 같으면 jaix setup)" if "Java" in (text or "") or "jar" in (text or "")
-               else "jaix setup 뒤 다시 시험, 그래도 같으면 이 결과를 소모임 채널에")
-        return [_fail(area_c, f"변환 실패: {why}", fix)], None
+        why = text if code is None else _why(text)
+        if "Java(JRE)" in (text or "") or "변환기 jar" in (text or ""):
+            return [_fail(area_c, f"변환 실패: {why}", "새 명령창에서 다시 실행(그래도 같으면 jaix setup)")], None
+        # 영문 경로에서는 되는지 — 되면 한글·띄어쓰기 경로 문제다(연구원 폴더는 대개 한글이라 따로 알린다)
+        plain = work.parent / "plain"
+        plain.mkdir(exist_ok=True)
+        shutil.copyfile(sample, plain / "sample.hwp")
+        code2, _ = runner([*cmd, "convert", str(plain / "sample.hwp"), str(plain / "sample.hwpx")], FIRST_RUN_TIMEOUT,
+                          cwd=str(plain), env=env)
+        if code2 == 0 and valid_hwpx(plain / "sample.hwpx"):
+            return [_fail(area_c, f"한글·띄어쓰기가 든 경로에서만 실패(영문 경로는 됨): {why}",
+                          "당분간 영문 이름 폴더에서 변환하고, 이 결과를 소모임 채널에 올려 주세요")], None
+        return [_fail(area_c, f"변환 실패: {why}", "jaix setup 뒤 다시 시험, 그래도 같으면 이 결과를 소모임 채널에")], None
     if not valid_hwpx(out):
         return [_fail(area_c, "만든 .hwpx 가 올바른 문서 묶음이 아님", "이 결과를 소모임 채널에 올려 주세요")], None
     res = [_ok(area_c, f"한글·띄어쓰기 경로에서 변환됨 ({out.stat().st_size // 1024}KB)")]
@@ -235,7 +252,7 @@ def check_hwp(lock, work, sample, runner=run):
     code, text = runner([*cmd, "extract", str(out), "-o", str(md)], FIRST_RUN_TIMEOUT, cwd=str(work), env=env)
     body = md.read_text(encoding="utf-8", errors="replace") if md.is_file() else ""
     if code != 0 or SAMPLE_WORD not in body:
-        why = text if code is None else (_tail(text, 2) or "본문이 비어 있음")
+        why = text if code is None else (_why(text) or "본문이 비어 있음")
         res.append(_fail(area_e, f"추출 실패: {why}", "이 결과를 소모임 채널에 올려 주세요"))
     else:
         res.append(_ok(area_e, f"{len(body):,}자"))

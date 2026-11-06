@@ -148,6 +148,14 @@ def test_check_hwp_failures(tmp_path, the_lock, monkeypatch):
         res, _ = selftest.check_hwp(the_lock, work, sample, lambda *a, **k: (2, "error: Java(JRE)가 필요합니다"))
         assert res[0].status == "fail" and "새 명령창" in res[0].fix
 
+        def ascii_only(cmd, timeout, cwd=None, env=None):
+            if "시험" in cmd[-2]:
+                return 1, 'Exception in thread "main" java.nio.file.InvalidPathException: Illegal char\n\tat X.main(X.java:1)'
+            _fake_hwpx(cmd[-1])
+            return 0, ""
+        res, _ = selftest.check_hwp(the_lock, work, sample, ascii_only)
+        assert res[0].status == "fail" and "영문 경로는 됨" in res[0].message and "InvalidPathException" in res[0].message
+
         def not_zip(cmd, timeout, cwd=None, env=None):
             Path(cmd[-1]).write_bytes(b"junk")
             return 0, ""
