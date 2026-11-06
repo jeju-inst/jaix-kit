@@ -255,7 +255,7 @@ def register(log, dry_run=False):
         log("  로그온 자동 갱신: 이 OS는 지원 안 함 → 가끔 `jaix update`")
         return False
     if installer_managed():
-        return _drop_legacy(log, dry_run)
+        return drop_legacy(log, dry_run)
     cmd = command()
     if dry_run:
         log(f"  로그온 자동 갱신: 등록 예정 ({' '.join(cmd)})")
@@ -275,7 +275,7 @@ def register(log, dry_run=False):
     return ok
 
 
-def _drop_legacy(log, dry_run):
+def drop_legacy(log, dry_run=False):
     """설치본: 예전 판이 남긴 jaix-update 예약 작업·시작프로그램 바로가기를 지운다(Defender 가 jaixw.exe 를 격리하는
     지속성 항목들). 아무것도 등록하지 않으므로 늘 False."""
     if not dry_run and _task_registered() and _run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])[0]:

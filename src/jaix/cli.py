@@ -416,6 +416,8 @@ def _update(args, log):
     problems = []
     lock = lockmod.load(args.lock, args.channel, args.offline)
     log(f"jaix {__version__} · 잠금: {lock.source}")
+    if schedule.installer_managed():  # 예전 판이 남긴 자동 시작 항목(Defender 가 jaixw 를 격리하는 원인)을 지운다
+        schedule.drop_legacy(log, dry_run=args.dry_run)
     log("\n[1/3] 런타임 갱신")
     for rt in runtimes.RUNTIMES:
         must = runtimes.required(rt, lock)

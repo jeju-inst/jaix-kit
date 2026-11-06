@@ -3024,3 +3024,19 @@ def test_plugbin_copy_in_use_keeps_old_copy_and_record(isolated, monkeypatch, th
     monkeypatch.setattr(Path, "rename", real_rename)  # 닫고 다시 → 바뀐다
     assert REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), print)["status"] == "ok"
     assert plugbin.recorded()["mail-skill"]["sha"] == "b" * 40 and not copy.with_name("mail-skill.jaix-old").exists()
+
+
+def test_update_drops_legacy_startup_link(managed, the_lock, monkeypatch):
+    """새 판은 setup 없이 update 만 도는 PC 도 많다 → update 도 예전 바로가기를 지운다(CI 가 잡음)."""
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    monkeypatch.setattr(cli.lockmod, "load", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    with pytest.raises(RuntimeError):
+        cli._update(argparse.Namespace(lock=None, channel=None, offline=True, dry_run=False), print)
+    assert schedule.startup_link().exists()  # 잠금을 읽은 뒤에 지운다 — 여기선 아직
+    monkeypatch.setattr(cli.lockmod, "load", lambda *a, **k: the_lock)
+    monkeypatch.setattr(cli.runtimes, "RUNTIMES", [])
+    monkeypatch.setattr(cli.uvpython, "ensure", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    with pytest.raises(RuntimeError):
+        cli._update(argparse.Namespace(lock=None, channel=None, offline=True, dry_run=False), print)
+    assert not schedule.startup_link().exists()
