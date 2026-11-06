@@ -245,12 +245,19 @@ def in_new_window(item, log, popen=None, osascript=None, sleep=time.sleep, limit
     try:
         if IS_WIN:
             p = (popen or subprocess.Popen)(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-            try:
-                code = p.wait(timeout=limit)
-            except subprocess.TimeoutExpired:
-                return None
-            got = _read_code(name)
-            return got if got is not None else code
+            # 자식은 결과를 적은 뒤 Enter 를 기다린다 — 창을 닫지 않고 돌아와도 막히지 않게 결과 파일을 본다
+            waited = 0.0
+            while waited < limit:
+                got = _read_code(name)
+                if got is not None:
+                    return got
+                code = p.poll()
+                if code is not None:
+                    got = _read_code(name)
+                    return got if got is not None else code
+                sleep(POLL)
+                waited += POLL
+            return None
         if IS_MAC:
             script = " ".join(shlex.quote(c) for c in cmd)
             run = osascript or (lambda s: subprocess.run(

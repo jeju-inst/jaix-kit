@@ -202,11 +202,24 @@ def test_new_window_windows(monkeypatch):
             seen["cmd"], seen["flags"] = cmd, creationflags
             Path(cmd[-1]).write_text("0", encoding="utf-8")
 
-        def wait(self, timeout=None):
-            return 0
-    assert connect.in_new_window("mail", print, popen=P) == 0
+        def poll(self):
+            return None  # 결과를 적고 Enter 를 기다리는 중(창이 열려 있음)
+    assert connect.in_new_window("mail", print, popen=P, sleep=lambda s: None) == 0
     assert seen["flags"] == 0x10 and "--here" in seen["cmd"]
     assert not Path(seen["cmd"][-1]).exists()  # 결과 파일은 지운다
+
+
+def test_new_window_windows_child_exits_without_result(monkeypatch):
+    monkeypatch.setattr(connect, "IS_WIN", True)
+    monkeypatch.setattr(subprocess, "CREATE_NEW_CONSOLE", 0x10, raising=False)
+
+    class P:
+        def __init__(self, cmd, creationflags=0):
+            pass
+
+        def poll(self):
+            return 5
+    assert connect.in_new_window("mail", print, popen=P, sleep=lambda s: None) == 5
 
 
 def test_new_window_mac_polls_result(monkeypatch):
