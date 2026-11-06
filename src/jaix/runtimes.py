@@ -2,7 +2,7 @@
 
 Windows 설치 순서: 이미 쓸 만한 것(PATH · 새 창 PATH · winget 바로가기)이 있으면 그대로 쓴다. 없으면 포터블 zip 을
 jaix_home 아래에 풀고 사용자 PATH 에 추가한다. 관리자 권한이 필요 없다.
-- Git·uv·age 는 winget 을 쓰지 않고 GitHub 릴리스의 고정 판을 sha256 으로 확인해 직접 받는다(PINNED). winget 은 원내 PC
+- Git·uv·age·himalaya 는 winget 을 쓰지 않고 GitHub 릴리스의 고정 판을 sha256 으로 확인해 직접 받는다(PINNED). winget 은 원내 PC
   에서 막히거나 15분씩 멈춰 셋이 통째로 빠졌다(소모임 11/5, 직접 받는 himalaya·jar·rhwp 는 같은 PC에서 통과).
 - 나머지 winget ID 가 있는 것(Java·Node)은 winget 사용자 범위 → 안 되면 포터블. winget 이 머신 범위 설치기만 있는
   패키지는 --scope user 가 거절되므로 자연히 포터블로 넘어간다.
@@ -39,6 +39,11 @@ PINNED = {
     "age": {"name": "age-v1.3.2-windows-amd64.zip",  # v1.3.2 (2026-08-29)
             "url": "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-windows-amd64.zip",
             "sha256": "f48d8f8f9ebe903ab5027ed067652f2cc1db94bc206976430133b905dcd8e8c7"},
+    # mailskill 어댑터가 1.x 문법(`-o json`, `folder`)을 쓴다. 2.x 는 `--json`·`mailbox` 로 바뀌어 조회·검색·읽기가
+    # 전부 깨진다(namun-ji 실측 2026-11-06: latest 추종으로 2.2.1 이 깔림). mailskill 이 2.x 로 옮기면 여기만 바꾼다
+    "himalaya": {"name": "himalaya.x86_64-windows.zip",  # v1.2.0 (2026-02-19)
+                 "url": "https://github.com/pimalaya/himalaya/releases/download/v1.2.0/himalaya.x86_64-windows.zip",
+                 "sha256": "e8af483e97bb66e2c48ef76695a418cf76eae13830ec2dd0d600345a38385184"},
 }
 
 
@@ -75,6 +80,8 @@ class Runtime:
     path_subdir: str = ""           # tree 안에서 PATH에 넣을 하위 폴더
     winget: str | None = None
     min_major: int | None = None
+    max_major: int | None = None    # 이보다 높으면 쓸 수 없음(문법이 바뀐 새 판). Windows 는 고정 판으로 다시 깐다
+    max_reason: str = ""
     min_version: str | None = None  # 이보다 낮으면 doctor가 "업데이트 필요"(동작은 함 → 주의)
     min_reason: str = ""            # 그 버전이 필요한 이유(doctor 메시지)
     windows_only: bool = False
@@ -123,8 +130,9 @@ RUNTIMES = [
     # 웍스 도구(nworks, npm 패키지)만 쓴다. 잠금에 jaix-works 가 있으면 works.ensure 가 부른다
     Runtime("node", "Node.js (LTS)", "node", ["--version"], False, _nodejs, tree="node",
             winget="OpenJS.NodeJS.LTS", min_major=18, hint="brew install node", purpose="웍스 도구(nworks)"),
-    Runtime("himalaya", "himalaya", "himalaya", ["--version"], False,
-            _github("pimalaya/himalaya", r"^himalaya\.x86_64-windows\.zip$"), hint="brew install himalaya",
+    Runtime("himalaya", "himalaya", "himalaya", ["--version"], False, _pinned("himalaya"),
+            max_major=1, max_reason="2.x 는 명령 문법이 달라 mailskill 이 못 씀",
+            hint="brew 는 2.x 를 깖 → https://github.com/pimalaya/himalaya/releases/tag/v1.2.0 에서 받아 PATH 에",
             needed_by="mail-skill", purpose="메일 도구(mail-skill 플러그인)"),
     Runtime("age", "age", "age", ["--version"], False, _pinned("age"), hint="brew install age", needed_by="mail-skill",
             purpose="메일 도구 비밀 암호화(mail-skill 플러그인)"),
@@ -203,7 +211,16 @@ def outdated(rt, found):
 def ok(rt, found):
     if not found.path:
         return False
+    if rt.max_major is not None and found.major is not None and found.major > rt.max_major:
+        return False
     return rt.min_major is None or (found.major or 0) >= rt.min_major
+
+
+def need(rt, found):
+    """found 가 왜 안 되는지(ok 가 False 이고 path 가 있을 때) 한 마디."""
+    if rt.max_major is not None and found.major is not None and found.major > rt.max_major:
+        return f"{rt.max_major}.x 필요({rt.max_reason})"
+    return f"{rt.min_major} 이상 필요"
 
 
 def _marker(rt):
@@ -266,7 +283,8 @@ def install_portable(rt, log):
     """최신 포터블을 받아 깐다. 지난번과 같은 파일이면 건너뛴다. PATH에 넣을 폴더를 돌려준다."""
     name, url = rt.resolve()
     marker = _marker(rt)
-    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == name and find(rt).managed:
+    # 파일 이름이 같아도 판이 다를 수 있다(himalaya 는 latest 를 따라가던 때와 고정 판의 이름이 같다) → 쓸 수 있을 때만 건너뜀
+    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == name and (f := find(rt)).managed and ok(rt, f):
         log(f"  {rt.label}: 최신({name}) — 그대로 둠")
         return rt.path_dir()
     log(f"  {rt.label}: {name} 내려받는 중…")
@@ -329,7 +347,7 @@ def ensure(rt, log, dry_run=False, upgrade=False):
         return found
     if not IS_WIN:
         log(f"  {rt.label}: 없음 → {rt.hint or '수동 설치'}" if not found.path
-            else f"  {rt.label}: {found.version} — {rt.min_major} 이상 필요 → {rt.hint}")
+            else f"  {rt.label}: {found.version} — {need(rt, found)} → {rt.hint}")
         return found
     if dry_run:
         log(f"  {rt.label}: 설치 예정 ({f'winget {rt.winget} → ' if rt.winget else ''}"

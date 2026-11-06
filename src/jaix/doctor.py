@@ -45,9 +45,10 @@ def check_runtimes(lock=None):
         elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
         elif not runtimes.required(rt, lock):
-            out.append(Check("skip", rt.label, f"없음 — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
+            what = f"{found.version} — {runtimes.need(rt, found)}" if found.path else "없음"
+            out.append(Check("skip", rt.label, f"{what} — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
         elif found.path:
-            out.append(Check("fail", rt.label, f"{found.version} — {rt.min_major} 이상 필요 ({rt.purpose})",
+            out.append(Check("fail", rt.label, f"{found.version} — {runtimes.need(rt, found)} ({rt.purpose})",
                              FIX_SETUP if IS_WIN else rt.hint))
         else:
             out.append(Check("fail", rt.label, f"없음 ({rt.purpose})", FIX_SETUP if IS_WIN else rt.hint))

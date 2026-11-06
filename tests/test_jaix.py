@@ -2933,3 +2933,38 @@ def test_plugbin_cli_only_plugin_without_bin(isolated, monkeypatch, the_lock):
     res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), print)
     assert res["status"] == "ok" and "mailskill" in res["commands"]
     assert (plugbin.plugins_dir() / "mail-skill" / "cli").is_dir()
+
+
+# --- himalaya 는 1.x 고정: mailskill 이 1.x 문법(-o json·folder)을 쓴다. 2.x 가 깔린 PC 는 고정 판으로 다시 깐다 -----
+def test_himalaya_pinned_to_1x_and_2x_is_not_ok():
+    rt = runtimes.BY_KEY["himalaya"]
+    name, url = rt.resolve()  # GitHub latest API 를 부르지 않는다
+    assert "/v1.2.0/" in url and name == runtimes.PINNED["himalaya"]["name"]
+    assert re.fullmatch(r"[0-9a-f]{64}", runtimes.PINNED["himalaya"]["sha256"])
+    two = runtimes.Found("/x/himalaya", "2.2.1", 2)
+    assert runtimes.ok(rt, runtimes.Found("/x/himalaya", "1.2.0", 1)) and not runtimes.ok(rt, two)
+    assert "1.x 필요" in runtimes.need(rt, two) and "mailskill" in runtimes.need(rt, two)
+    assert runtimes.ok(runtimes.BY_KEY["java"], runtimes.Found("/x/java", "25.0.1", 25))  # 위 한도는 java 등엔 없음
+
+
+def test_himalaya_2x_with_same_asset_name_is_reinstalled(isolated, monkeypatch):
+    """latest 를 따라가던 때의 2.x 도 파일 이름이 같다(himalaya.x86_64-windows.zip) → 표식만 보고 건너뛰면 안 된다."""
+    rt = runtimes.BY_KEY["himalaya"]
+    got = _serve_pinned(monkeypatch, "himalaya", {"himalaya.exe": b"v1"})
+    paths.jaix_home().mkdir(parents=True, exist_ok=True)
+    runtimes._marker(rt).write_text(runtimes.PINNED["himalaya"]["name"], encoding="utf-8")
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/jaix/bin/himalaya.exe", "2.2.1", 2, managed=True))
+    runtimes.install_portable(rt, print)
+    assert got and (paths.bin_dir() / "himalaya.exe").read_bytes() == b"v1"
+    # 고정 판이 이미 있으면 받지 않는다
+    got.clear()
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/jaix/bin/himalaya.exe", "1.2.0", 1, managed=True))
+    runtimes.install_portable(rt, print)
+    assert not got
+
+
+def test_doctor_flags_himalaya_2x(monkeypatch):
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/x/" + r.exe, "2.2.1", 2) if r.key == "himalaya"
+                        else runtimes.Found(None, None))
+    lines = [c for c in doctor.check_runtimes() if c.area == "himalaya"]
+    assert lines and "2.2.1" in lines[0].message and "1.x 필요" in lines[0].message
