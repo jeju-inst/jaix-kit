@@ -227,6 +227,22 @@ def _marker(rt):
     return paths.jaix_home() / f".{rt.key}.asset"
 
 
+# 서명 없는 포터블(himalaya 등)을 Defender 가 오탐으로 격리하는 일이 있다(namun-ji 2026-11-06: himalaya 1.2.0 받는 중
+# 위협 알림 3번 — zip 안에 같은 exe 가 세 벌). 관리자 권한 없이는 예외를 못 넣으므로 어디서 확인할지만 알린다
+AV_HINT = ("백신(Windows 보안)이 막았을 수 있음 — Windows 보안 → 바이러스 및 위협 방지 → 보호 기록에서 위협 이름·경로를 "
+           "확인해 AI센터에 알려 주세요")
+
+
+def av_blocked(err):
+    """설치 중 오류가 백신 차단 때문인지. ERROR_VIRUS_INFECTED(225)·ERROR_VIRUS_DELETED(226)."""
+    return getattr(err, "winerror", None) in (225, 226) or "virus" in str(err).lower()
+
+
+def vanished(rt):
+    """jaix 가 받아 깐 기록(표식)은 있는데 실행파일이 없다 — 깐 뒤 누가(대개 백신이) 지웠다."""
+    return bool(IS_WIN and _marker(rt).is_file() and not shutil.which(rt.exe, path=str(rt.path_dir())))
+
+
 def _extract(archive, rt):
     """zip을 설치 위치에 푼다. tree면 맨 위 폴더 하나를 벗겨 통째로, 아니면 .exe/.dll만 bin에."""
     with zipfile.ZipFile(archive) as z:
@@ -303,6 +319,8 @@ def install_portable(rt, log):
         else:  # 단일 exe (hwp2pdf-cli-<버전>.exe → hwp2pdf-cli.exe)
             paths.bin_dir().mkdir(parents=True, exist_ok=True)
             shutil.copyfile(file, paths.bin_dir() / f"{rt.exe}.exe")
+    if IS_WIN and not shutil.which(rt.exe, path=str(rt.path_dir())):  # 풀자마자 격리되면 여기서 안다(표식은 남기지 않음)
+        raise RuntimeError(f"풀었는데 {rt.exe}.exe 가 없음 — {AV_HINT}")
     marker.write_text(name, encoding="utf-8")
     return rt.path_dir()
 
@@ -363,7 +381,7 @@ def ensure(rt, log, dry_run=False, upgrade=False):
     try:
         winenv.add_to_path([install_portable(rt, log)])
     except Exception as e:  # 한 런타임이 막혀도 나머지는 계속 깐다. doctor가 남은 것을 알려 준다
-        log(f"  {rt.label}: 설치 실패 — {e}")
+        log(f"  {rt.label}: 설치 실패 — {e}" + (f"\n    {AV_HINT}" if av_blocked(e) else ""))
         return find(rt)
     found = find(rt)
     log(f"  {rt.label}: {found.version or '?'} ({found.path})")

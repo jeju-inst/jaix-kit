@@ -45,13 +45,16 @@ def check_runtimes(lock=None):
         elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
         elif not runtimes.required(rt, lock):
-            what = f"{found.version} — {runtimes.need(rt, found)}" if found.path else "없음"
+            what = f"{found.version} — {runtimes.need(rt, found)}" if found.path else \
+                ("없음 — 깔았던 기록은 있는데 파일이 사라짐, " + runtimes.AV_HINT if runtimes.vanished(rt) else "없음")
             out.append(Check("skip", rt.label, f"{what} — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
         elif found.path:
             out.append(Check("fail", rt.label, f"{found.version} — {runtimes.need(rt, found)} ({rt.purpose})",
                              FIX_SETUP if IS_WIN else rt.hint))
         else:
-            out.append(Check("fail", rt.label, f"없음 ({rt.purpose})", FIX_SETUP if IS_WIN else rt.hint))
+            gone = runtimes.vanished(rt)
+            out.append(Check("fail", rt.label, f"없음 ({rt.purpose})" + (" — 깔았던 기록은 있는데 파일이 사라짐" if gone else ""),
+                             f"{runtimes.AV_HINT} · 그 뒤 {FIX_SETUP}" if gone else (FIX_SETUP if IS_WIN else rt.hint)))
         if rt.key == "hwp2pdf" and found.path and not runtimes.hancom_installed():
             out.append(Check("warn", "한컴오피스", "없음 → HWP 렌더는 rhwp 근사 렌더로 대체 (hwp2pdf는 설치돼 있음)",
                              "정확한 렌더가 필요하면 한컴오피스 설치"))
