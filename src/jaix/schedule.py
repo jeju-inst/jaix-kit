@@ -6,10 +6,11 @@ Claude는 마켓플레이스 autoUpdate로 저절로 갱신되지만 Codex·Herm
 - macOS: ~/Library/LaunchAgents의 LaunchAgent(RunAtLoad). launchd의 PATH는 비어 있다시피 해서 등록할 때 PATH를 적어 둔다.
 결과는 data_dir(Windows %LOCALAPPDATA%\\jaix)의 update-status.json·update.log에 남고 doctor가 보여 준다.
 
-**Windows 설치본(jaix-setup)은 예약 작업을 쓰지 않는다**(2026-11-04): 서명 없는 창 없는 jaixw.exe 가 schtasks 로
-자기 자신을 로그온 작업에 등록하는 흐름이 Defender `Behavior:Win32/Persistence.A!ml` 로 잡혀 jaixw.exe 와
-jaix-update 작업이 함께 격리·삭제됐다(jaix-win 실측). 대신 설치기(Inno [Icons])가 시작프로그램 폴더에
-`JAIX 갱신` 바로가기를 선언하고, jaix 는 그것을 확인만 한다. 개발 설치(파이썬)는 그대로 예약 작업.
+**Windows 설치본(jaix-setup)은 로그온 자동 갱신을 두지 않는다.** 서명 없는 창 없는 jaixw.exe 를 가리키는 자동 시작
+항목이 있으면 Defender ML 이 jaixw.exe 를 격리했다 — jaix 가 schtasks 로 등록했을 때(Persistence.A!ml, jaix-win
+2026-11-04)도, 설치기(Inno {userstartup})가 바로가기를 뒀을 때(Bearfoos.A!ml, jaix-test 2026-11-07 v2026.11.07.2)도.
+그래서 설치본은 예전 판이 남긴 작업·바로가기를 지우기만 한다. 새 판은 jaix doctor 가 알리고 받기는 시작 메뉴
+'JAIX 업데이트'(jaix.exe update). Claude 플러그인은 Claude 마켓플레이스 autoUpdate 가 맡는다. 개발 설치(파이썬)는 그대로.
 """
 import json
 import os
@@ -50,12 +51,12 @@ def plist_path():
     return paths.launch_agents_dir() / f"{AGENT_LABEL}.plist"
 
 
-STARTUP_LINK = "JAIX 갱신.lnk"  # installer/jaix-setup.iss [Icons] 의 {userstartup} 항목과 같은 이름
+STARTUP_LINK = "JAIX 갱신.lnk"  # 예전 설치기가 {userstartup} 에 두던 이름(installer [InstallDelete] 와 같게) — 이제 지우기만
 LOGON_DELAY = 120  # 바로가기에는 작업의 '지연 2분'이 없어 jaix update --delay 로 대신한다(로그온 직후 네트워크)
 
 
 def installer_managed():
-    """Windows 설치본이면 로그온 자동 갱신은 설치기가 둔 시작프로그램 바로가기다(예약 작업을 만들지 않는다)."""
+    """Windows 설치본이면 로그온 자동 갱신을 두지 않는다(예약 작업도 바로가기도 — 모듈 설명)."""
     return IS_WIN and paths.exe_dir() is not None
 
 
@@ -158,7 +159,7 @@ def _run(args):
 
 def registered():
     if installer_managed():
-        return startup_link().is_file()
+        return False
     if IS_WIN:
         return _task_registered()
     if IS_MAC:
@@ -254,7 +255,7 @@ def register(log, dry_run=False):
         log("  로그온 자동 갱신: 이 OS는 지원 안 함 → 가끔 `jaix update`")
         return False
     if installer_managed():
-        return _check_startup_link(log, dry_run)
+        return drop_legacy(log, dry_run)
     cmd = command()
     if dry_run:
         log(f"  로그온 자동 갱신: 등록 예정 ({' '.join(cmd)})")
@@ -274,15 +275,18 @@ def register(log, dry_run=False):
     return ok
 
 
-def _check_startup_link(log, dry_run):
-    """설치본: 예전 판이 만든 jaix-update 예약 작업은 지우고(Defender 가 지속성으로 잡는 그 작업), 설치기가 둔
-    시작프로그램 바로가기가 있는지만 본다. jaix 는 바로가기를 만들지 않는다 — 만드는 주체가 서명 없는 PE 면 같은 판정이다."""
+def drop_legacy(log, dry_run=False):
+    """설치본: 예전 판이 남긴 jaix-update 예약 작업·시작프로그램 바로가기를 지운다(Defender 가 jaixw.exe 를 격리하는
+    지속성 항목들). 아무것도 등록하지 않으므로 늘 False."""
     if not dry_run and _task_registered() and _run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])[0]:
-        log("  로그온 자동 갱신: 예전 예약 작업 jaix-update 를 지움(이제 시작프로그램 바로가기)")
-    if startup_link().is_file():
-        log(f"  로그온 자동 갱신: 시작프로그램 바로가기 ({startup_link().name}, 설치 프로그램이 둠)")
-        return True
-    log("  로그온 자동 갱신: 시작프로그램 바로가기가 없음 → jaix-setup 을 다시 실행하면 생김")
+        log("  로그온 자동 갱신: 예전 예약 작업 jaix-update 를 지움")
+    if not dry_run and startup_link().is_file():
+        try:
+            startup_link().unlink()
+            log(f"  로그온 자동 갱신: 예전 시작프로그램 바로가기 {startup_link().name} 를 지움")
+        except OSError as e:
+            log(f"  로그온 자동 갱신: 예전 바로가기 {startup_link()} 를 지우지 못함 — {e}")
+    log("  로그온 자동 갱신: 없음(설치본) — 새 판은 jaix doctor 가 알림 · 받기는 시작 메뉴 'JAIX 업데이트'")
     return False
 
 

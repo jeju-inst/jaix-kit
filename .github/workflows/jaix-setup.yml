@@ -50,12 +50,34 @@ jobs:
           Stamp installer/jaix-setup.iss '^#define AppVer ".*"' "#define AppVer `"$v`"" $true
           Write-Host "version $v"
 
+      # PyInstaller 부트로더를 소스에서 직접 빌드한다. 배포 휠의 부트로더(run.exe·runw.exe)는 수많은 악성코드도 같은 바이트를
+      # 써서 Defender 기계학습이 jaixw.exe·jaix-setup.exe 를 Trojan:Win32/Bearfoos.A!ml 로 잡았다(namun-ji 2026-11-06 격리).
+      # 소스 빌드는 바이트가 달라져 이 판정을 피하는 흔한 방법이다(효과는 namun-ji 에서 MpCmdRun 수동 스캔으로 실측). 동작은 같은 판의 같은 코드다.
+      # 판은 고정해 재현 가능하게 한다(올릴 때 이 줄만 바꾼다)
+      - name: Build PyInstaller bootloader from source
+        shell: pwsh
+        env:
+          PYI_VERSION: "6.22.3"
+        run: |
+          python -m pip install --upgrade pip
+          $env:PYINSTALLER_COMPILE_BOOTLOADER = "1"
+          pip install --no-binary pyinstaller --no-cache-dir "pyinstaller==$env:PYI_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller 소스 빌드 실패" }
+          # 정말 새로 빌드됐는지: 배포 휠의 부트로더와 바이트가 달라야 한다
+          $bl = python -c "import PyInstaller, os; print(os.path.join(os.path.dirname(PyInstaller.__file__), 'bootloader', 'Windows-64bit-intel'))"
+          pip download --only-binary :all: --no-deps --platform win_amd64 --python-version 3.12 -d wheel "pyinstaller==$env:PYI_VERSION"
+          Expand-Archive (Get-ChildItem wheel\*.whl).FullName wheel\x
+          foreach ($b in 'run.exe','runw.exe') {
+            $mine = (Get-FileHash "$bl\$b").Hash; $stock = (Get-FileHash "wheel\x\PyInstaller\bootloader\Windows-64bit-intel\$b").Hash
+            Write-Host "$b  built=$mine  wheel=$stock"
+            if ($mine -eq $stock) { throw "$b 가 배포 휠 것과 같음 — 소스 빌드가 안 됨" }
+          }
+
       # onedir(jaix-kit#46): onefile 이 Defender 기계학습 판정에 걸려 바꿨다. UPX 끔·버전 리소스는 spec 에서
       - name: Build jaix (onedir)
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          pip install . pyinstaller
+          pip install .
           if ("${{ github.ref }}".StartsWith('refs/tags/v')) { $env:JAIX_VERSION = "${{ github.ref_name }}".Substring(1) }
           pyinstaller --noconfirm installer\jaix.spec
           .\dist\jaix\jaix.exe --version
@@ -138,6 +160,11 @@ jobs:
           # #27: jaix setup 본 실행이 작업 스케줄러(--via-task)로 돌았는지 — 그 길만 setup-status.json 을 남긴다
           if (-not (Test-Path "$data\setup-status.json")) { throw "jaix setup 이 작업 스케줄러로 돌지 않음(setup-status.json 없음)" }
           Get-Content "$data\setup-status.json"
+          # 작업이 띄운 것이 콘솔 jaix.exe 인지(창 없는 jaixw.exe 를 예약 작업으로 띄우는 흐름이 Defender 에 걸림, 11/4·11/7).
+          # setup 기록의 머리줄이 실행파일 이름을 남긴다(cli._banner)
+          $banner = Select-String -Path "$data\setup.log" -Pattern '^== .* setup \(' | Select-Object -Last 1
+          Write-Host "머리줄: $($banner.Line)"
+          if (-not $banner -or $banner.Line -notlike '*(via task) · jaix.exe') { throw "예약 작업의 setup 이 jaix.exe 로 돌지 않음: $($banner.Line)" }
           foreach ($f in 'setup.log','setup-status.json','guide.txt') {
             if (Test-Path "$app\$f") { throw "기록 $f 이 프로그램 폴더에 생김" }
           }
@@ -174,37 +201,40 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "cmd 에서 $n --version 종료 코드 $LASTEXITCODE" }
           }
 
-      # 로그온 자동 갱신: 설치기가 둔 시작프로그램 바로가기(jaixw.exe update --quiet)가 있고, 예약 작업은 만들지 않으며
-      # (Defender Persistence.A!ml, jaix-win 11/4), 그 명령이 돌아 상태를 남기는지
-      - name: Logon auto-update shortcut
+      # 로그온 자동 갱신은 두지 않는다: 서명 없는 jaixw.exe 를 가리키는 자동 시작 항목(예약 작업·시작프로그램·Run 키)이
+      # 있으면 Defender 가 jaixw 를 격리했다(jaix-win 11/4 Persistence.A!ml, jaix-test 11/7 Bearfoos.A!ml). 설치 뒤 그런
+      # 항목이 하나도 없는지, 예전 판이 남긴 바로가기는 jaix update 가 지우는지, update --quiet 가 돌아 상태를 남기는지
+      - name: No autostart entries (Defender) + legacy shortcut cleanup
         shell: pwsh
         run: |
           [Console]::OutputEncoding = [Text.Encoding]::UTF8
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
-          $lnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'JAIX 갱신.lnk'
-          if (-not (Test-Path $lnk)) { Get-ChildItem ([Environment]::GetFolderPath('Startup')); throw "시작프로그램 바로가기 없음: $lnk" }
-          # WScript.Shell 은 한글 이름 .lnk 를 빈 바로가기로 읽는다(러너 코드페이지 1252) → ASCII 이름 사본으로 읽는다
-          $copy = Join-Path $env:TEMP 'jaix-startup-check.lnk'
-          Copy-Item -LiteralPath $lnk -Destination $copy -Force
-          Write-Host "바로가기 파일: $((Get-Item -LiteralPath $lnk).Length) B"
-          $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($copy)
-          Write-Host "바로가기: $($sc.TargetPath) $($sc.Arguments)"
-          if ($sc.TargetPath -notlike '*\jaix\jaixw.exe') { throw "바로가기가 창 없는 jaixw.exe 를 부르지 않음: $($sc.TargetPath)" }
-          if ($sc.Arguments -notlike 'update --quiet*') { throw "바로가기 인자: $($sc.Arguments)" }
+          $startup = [Environment]::GetFolderPath('Startup')
+          $lnk = Join-Path $startup 'JAIX 갱신.lnk'
+          if (Test-Path -LiteralPath $lnk) { throw "설치기가 시작프로그램 바로가기를 둠: $lnk" }
+          $hits = Get-ChildItem $startup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*jaix*' -or $_.Name -like '*JAIX*' }
+          if ($hits) { throw "시작프로그램에 jaix 항목: $($hits.Name -join ', ')" }
+          $run = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+          if ($run -and ($run.PSObject.Properties | Where-Object { "$($_.Value)" -like '*jaix*' })) { throw "Run 키에 jaix 항목" }
           schtasks /Query /TN jaix-update 2>$null
           if ($LASTEXITCODE -eq 0) { throw "설치본이 예약 작업 jaix-update 를 만듦(지속성 판정 대상)" }
+          schtasks /Query /TN jaix-setup-once 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "한 번짜리 작업 jaix-setup-once 가 남음" }
           $global:LASTEXITCODE = 0
+          # 예전 판이 남긴 바로가기 → jaix update 가 지운다
+          [IO.File]::WriteAllBytes($lnk, [byte[]](1,2,3))
           $jaix = Join-Path $env:LOCALAPPDATA 'jaix'
           $status = "$jaix\update-status.json"
           Remove-Item $status -ErrorAction SilentlyContinue
-          # 로그온 때 셸이 여는 것과 같은 명령(지연만 빼고)
-          Start-Process -FilePath $sc.TargetPath -ArgumentList 'update','--quiet' -Wait -NoNewWindow
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix\jaix\jaix.exe'
+          Start-Process -FilePath $app -ArgumentList 'update','--quiet' -Wait -NoNewWindow
           Get-Content "$jaix\update.log" -Tail 40
           $s = Get-Content $status -Raw | ConvertFrom-Json
-          if (-not $s.ok) { throw "자동 갱신 실패: $($s.error) $($s.problems)" }
+          if (-not $s.ok) { throw "update 실패: $($s.error) $($s.problems)" }
+          if (Test-Path -LiteralPath $lnk) { throw "jaix update 가 예전 바로가기를 지우지 않음" }
           $c = (jaix doctor --json | Out-String | ConvertFrom-Json).checks | Where-Object area -eq '로그온 자동 갱신'
           Write-Host "doctor: $($c.status) $($c.message)"
-          if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
+          if ($c.status -ne 'info') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
 
       # Claude Code 네이티브 설치 경로(clis.install_claude: downloads.claude.ai → manifest sha256 → claude.exe install
       # stable)는 러너에 npm 판 claude 가 이미 있어 위 설치에서는 '그대로 둠'만 탄다. 격리한 홈(USERPROFILE)에서 jaix 의
@@ -245,7 +275,9 @@ jobs:
 
       # Git·uv·age 는 winget 없이 고정 판을 직접 받는다(#118). 러너엔 Git 이 있어 setup 은 '그대로 둠'만 탄다 →
       # 격리한 jaix 폴더에 같은 코드로 PortableGit(7z 자동 풀기 exe)·uv·age 를 받아 풀고 git·bash·uv·age 가 도는지 본다
-      - name: Pinned runtimes direct install (PortableGit · uv · age, isolated jaix home)
+      # install_portable 은 푼 뒤 rt.path_dir() 에 rt.exe 가 있는지 본다(#134, 백신 격리 감지) → 포터블로 깔리는 런타임마다
+      # 그 구조가 맞는지도 여기서 실제로 확인한다(himalaya·Java·Node 추가)
+      - name: Portable runtimes direct install (PortableGit · uv · age · himalaya · Java · Node, isolated jaix home)
         shell: pwsh
         run: |
           [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -253,7 +285,7 @@ jobs:
           $env:PYTHONIOENCODING = 'utf-8'
           @'
           from jaix import runtimes
-          for key in ("git", "uv", "age"):
+          for key in ("git", "uv", "age", "himalaya", "java", "node"):
               rt = runtimes.BY_KEY[key]
               print(key, "->", runtimes.install_portable(rt, print))
           '@ | python -
@@ -263,6 +295,9 @@ jobs:
           & "$h\git\bin\bash.exe" -c 'echo bash ok; git --version'; if ($LASTEXITCODE -ne 0) { throw "bash 실패" }
           & "$h\bin\uv.exe" --version; if ($LASTEXITCODE -ne 0) { throw "uv 실패" }
           & "$h\bin\age.exe" --version; if ($LASTEXITCODE -ne 0) { throw "age 실패" }
+          & "$h\bin\himalaya.exe" --version; if ($LASTEXITCODE -ne 0) { throw "himalaya 실패" }
+          & "$h\jre\bin\java.exe" -version; if ($LASTEXITCODE -ne 0) { throw "java 실패" }
+          & "$h\node\node.exe" --version; if ($LASTEXITCODE -ne 0) { throw "node 실패" }
 
       - name: Uninstall
         shell: pwsh

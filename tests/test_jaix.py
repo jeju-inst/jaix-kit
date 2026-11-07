@@ -2039,29 +2039,31 @@ def managed(isolated, monkeypatch, tmp_path):
     return state
 
 
-def test_installer_declares_startup_link_with_same_name():
+def test_installer_has_no_autostart_and_deletes_legacy_link():
+    """서명 없는 jaixw.exe 를 가리키는 자동 시작 항목이 있으면 Defender 가 jaixw 를 격리했다(11/4·11/7) → 두지 않는다."""
     iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
-    name = schedule.STARTUP_LINK.removesuffix(".lnk")
-    line = next(ln for ln in iss.splitlines() if ln.startswith('Name: "{userstartup}'))
-    assert f'{{userstartup}}\\{name}"' in line and 'jaixw.exe"' in line
-    assert f"update --quiet --delay {schedule.LOGON_DELAY}" in line
+    lines = [ln for ln in iss.splitlines() if not ln.lstrip().startswith(";")]
+    assert not any(ln.startswith('Name: "{userstartup}') or ln.startswith('Name: "{commonstartup}') for ln in lines)
+    assert not any("CurrentVersion\\Run" in ln for ln in lines)
+    assert f'Type: files; Name: "{{userstartup}}\\{schedule.STARTUP_LINK}"' in iss
 
 
-def test_managed_register_does_not_create_task_and_drops_legacy(managed):
+def test_managed_register_creates_nothing_and_drops_legacy(managed):
     assert schedule.installer_managed()
     managed.task = True  # 예전 판이 만든 jaix-update
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")  # 예전 설치기가 둔 바로가기
     seen = []
-    assert schedule.register(seen.append) is False  # 바로가기가 아직 없음
+    assert schedule.register(seen.append) is False
     assert not any(c[:2] == ["schtasks", "/Create"] for c in managed.calls)
     assert ["schtasks", "/Delete", "/TN", schedule.TASK_NAME, "/F"] in managed.calls
-    assert any("바로가기가 없음" in m for m in seen)
-    schedule.startup_link().parent.mkdir(parents=True)
+    assert not schedule.startup_link().exists() and not schedule.registered()
+    assert any("JAIX 업데이트" in m for m in seen)
+    # dry-run 은 지우지 않는다
     schedule.startup_link().write_bytes(b"lnk")
-    managed.task = False
-    seen.clear()
-    assert schedule.register(seen.append) is True and schedule.registered()
-    assert any("시작프로그램 바로가기" in m for m in seen)
-    assert schedule.run_mode() is None and schedule.last_run() is None
+    managed.calls.clear()
+    schedule.register(print, dry_run=True)
+    assert schedule.startup_link().exists() and not any(c[:2] == ["schtasks", "/Delete"] for c in managed.calls)
 
 
 def test_managed_unregister_removes_link(managed):
@@ -2070,14 +2072,13 @@ def test_managed_unregister_removes_link(managed):
     assert schedule.unregister() is True and not schedule.startup_link().exists()
 
 
-def test_doctor_managed_missing_link_points_to_installer(managed, monkeypatch):
+def test_doctor_managed_no_autoupdate_is_info_and_legacy_link_warns(managed):
     c = doctor.check_autoupdate()[0]
-    assert c.status == "warn" and schedule.STARTUP_LINK in c.message and "jaix-setup" in c.fix
+    assert c.status == "info" and "Defender" in c.message and "JAIX 업데이트" in c.fix
     schedule.startup_link().parent.mkdir(parents=True)
     schedule.startup_link().write_bytes(b"lnk")
-    monkeypatch.setattr(schedule, "last_status", lambda: {"ok": True, "time": "t"})
     c = doctor.check_autoupdate()[0]
-    assert c.status == "ok" and "시작프로그램 바로가기" in c.message
+    assert c.status == "warn" and schedule.STARTUP_LINK in c.message and "jaix update" in c.fix
 
 
 def test_update_quiet_delay_sleeps(isolated, monkeypatch):
@@ -2933,3 +2934,126 @@ def test_plugbin_cli_only_plugin_without_bin(isolated, monkeypatch, the_lock):
     res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), print)
     assert res["status"] == "ok" and "mailskill" in res["commands"]
     assert (plugbin.plugins_dir() / "mail-skill" / "cli").is_dir()
+
+
+# --- himalaya 는 1.x 고정: mailskill 이 1.x 문법(-o json·folder)을 쓴다. 2.x 가 깔린 PC 는 고정 판으로 다시 깐다 -----
+def test_himalaya_pinned_to_1x_and_2x_is_not_ok():
+    rt = runtimes.BY_KEY["himalaya"]
+    name, url = rt.resolve()  # GitHub latest API 를 부르지 않는다
+    assert "/v1.2.0/" in url and name == runtimes.PINNED["himalaya"]["name"]
+    assert re.fullmatch(r"[0-9a-f]{64}", runtimes.PINNED["himalaya"]["sha256"])
+    two = runtimes.Found("/x/himalaya", "2.2.1", 2)
+    assert runtimes.ok(rt, runtimes.Found("/x/himalaya", "1.2.0", 1)) and not runtimes.ok(rt, two)
+    assert "1.x 필요" in runtimes.need(rt, two) and "mailskill" in runtimes.need(rt, two)
+    assert runtimes.ok(runtimes.BY_KEY["java"], runtimes.Found("/x/java", "25.0.1", 25))  # 위 한도는 java 등엔 없음
+
+
+def test_himalaya_2x_with_same_asset_name_is_reinstalled(isolated, monkeypatch):
+    """latest 를 따라가던 때의 2.x 도 파일 이름이 같다(himalaya.x86_64-windows.zip) → 표식만 보고 건너뛰면 안 된다."""
+    rt = runtimes.BY_KEY["himalaya"]
+    got = _serve_pinned(monkeypatch, "himalaya", {"himalaya.exe": b"v1"})
+    paths.jaix_home().mkdir(parents=True, exist_ok=True)
+    runtimes._marker(rt).write_text(runtimes.PINNED["himalaya"]["name"], encoding="utf-8")
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/jaix/bin/himalaya.exe", "2.2.1", 2, managed=True))
+    runtimes.install_portable(rt, print)
+    assert got and (paths.bin_dir() / "himalaya.exe").read_bytes() == b"v1"
+    # 고정 판이 이미 있으면 받지 않는다
+    got.clear()
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/jaix/bin/himalaya.exe", "1.2.0", 1, managed=True))
+    runtimes.install_portable(rt, print)
+    assert not got
+
+
+def test_doctor_flags_himalaya_2x(monkeypatch):
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/x/" + r.exe, "2.2.1", 2) if r.key == "himalaya"
+                        else runtimes.Found(None, None))
+    lines = [c for c in doctor.check_runtimes() if c.area == "himalaya"]
+    assert lines and "2.2.1" in lines[0].message and "1.x 필요" in lines[0].message
+
+
+# --- 백신(Defender)이 포터블을 격리했을 때: 어디서 확인할지 알린다(예외는 관리자 권한이라 jaix 가 넣지 않음) -----
+def test_av_blocked_detects_virus_errors():
+    e = OSError(22, "Operation did not complete successfully because the file contains a virus")
+    assert runtimes.av_blocked(e)
+    w = OSError("x")
+    w.winerror = 225
+    assert runtimes.av_blocked(w) and not runtimes.av_blocked(OSError("disk full"))
+
+
+def test_install_quarantined_right_after_unpack_raises_and_keeps_no_marker(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["age"]
+    _serve_pinned(monkeypatch, "age", {"age/age.exe": b"a"})
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    real = runtimes._extract
+    monkeypatch.setattr(runtimes, "_extract", lambda f, r: real(f, r) or (paths.bin_dir() / "age.exe").unlink())
+    with pytest.raises(RuntimeError, match="보호 기록"):
+        runtimes.install_portable(rt, print)
+    assert not runtimes._marker(rt).exists()
+
+
+def test_doctor_says_vanished_runtime_may_be_av(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["himalaya"]
+    paths.jaix_home().mkdir(parents=True, exist_ok=True)
+    runtimes._marker(rt).write_text(runtimes.PINNED["himalaya"]["name"], encoding="utf-8")
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(doctor, "IS_WIN", True, raising=False)
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(None, None))
+    assert runtimes.vanished(rt)
+    line = [c for c in doctor.check_runtimes() if c.area == "himalaya"][0]
+    assert "사라짐" in line.message and "보호 기록" in line.message + line.fix
+
+
+def test_plugbin_copy_in_use_keeps_old_copy_and_record(isolated, monkeypatch, the_lock):
+    """옛 사본을 누가 쓰고 있으면(Windows 에서 mailskill·python 이 파일을 잡음) 반쯤 지우지 않고 그대로 두며,
+    기록도 옛 커밋으로 남겨 다음 update 가 다시 시도한다. 로그에 '닫고 다시' 를 알린다."""
+    _fake_plugin_source(monkeypatch)
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="a" * 40), print)
+    copy = plugbin.plugins_dir() / "mail-skill"
+    real_rename = Path.rename
+
+    def busy(self, target):
+        if self == copy:
+            raise PermissionError(5, "Access is denied")
+        return real_rename(self, target)
+    monkeypatch.setattr(Path, "rename", busy)
+    lines = []
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), lines.append)
+    assert res["failed"] == ["mail-skill"] and any("쓰는 중" in line for line in lines)
+    assert (copy / "scripts").is_dir() and plugbin.recorded()["mail-skill"]["sha"] == "a" * 40
+    assert not copy.with_name("mail-skill.jaix-new").exists() and not copy.with_name("mail-skill.jaix-old").exists()
+    monkeypatch.setattr(Path, "rename", real_rename)  # 닫고 다시 → 바뀐다
+    assert REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), print)["status"] == "ok"
+    assert plugbin.recorded()["mail-skill"]["sha"] == "b" * 40 and not copy.with_name("mail-skill.jaix-old").exists()
+
+
+def test_update_drops_legacy_startup_link(managed, the_lock, monkeypatch):
+    """새 판은 setup 없이 update 만 도는 PC 도 많다 → update 도 예전 바로가기를 지운다(CI 가 잡음)."""
+    schedule.startup_link().parent.mkdir(parents=True)
+    schedule.startup_link().write_bytes(b"lnk")
+    monkeypatch.setattr(cli.lockmod, "load", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    with pytest.raises(RuntimeError):
+        cli._update(argparse.Namespace(lock=None, channel=None, offline=True, dry_run=False), print)
+    assert schedule.startup_link().exists()  # 잠금을 읽은 뒤에 지운다 — 여기선 아직
+    monkeypatch.setattr(cli.lockmod, "load", lambda *a, **k: the_lock)
+    monkeypatch.setattr(cli.runtimes, "RUNTIMES", [])
+    monkeypatch.setattr(cli.uvpython, "ensure", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    with pytest.raises(RuntimeError):
+        cli._update(argparse.Namespace(lock=None, channel=None, offline=True, dry_run=False), print)
+    assert not schedule.startup_link().exists()
+
+
+def test_via_task_runs_console_jaix_not_jaixw(isolated, monkeypatch, tmp_path):
+    """설치 중 한 번짜리 예약 작업은 콘솔 jaix.exe 를 부른다 — jaixw 를 예약 작업으로 띄우는 흐름이 Defender 에 걸렸다(11/4·11/7)."""
+    app = tmp_path / "app" / "jaix"
+    app.mkdir(parents=True)
+    (app / "jaix.exe").write_bytes(b"")
+    (app / "jaixw.exe").write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(app / "jaix.exe"))
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    seen = {}
+    monkeypatch.setattr(schedule, "run_via_task", lambda cmd, *a: seen.setdefault("cmd", cmd) and 0)
+    cli.main(["setup", "--via-task", "--log", str(isolated / "s.log")])
+    assert Path(seen["cmd"][0]).name == "jaix.exe"
+    assert "windowless=True" not in "".join(
+        ln for ln in Path(cli.__file__).read_text(encoding="utf-8").split("def _setup_via_task", 1)[1].split("\ndef ", 1)[0])
