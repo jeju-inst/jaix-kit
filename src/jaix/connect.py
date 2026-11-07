@@ -260,8 +260,8 @@ def meaning(item, code):
         return RESULT[item][code]
     if code in CLOSED:
         return CLOSED_MEANING
-    if code == hermesbot.CANCELLED:
-        return "취소함"
+    if code == hermesbot.CANCELLED:  # 이 창에서 Ctrl+C(_call) — 새 창의 0xC000013A 와 같은 문구로
+        return CLOSED_MEANING
     return f"끝나지 않음(코드 {code}) — 창의 안내를 확인"
 
 

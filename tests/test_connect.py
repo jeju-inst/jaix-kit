@@ -176,7 +176,7 @@ def test_mail_command_skips_cmd_batch_on_windows(monkeypatch, tmp_path):
     assert connect.mail_command("/x/mailskill") == ["/x/mailskill", "setup"]
 
 
-@pytest.mark.parametrize("code", [3221225786, -1073741510])
+@pytest.mark.parametrize("code", [3221225786, -1073741510, hermesbot.CANCELLED])
 def test_closed_window_code_is_explained(code):
     line = connect.result_line("mail", code)
     assert "창을 닫" in line and str(code) not in line
