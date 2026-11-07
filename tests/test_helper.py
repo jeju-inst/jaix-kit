@@ -77,7 +77,8 @@ def test_run_uses_empty_helper_dir_not_install_dir(monkeypatch, tmp_path):
     assert cwd == paths.data_dir() / "helper" and cwd.is_dir() and not any(cwd.iterdir())
     for d in (install, paths.exe_dir(), paths.jaix_home()):
         assert cwd != d and not cwd.is_relative_to(d) and not Path(d).is_relative_to(cwd)
-    assert any("Yes, I trust this folder" in line for line in lines)  # 기본 'No, exit' 를 피하는 법을 알린다
+    assert any("↑ 키로 'Yes, I trust this folder'" in line for line in lines)  # 기본 'No, exit' 를 피하는 법을 알린다
+    assert not any("숫자 1" in line for line in lines)  # 신뢰 화면은 숫자 키에 반응하지 않음(실기 11/7, v2026.11.07.6)
 
 
 def test_run_without_claude(monkeypatch):
