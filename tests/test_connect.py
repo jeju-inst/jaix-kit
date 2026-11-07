@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jaix import cli, connect, gw, hermesbot, lock, paths, selftest, works
+from jaix import cli, connect, gw, hermesbot, lock, paths, plugbin, selftest, works
 
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 FORBIDDEN = ("hermes", "hermes-acp", "gw", "mailskill", "nworks", "claude", "osascript")
@@ -138,6 +138,56 @@ def test_connect_mail_missing_tool(monkeypatch):
     assert "jaix setup" in lines[-1]
 
 
+def test_connect_mail_opens_guide_only_once(monkeypatch):
+    monkeypatch.setattr(paths, "which", lambda n: "/x/mailskill" if n == "mailskill" else None)
+    opened = []
+    lines, log = _log()
+    for _ in range(3):
+        connect.connect_mail(log, opener=lambda u: opened.append(u) or True, call=lambda c: 2)
+    assert opened == [connect.MAIL_GUIDE]  # 할 때마다 탭이 쌓이지 않음(실기 11/7)
+    assert sum(connect.MAIL_GUIDE in line for line in lines) == 2  # 두 번째부터는 주소만 보인다
+
+
+def test_connect_mail_guide_retried_when_browser_failed(monkeypatch):
+    monkeypatch.setattr(paths, "which", lambda n: "/x/mailskill" if n == "mailskill" else None)
+    opened = []
+    lines, log = _log()
+    connect.connect_mail(log, opener=lambda u: opened.append(u) and False, call=lambda c: 2)
+    connect.connect_mail(log, opener=lambda u: opened.append(u) or True, call=lambda c: 2)
+    assert len(opened) == 2
+
+
+def test_mail_command_skips_cmd_batch_on_windows(monkeypatch, tmp_path):
+    # jaix 심 → 플러그인 사본 mailskill.cmd → mailskill.ps1. .cmd 를 거치면 Ctrl+C 에 cmd 의 Y/N 질문이 끼어든다
+    cli_dir = tmp_path / "plugin" / "cli"
+    cli_dir.mkdir(parents=True)
+    (cli_dir / "mailskill.cmd").write_text("@echo off\r\npowershell -File \"%~dp0mailskill.ps1\" %*\r\n")
+    (cli_dir / "mailskill.ps1").write_text("# ps1\n")
+    shim = tmp_path / "bin" / "mailskill.cmd"
+    shim.parent.mkdir()
+    shim.write_text(f'@rem {plugbin.SHIM_MARK}\r\n@call "{cli_dir / "mailskill.cmd"}" %*\r\n@exit /b %ERRORLEVEL%\r\n')
+    monkeypatch.setattr(connect, "IS_WIN", True)
+    cmd = connect.mail_command(str(shim))
+    assert cmd[0] == "powershell" and cmd[-2:] == [str(cli_dir / "mailskill.ps1"), "setup"]
+    assert connect.mail_command(str(cli_dir / "mailskill.cmd"))[-2] == str(cli_dir / "mailskill.ps1")
+    (cli_dir / "mailskill.ps1").unlink()  # ps1 을 못 찾으면 예전대로 .cmd
+    assert "mailskill.cmd" in str(connect.mail_command(str(shim)))
+    monkeypatch.setattr(connect, "IS_WIN", False)
+    assert connect.mail_command("/x/mailskill") == ["/x/mailskill", "setup"]
+
+
+@pytest.mark.parametrize("code", [3221225786, -1073741510])
+def test_closed_window_code_is_explained(code):
+    line = connect.result_line("mail", code)
+    assert "창을 닫" in line and str(code) not in line
+
+
+def test_result_line_says_again_once():
+    for item, table in connect.RESULT.items():
+        for code in [*table, 99, hermesbot.CANCELLED, None]:
+            assert connect.result_line(item, code).count("다시") <= 1, (item, code)
+
+
 def test_connect_hermes_uses_saved_model(monkeypatch):
     monkeypatch.setattr(hermesbot, "recorded", lambda: {"status": "connected", "model": "claude"})
     seen = []
@@ -145,7 +195,7 @@ def test_connect_hermes_uses_saved_model(monkeypatch):
     assert seen[0].model == "claude" and seen[0].force is False and seen[0].no_wait is False
 
 
-@pytest.mark.parametrize("item,code,word", [("mail", 0, "[완료]"), ("mail", 1, "jaix setup"), ("mail", 2, "터미널"),
+@pytest.mark.parametrize("item,code,word", [("mail", 0, "[완료]"), ("mail", 1, "jaix setup"), ("mail", 2, "[실패]"),
                                             ("mail", 3, "로그인 확인 실패"), ("gw", 2, "아이디·비밀번호"),
                                             ("gw", 3, "취소"), ("hermes", hermesbot.ALREADY, "[완료]"),
                                             ("works", None, "[미완료]")])
