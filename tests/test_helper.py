@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from jaix import cli, claude, helper, hermesbot, lock, selftest
+import sys
+
+from jaix import cli, claude, helper, hermesbot, lock, paths, selftest
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_FILE = ROOT / ".claude-plugin" / "marketplace.json"
@@ -56,8 +58,26 @@ def test_run_launches_claude(monkeypatch):
     monkeypatch.setattr(claude, "find_cli", lambda: "/x/claude")
     monkeypatch.setattr(selftest, "plugin_root", lambda name: None)
     seen = []
-    assert helper.run(print, call=lambda c: seen.append(c) or 0) == 0
+    assert helper.run(print, call=lambda c, cwd=None: seen.append(c) or 0) == 0
     assert seen and helper.FIRST_PROMPT in seen[0]
+
+
+def test_run_uses_empty_helper_dir_not_install_dir(monkeypatch, tmp_path):
+    # 설치 폴더(실행 파일들)를 작업 폴더로 열면 신뢰 화면에서 'Yes' 를 고를 때 Claude 가 그것을 고칠 수 있게 된다(실기 11/7)
+    install = tmp_path / "Programs" / "jaix" / "jaix"
+    install.mkdir(parents=True)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(install / "jaix.exe"))
+    monkeypatch.chdir(install)  # 시작 메뉴 바로가기의 작업 폴더가 설치 폴더여도
+    monkeypatch.setattr(claude, "find_cli", lambda: "/x/claude")
+    monkeypatch.setattr(selftest, "plugin_root", lambda name: None)
+    seen, lines = [], []
+    assert helper.run(lines.append, call=lambda c, cwd=None: seen.append(cwd) or 0) == 0
+    cwd = Path(seen[0])
+    assert cwd == paths.data_dir() / "helper" and cwd.is_dir() and not any(cwd.iterdir())
+    for d in (install, paths.exe_dir(), paths.jaix_home()):
+        assert cwd != d and not cwd.is_relative_to(d) and not Path(d).is_relative_to(cwd)
+    assert any("Yes, I trust this folder" in line for line in lines)  # 기본 'No, exit' 를 피하는 법을 알린다
 
 
 def test_run_without_claude(monkeypatch):
