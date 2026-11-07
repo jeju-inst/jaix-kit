@@ -5,12 +5,19 @@
 `--append-system-prompt-file` 은 Claude Code 2.1.318 에서 확인했다. 데스크톱 앱 로그인은 명령창 claude 로 **이어지지 않는다**
 (Windows 실기 2026-11-06, jaix v2026.11.06.2: 빈 설정에서 `claude -p` → "Not logged in"). 그래서 처음 한 번은 명령창 claude 가
 로그인을 묻는다 — 안내문으로 무엇을 고를지 미리 알려 준다.
+
+작업 폴더는 도우미 전용 빈 폴더(데이터 폴더의 helper)다. 시작 메뉴 바로가기의 작업 폴더인 설치 폴더(실행 파일들)를
+Claude 가 읽고 고칠 대상으로 열지 않게(jaix-test 실기 11/7, v2026.11.07.5). 처음 그 폴더에서 claude 를 열면 '이 폴더를
+신뢰하나' 화면이 뜬다 — 대화형 claude 에는 그 화면을 건너뛰는 공식 방법이 없다(`-p`·TTY 아닐 때만 건너뜀, Claude Code
+2.1.319 --help). jaix 가 ~/.claude.json 의 hasTrustDialogAccepted 를 직접 쓰지는 않는다: Claude 가 실행 중에도 통째로
+다시 쓰는 파일이라 경합으로 사용자 설정을 잃을 수 있고, 신뢰 결정은 사용자 몫이다. 대신 빈 전용 폴더라 신뢰해도
+열리는 것이 없음을 알리고 무엇을 고를지 안내한다(기본 선택이 'No, exit' 라 Enter 만 치면 꺼진다).
 """
 import subprocess
 import sys
 from pathlib import Path
 
-from jaix import claude, hermesbot, proc, selftest
+from jaix import claude, hermesbot, paths, proc, selftest
 from jaix.paths import IS_WIN
 
 PLUGIN = "jaix-help"
@@ -35,6 +42,13 @@ def skill_file():
     return next((p for p in bundled_candidates() if p.is_file()), None)
 
 
+def workdir():
+    """도우미 전용 빈 작업 폴더(없으면 만듦). 설치 폴더가 아니다."""
+    d = paths.data_dir() / "helper"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def command(cli, skill):
     # 첫 요청을 맨 앞에: --allowedTools 는 값을 여럿 받아 뒤의 낱말까지 삼킨다
     return proc.command(cli, [FIRST_PROMPT, "--append-system-prompt-file", str(skill), "--allowedTools", ALLOWED])
@@ -54,10 +68,13 @@ def run(log, call=None, pause=None):
         log("JAIX 도우미를 엽니다.")
         log("처음 한 번은 Claude 로그인을 묻습니다(데스크톱 앱 로그인과 따로입니다):")
         log("  로그인 방법을 고르라고 하면 1번 'Claude account with subscription' → 브라우저에서 회사 계정(@ji.re.kr)으로 승인.")
+        log("처음 한 번은 'Do you trust the files in this folder?'(이 폴더를 신뢰하나)를 묻습니다:")
+        log("  ↑ 키(또는 숫자 1)로 'Yes, I trust this folder' 를 고른 뒤 Enter. 그냥 Enter 를 치면 'No, exit' 로 꺼집니다.")
+        log("  이 폴더는 도우미 전용 빈 폴더라 신뢰해도 열리는 파일이 없습니다.")
         log("비밀번호는 이 창에 쓰지 마세요 — 계정 연결은 따로 뜨는 창에 직접 넣습니다. 끝내려면 /exit")
         log("")
         try:
-            code = (call or subprocess.call)(command(cli, skill))
+            code = (call or subprocess.call)(command(cli, skill), cwd=str(workdir()))
         except OSError as e:
             log(f"claude 를 실행하지 못함: {e}")
             code = 1
