@@ -209,3 +209,11 @@ def test_installer_closes_jaix_windows_itself():
     iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
     assert "\nCloseApplications=force\n" in iss
     assert "procedure ApplyPreviousChoice" in iss  # 이전 선택은 설치기가 체크 기본값으로
+
+
+def test_logon_dialog_carries_steps(su, monkeypatch):
+    """로그온 경로는 로그가 파일에만 남아 브라우저 뒤 할 일을 대화상자 본문에 싣는다(리뷰 #144)."""
+    monkeypatch.setattr(selfupdate, "other_jaix", lambda: [])
+    st = selfupdate.check(force=True, fetch=release)
+    text = selfupdate.dialog_text(st)
+    assert "[추가 정보]" in text and selfupdate.RELEASES in text and "2026.11.05.1" in text

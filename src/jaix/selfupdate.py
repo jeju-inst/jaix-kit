@@ -285,13 +285,19 @@ def open_download(state, log, opener=None):
     return ok
 
 
+def dialog_text(state):
+    """로그온 경로는 로그가 파일에만 남는다 — 브라우저 뒤 할 일(SmartScreen·릴리스 주소)을 대화상자 본문에 싣는다."""
+    return (f"JAIX 새 판이 있습니다.\n\n지금: {__version__}\n새 판: {state.get('latest')}\n\n"
+            f"[예]를 누르면 브라우저가 새 판 설치기를 받습니다.{open_windows_note()}\n"
+            + "\n".join(steps(state)[1:]) + "\n\n"
+            f"[아니요]를 누르면 다음 로그온 때 다시 묻습니다({GUIDE} 로도 할 수 있습니다).")
+
+
 def ask_dialog(state):
     """로그온 갱신(창 없는 jaixw)이 묻는 작은 대화상자. [예] → True."""
     if not IS_WIN:
         return False
-    text = (f"JAIX 새 판이 있습니다.\n\n지금: {__version__}\n새 판: {state.get('latest')}\n\n"
-            f"[예]를 누르면 브라우저가 새 판 설치기를 받습니다. 받은 파일을 열어 설치하세요.{open_windows_note()}\n"
-            f"[아니요]를 누르면 다음 로그온 때 다시 묻습니다({GUIDE} 로도 할 수 있습니다).")
+    text = dialog_text(state)
     MB_YESNO, MB_ICONINFORMATION, MB_SETFOREGROUND, MB_TOPMOST, IDYES = 0x4, 0x40, 0x10000, 0x40000, 6
     try:
         return ctypes.windll.user32.MessageBoxW(None, text, "JAIX 업데이트",
