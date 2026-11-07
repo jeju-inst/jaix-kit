@@ -253,3 +253,21 @@ def test_close_others_reports_each(su):
     others = selfupdate.close_others(seen.append, find=lambda: [(101, "jaix.exe"), (102, "jaixw.exe")],
                                      kill=lambda pid: pid == 101)
     assert len(others) == 2 and "닫음" in seen[0] and "닫지 못함" in seen[1]
+
+
+def test_installed_version_installer_is_pruned_next_check(su, monkeypatch):
+    """jaix-test 11/7: --self 로 깐 판의 updates 사본이 남아 있다가 Defender 에 격리됐다 — 깐 판 이하는 다음 확인 때 지운다."""
+    st = selfupdate.check(force=True, fetch=release)
+    path = selfupdate.fetch_installer(st, lambda m="": None, download=fake_download())
+    older = path.parent / "jaix-setup-2026.11.04.7.exe"  # 지금 판과 같은 것
+    older.write_bytes(PAYLOAD)
+    log = path.parent / "install-2026.11.05.1.log"
+    log.write_text("x")
+    selfupdate.check(fetch=release)
+    assert path.exists() and not older.exists()  # 아직 안 깐 새 판은 남긴다
+    monkeypatch.setattr(selfupdate, "__version__", "2026.11.05.1")  # 새 판을 깔았다
+    assert selfupdate.prune_installed() == [path] and not path.exists()
+    assert log.exists() and selfupdate.state_file().exists()  # 설치 기록·상태는 둔다
+    monkeypatch.setattr(selfupdate, "__version__", "0.0.0+dev")  # 개발판은 손대지 않는다
+    path.write_bytes(PAYLOAD)
+    assert selfupdate.prune_installed() == [] and path.exists()

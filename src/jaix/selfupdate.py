@@ -6,6 +6,8 @@
 - **조용히 설치하지 않는다.** 갱신이 끝나면 작은 대화상자로 묻고, 사용자가 [예]를 누를 때만 설치기를
   `/JAIXAUTOUPDATE=1` 로 띄운다. 서명 없는 설치기라 무인 다운로드+무인 실행은 Defender 행동 탐지 위험이 크다(#46).
 - 받기 실패·검증 실패·격리(파일이 사라짐)는 기록만 하고 다음 로그온에 다시 한다.
+- 이미 깐 판(지금 판 이하)의 받아 둔 설치기는 다음 확인 때 지운다(prune_installed). 남겨 두면 Defender 가 뒤늦게
+  격리 알림을 띄운다(jaix-test 11/7: .07.6 을 --self 로 깐 3초 뒤 updates 사본이 Behavior:Win32/Execution.A!ml).
 - 수동: `jaix update --self`. 점검: doctor 의 "jaix 본체" 줄.
 """
 import ctypes
@@ -93,9 +95,33 @@ def _fetch():
     return net.get_json(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=15)
 
 
+def prune_installed(log=None):
+    """받아 둔 설치기 중 지금 판 이하(이미 깐 것)를 지운다. 지운 파일 목록. 개발판이면 아무것도 안 한다."""
+    cur = current()
+    if cur is None:
+        return []
+    gone = []
+    try:
+        found = list(updates_dir().glob("jaix-setup-*.exe"))
+    except OSError:
+        return []
+    for f in found:
+        v = parse_version(f.stem[len("jaix-setup-"):])
+        if v and v <= cur:
+            try:
+                f.unlink()
+                gone.append(f)
+            except OSError:  # 이미 격리됐거나 잠김 — 다음에 다시
+                continue
+    if gone and log:
+        log(f"jaix 업데이트: 이미 깐 판의 받아 둔 설치기 {len(gone)}개 지움")
+    return gone
+
+
 def check(force=False, fetch=None, now=None):
     """최신 릴리스를 확인해 상태에 남기고 돌려준다. 간격 안이면(force 아니면) 묻지 않고 지난 상태.
     상태: latest(태그)·newer·url·digest·critical·checked_at·error."""
+    prune_installed()
     state = load_state()
     if state.get("current") != __version__:  # 그사이 본체가 바뀜(자기 업데이트·수동 설치) — 지난 판정은 버린다
         state.pop("checked_at", None)
