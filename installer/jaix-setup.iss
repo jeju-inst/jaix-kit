@@ -71,6 +71,10 @@ Name: "{autoprograms}\JAIX 업데이트 (jaix update)"; Filename: "{cmd}"; Param
 ; 자동 시작 항목이 있으면 만든 주체가 jaix 든 설치기든 Defender ML 이 jaixw.exe 를 Bearfoos.A!ml·Persistence.A!ml 로
 ; 격리했다(jaix-win 11/4: jaix 의 schtasks 등록 / jaix-test 11/7 v2026.11.07.2: 설치기의 {userstartup} 바로가기).
 ; 새 판은 jaix doctor 가 알리고, 받기는 위 'JAIX 업데이트'. 예전 바로가기는 [InstallDelete] 가 지운다
+; JAIX 도우미: 명령창에서 claude 를 도우미 스킬 사본과 함께 연다(Code 탭 플러그인이 안 깔렸을 때의 안전망).
+; jaix.exe 를 바로 띄우고, 숨는 창(hide-early)은 jaix helper 가 다시 보이게 한다
+Name: "{autoprograms}\JAIX 도우미"; Filename: "{app}\jaix\jaix.exe"; Parameters: "helper"; \
+  Comment: "jaix 도구가 안 될 때 Claude 가 점검·안내(jaix 점검해줘)"
 ; Hermes AI 구독 로그인을 설치 뒤에도 다시 할 수 있게. 사용자가 탐색기에서 여는 것이라 설치기의 자식이 아니다
 Name: "{autoprograms}\JAIX Hermes 로그인"; Filename: "{app}\jaix\jaix.exe"; Parameters: "hermes login --model {code:HermesModelArg}"; \
   Comment: "Hermes 가 쓸 AI 구독에 로그인(브라우저에서 승인)"; Check: HermesChosen

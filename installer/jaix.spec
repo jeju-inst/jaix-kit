@@ -53,7 +53,9 @@ a = Analysis(  # noqa: F821
     [os.path.join(ROOT, "src", "jaix", "__main__.py")],
     pathex=[os.path.join(ROOT, "src")],
     # 잠금 사본을 묶어 네트워크가 막혀도 doctor가 돈다(평소엔 GitHub의 최신 잠금을 먼저 본다)
-    datas=[(os.path.join(ROOT, ".claude-plugin", "marketplace.json"), ".")],
+    # JAIX 도우미 스킬 사본: 플러그인 설치가 실패해도 시작 메뉴 'JAIX 도우미'(jaix helper)가 쓴다
+    datas=[(os.path.join(ROOT, ".claude-plugin", "marketplace.json"), "."),
+           (os.path.join(ROOT, "plugins", "jaix-help", "skills", "jaix-help", "SKILL.md"), "jaix-help")],
 )
 pyz = PYZ(a.pure)  # noqa: F821
 

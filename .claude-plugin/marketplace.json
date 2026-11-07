@@ -160,6 +160,25 @@
         }
       },
       "version": "2026.11.05.2"
+    },
+    {
+      "name": "jaix-help",
+      "displayName": "JAIX 도우미",
+      "description": "jaix 도구가 안 될 때 자가시험으로 점검하고, 묻고 고치며, 계정 연결 창을 띄운다.",
+      "category": "productivity",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jeju-inst/jaix-kit.git",
+        "path": "plugins/jaix-help",
+        "ref": "main",
+        "sha": "dcf1e9fb08c04856401066307d725386af4e6e65"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-kit",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
     }
   ]
 }
