@@ -16,8 +16,8 @@
         "source": "git-subdir",
         "url": "https://github.com/jeju-inst/calendar-worklog.git",
         "path": "plugin",
-        "ref": "v2026.10.30.1",
-        "sha": "dab8e0e00e9a17b54e1a2db3d522c1a956e6bcc6"
+        "ref": "v2026.11.06.2",
+        "sha": "86812e0d8447821cf0e529dc0965120ea5710394"
       },
       "homepage": "https://github.com/jeju-inst/calendar-worklog",
       "metadata": {
@@ -25,7 +25,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.1"
+      "version": "2026.11.06.2"
     },
     {
       "name": "hwp-agent",
@@ -111,8 +111,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/jaix-gw.git",
-        "ref": "v2026.10.30.3",
-        "sha": "1d951fdd4d0ac893bf0a9bdda7aca5ceb8c87eb9"
+        "ref": "v2026.11.06.1",
+        "sha": "48467c135da8a3216608fe3a088125799189cff5"
       },
       "homepage": "https://github.com/jeju-inst/jaix-gw",
       "metadata": {
@@ -120,7 +120,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.3"
+      "version": "2026.11.06.1"
     },
     {
       "name": "mail-skill",
