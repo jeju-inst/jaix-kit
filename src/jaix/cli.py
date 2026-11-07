@@ -108,7 +108,7 @@ def guide(channels, result):
                 "  켜져 있던 Codex는 jaix가 새로 정한 도구 위치(예: HWP2PDF_CLI)를 모릅니다.",
             ]
             out.append("  새 버전은 로그온할 때 jaix가 저절로 맞춥니다." if result.get("autoupdate")
-                       else "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.")
+                       else "  Codex는 저절로 갱신되지 않습니다. 가끔 시작 메뉴 'JAIX 업데이트'(또는 명령창에서 `jaix update`)를 실행하세요.")
         else:
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
     terms = [n for n in ("claude", "codex") if n in channels and (result.get(f"{n}_cli") or {}).get("status")
@@ -180,7 +180,11 @@ def _setup_via_task(args):
     않게 한다(#27). 진행 줄은 setup.log 에서 읽어 이 프로세스의 표준 출력으로 흘려 설치 화면에 보인다."""
     raw = [a for a in args.raw_argv if a != "--via-task"]
     status = paths.data_dir() / "setup-status.json"
-    base = paths.self_command(windowless=True)  # 작업이 도는 동안 콘솔 창이 뜨지 않게
+    # 콘솔 jaix.exe 로 돌린다(창 없는 jaixw.exe 가 아니라). 작업이 띄운 jaix.exe 는 콘솔을 혼자 가지므로 hide-early 로
+    # 곧 숨는다(installer/jaix.spec). jaixw 를 예약 작업으로 띄우는 흐름이 Defender ML(Persistence.A!ml 11/4,
+    # Bearfoos.A!ml 11/7 — 둘 다 Process Name=jaixw.exe)에 걸렸고 같은 판의 jaix.exe 는 걸리지 않았다(jaix-test 실측).
+    # 예약 작업 자체는 남긴다: Inno 의 자식으로 돌면 RedirectionGuard 등 완화 정책을 물려받아 os error 448(#27)
+    base = paths.self_command()
     log_path = args.log or str(paths.data_dir() / "setup.log")
     if not args.log:
         raw += ["--log", log_path]
@@ -416,6 +420,8 @@ def _update(args, log):
     problems = []
     lock = lockmod.load(args.lock, args.channel, args.offline)
     log(f"jaix {__version__} · 잠금: {lock.source}")
+    if schedule.installer_managed():  # 예전 판이 남긴 자동 시작 항목(Defender 가 jaixw 를 격리하는 원인)을 지운다
+        schedule.drop_legacy(log, dry_run=args.dry_run)
     log("\n[1/3] 런타임 갱신")
     for rt in runtimes.RUNTIMES:
         must = runtimes.required(rt, lock)

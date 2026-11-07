@@ -160,6 +160,11 @@ jobs:
           # #27: jaix setup 본 실행이 작업 스케줄러(--via-task)로 돌았는지 — 그 길만 setup-status.json 을 남긴다
           if (-not (Test-Path "$data\setup-status.json")) { throw "jaix setup 이 작업 스케줄러로 돌지 않음(setup-status.json 없음)" }
           Get-Content "$data\setup-status.json"
+          # 작업이 띄운 것이 콘솔 jaix.exe 인지(창 없는 jaixw.exe 를 예약 작업으로 띄우는 흐름이 Defender 에 걸림, 11/4·11/7).
+          # setup 기록의 머리줄이 실행파일 이름을 남긴다(cli._banner)
+          $banner = Select-String -Path "$data\setup.log" -Pattern '^== .* setup \(' | Select-Object -Last 1
+          Write-Host "머리줄: $($banner.Line)"
+          if (-not $banner -or $banner.Line -notlike '*(via task) · jaix.exe') { throw "예약 작업의 setup 이 jaix.exe 로 돌지 않음: $($banner.Line)" }
           foreach ($f in 'setup.log','setup-status.json','guide.txt') {
             if (Test-Path "$app\$f") { throw "기록 $f 이 프로그램 폴더에 생김" }
           }
@@ -196,37 +201,40 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "cmd 에서 $n --version 종료 코드 $LASTEXITCODE" }
           }
 
-      # 로그온 자동 갱신: 설치기가 둔 시작프로그램 바로가기(jaixw.exe update --quiet)가 있고, 예약 작업은 만들지 않으며
-      # (Defender Persistence.A!ml, jaix-win 11/4), 그 명령이 돌아 상태를 남기는지
-      - name: Logon auto-update shortcut
+      # 로그온 자동 갱신은 두지 않는다: 서명 없는 jaixw.exe 를 가리키는 자동 시작 항목(예약 작업·시작프로그램·Run 키)이
+      # 있으면 Defender 가 jaixw 를 격리했다(jaix-win 11/4 Persistence.A!ml, jaix-test 11/7 Bearfoos.A!ml). 설치 뒤 그런
+      # 항목이 하나도 없는지, 예전 판이 남긴 바로가기는 jaix update 가 지우는지, update --quiet 가 돌아 상태를 남기는지
+      - name: No autostart entries (Defender) + legacy shortcut cleanup
         shell: pwsh
         run: |
           [Console]::OutputEncoding = [Text.Encoding]::UTF8
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
-          $lnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'JAIX 갱신.lnk'
-          if (-not (Test-Path $lnk)) { Get-ChildItem ([Environment]::GetFolderPath('Startup')); throw "시작프로그램 바로가기 없음: $lnk" }
-          # WScript.Shell 은 한글 이름 .lnk 를 빈 바로가기로 읽는다(러너 코드페이지 1252) → ASCII 이름 사본으로 읽는다
-          $copy = Join-Path $env:TEMP 'jaix-startup-check.lnk'
-          Copy-Item -LiteralPath $lnk -Destination $copy -Force
-          Write-Host "바로가기 파일: $((Get-Item -LiteralPath $lnk).Length) B"
-          $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($copy)
-          Write-Host "바로가기: $($sc.TargetPath) $($sc.Arguments)"
-          if ($sc.TargetPath -notlike '*\jaix\jaixw.exe') { throw "바로가기가 창 없는 jaixw.exe 를 부르지 않음: $($sc.TargetPath)" }
-          if ($sc.Arguments -notlike 'update --quiet*') { throw "바로가기 인자: $($sc.Arguments)" }
+          $startup = [Environment]::GetFolderPath('Startup')
+          $lnk = Join-Path $startup 'JAIX 갱신.lnk'
+          if (Test-Path -LiteralPath $lnk) { throw "설치기가 시작프로그램 바로가기를 둠: $lnk" }
+          $hits = Get-ChildItem $startup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*jaix*' -or $_.Name -like '*JAIX*' }
+          if ($hits) { throw "시작프로그램에 jaix 항목: $($hits.Name -join ', ')" }
+          $run = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+          if ($run -and ($run.PSObject.Properties | Where-Object { "$($_.Value)" -like '*jaix*' })) { throw "Run 키에 jaix 항목" }
           schtasks /Query /TN jaix-update 2>$null
           if ($LASTEXITCODE -eq 0) { throw "설치본이 예약 작업 jaix-update 를 만듦(지속성 판정 대상)" }
+          schtasks /Query /TN jaix-setup-once 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "한 번짜리 작업 jaix-setup-once 가 남음" }
           $global:LASTEXITCODE = 0
+          # 예전 판이 남긴 바로가기 → jaix update 가 지운다
+          [IO.File]::WriteAllBytes($lnk, [byte[]](1,2,3))
           $jaix = Join-Path $env:LOCALAPPDATA 'jaix'
           $status = "$jaix\update-status.json"
           Remove-Item $status -ErrorAction SilentlyContinue
-          # 로그온 때 셸이 여는 것과 같은 명령(지연만 빼고)
-          Start-Process -FilePath $sc.TargetPath -ArgumentList 'update','--quiet' -Wait -NoNewWindow
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\jaix\jaix\jaix.exe'
+          Start-Process -FilePath $app -ArgumentList 'update','--quiet' -Wait -NoNewWindow
           Get-Content "$jaix\update.log" -Tail 40
           $s = Get-Content $status -Raw | ConvertFrom-Json
-          if (-not $s.ok) { throw "자동 갱신 실패: $($s.error) $($s.problems)" }
+          if (-not $s.ok) { throw "update 실패: $($s.error) $($s.problems)" }
+          if (Test-Path -LiteralPath $lnk) { throw "jaix update 가 예전 바로가기를 지우지 않음" }
           $c = (jaix doctor --json | Out-String | ConvertFrom-Json).checks | Where-Object area -eq '로그온 자동 갱신'
           Write-Host "doctor: $($c.status) $($c.message)"
-          if ($c.status -ne 'ok') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
+          if ($c.status -ne 'info') { throw "doctor 로그온 자동 갱신: $($c.status) $($c.message)" }
 
       # Claude Code 네이티브 설치 경로(clis.install_claude: downloads.claude.ai → manifest sha256 → claude.exe install
       # stable)는 러너에 npm 판 claude 가 이미 있어 위 설치에서는 '그대로 둠'만 탄다. 격리한 홈(USERPROFILE)에서 jaix 의
