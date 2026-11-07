@@ -27,6 +27,26 @@ def user_path_entries():
     return [p for p in value.split(";") if p]
 
 
+def system_path_entries():
+    if not IS_WIN:
+        return []
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+            value, _ = winreg.QueryValueEx(key, "Path")
+    except OSError:
+        return []
+    return [p for p in value.split(";") if p]
+
+
+def fresh_path():
+    """새로 연 명령창이 보게 될 PATH(시스템 + 사용자, 레지스트리 기준). Windows 가 아니면 지금 PATH.
+    설치 전부터 떠 있던 창·앱(Claude 앱 포함)은 옛 PATH 를 물려받아 이것과 다를 수 있다."""
+    if not IS_WIN:
+        return os.environ.get("PATH", "")
+    return os.pathsep.join(os.path.expandvars(p) for p in [*system_path_entries(), *user_path_entries()])
+
+
 def _write_user_path(entries):
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
         winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, ";".join(entries))
@@ -39,6 +59,43 @@ def _broadcast():
     result = ctypes.c_ulong()
     ctypes.windll.user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment",
                                              SMTO_ABORTIFHUNG, 5000, ctypes.byref(result))
+
+
+def get_user_env(name):
+    """사용자 환경변수(HKCU\\Environment) 값. 없거나 Windows 가 아니면 None."""
+    if not IS_WIN:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except FileNotFoundError:
+        return None
+
+
+def set_user_env(name, value):
+    """사용자 환경변수를 쓰고 지금 프로세스에도 넣는다. 새로 연 앱·창부터 보인다. 바꿨으면 True."""
+    os.environ[name] = str(value)
+    if not IS_WIN or get_user_env(name) == str(value):
+        return False
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, str(value))
+    _broadcast()
+    return True
+
+
+def remove_user_env_under(name, prefix):
+    """사용자 환경변수 name 이 prefix 아래를 가리킬 때만 지운다(사용자가 바꿔 둔 값은 둔다). 지웠으면 True."""
+    value = get_user_env(name)
+    if not value:
+        return False
+    root = _norm(prefix)
+    if not (_norm(value) == root or _norm(value).startswith(root + "\\")):
+        return False
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+        winreg.DeleteValue(key, name)
+    _broadcast()
+    os.environ.pop(name, None)
+    return True
 
 
 def in_user_path(path):

@@ -12,6 +12,8 @@
     "ji-project-template@jaix": true,
     "korea-rio-mcp@jaix": true,
     "gw@jaix": true,
+    "mail-skill@jaix": true,
+    "hwp2pdf@jaix": true,
     "claude-for-nonprofits@synced": false
   },
   "model": "sonnet",

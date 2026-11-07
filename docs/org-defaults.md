@@ -54,7 +54,7 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | 키 | 값 | 효과 |
 |---|---|---|
 | `extraKnownMarketplaces.jaix` | git URL + `autoUpdate: true` | jaix 자동 등록·자동 업데이트. `jaix setup` 이 사용자 설정에 넣던 것과 같은 값 |
-| `enabledPlugins` (jaix 6종) | `true` | **managed의 `true` 는 강제 켬이다** — 사용자가 꺼도 로드된다(①의 "Installed by default"와 다름). 아래 주의 참조 |
+| `enabledPlugins` (jaix 7종) | `true` | **managed의 `true` 는 강제 켬이다** — 사용자가 꺼도 로드된다(①의 "Installed by default"와 다름). 아래 주의 참조 |
 | `enabledPlugins` `claude-for-nonprofits@synced` | `false` | ①과 이중 차단. 계정 동기화 플러그인 하나를 끄는 공식 형식이 `"<name>@synced": false` 다(settings-reference `syncClaudeAiPlugins` 절) |
 | `model` | `sonnet` | 좌석이 대부분 Pro의 1.25배라 한도 방지. 사용자의 `/model` 선택보다 우선하지만 `--model` 은 이긴다 |
 | `permissions.disableBypassPermissionsMode` | `disable` | 비개발자 PC에서 "전부 허용" 모드를 막는다. 잠금이 아니라 사고 방지 |
@@ -76,4 +76,4 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | 5 | 조직 커넥터 4종이 CLI `/mcp` 에 `claude.ai …` 로 보임 | `/mcp` | ✅ Gmail·Calendar·Drive·monday. Slack은 개인 설치 `plugin:slack:slack` 과 같은 URL이라 하나로 합쳐짐(일반 PC에선 `claude.ai Slack` 예상) |
 | 6 | Slack 커넥터 첫 연결이 Slack 관리자 승인 없이 되는지 | 일반 연구원 계정으로 연결 | 사전 조치 ✅: 워크스페이스가 **앱 승인 요구** 상태였고 Claude 앱이 "승인 필요"였음 → 11-04 "이 워크스페이스에 대해 승인". 일반 멤버 실측은 불가(Claude 좌석이 Owner 2명뿐) → 11/10 첫 사용자로 최종 확인 |
 | 7 | `model: sonnet` 이 CLI에서 기본으로 잡힘 | 새 세션 `/model` | ✅ 새 세션 Sonnet 5.5. 세션 안 `/model` 로 Opus 전환 가능, 다음 시작엔 다시 Sonnet("Managed settings pins Sonnet 5.5 — applies on restart"). 본인은 `claude --model opus` |
-| 8 | CLI에서 jaix가 managed `@jaix` 와 조직 동기화 사본으로 두 벌 잡히지 않는지 | `claude plugin list` (동기화 반영 뒤) | ⏳ 11-04 시점 CLI 동기화 폴더 미갱신. 비영리 사례로 보아 managed와 같은 이름의 동기화 사본은 무시될 것으로 예상 |
+| 8 | CLI에서 jaix가 managed `@jaix` 와 조직 동기화 사본으로 두 벌 잡히지 않는지 | `claude plugin list` (동기화 반영 뒤) | ✅ 중복 없음 (11-04 저녁〜11-05 새벽 30분 간격 8시간 관찰). CLI 동기화 폴더(`~/.claude/plugins/synced/`)에는 계정 단위 동기화(비영리 등)만 들어오고 조직 플러그인(jaix-kit-org)은 들어오지 않음 → CLI의 jaix는 managed `@jaix` 한 벌뿐. 조직 플러그인은 Desktop·Cowork·채팅 경로 전용으로 봄. 나중에 CLI로도 동기화되면 비영리 사례처럼 managed와 같은 이름의 사본은 무시될 것으로 예상 |

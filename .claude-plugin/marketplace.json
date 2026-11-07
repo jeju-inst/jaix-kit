@@ -35,8 +35,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v2026.10.30.2",
-        "sha": "10a53b7151ab1592979f46dcbfe7a35f429e0161"
+        "ref": "v2026.11.06.1",
+        "sha": "8bca5e4113a7d1b7d0f130f57751bb631aa01d33"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
@@ -44,7 +44,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.2"
+      "version": "2026.11.06.1"
     },
     {
       "name": "ji-report-writing",
@@ -131,8 +131,8 @@
         "source": "git-subdir",
         "url": "https://github.com/z0nam/mail-skill.git",
         "path": "plugins/mail-skill",
-        "ref": "v2026.11.04.1",
-        "sha": "adce7365cb99d609e53f14934233b6239b994add"
+        "ref": "v2026.11.06.1",
+        "sha": "a2180369c2534df5f8d6d3ef5b94f4882d046ef1"
       },
       "homepage": "https://github.com/z0nam/mail-skill",
       "metadata": {
@@ -140,7 +140,26 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.04.1"
+      "version": "2026.11.06.1"
+    },
+    {
+      "name": "hwp2pdf",
+      "displayName": "HWP → PDF 변환 (hwp2pdf)",
+      "description": "한컴오피스로 HWP/HWPX 파일·폴더를 PDF·DOCX·HWPX로 일괄 변환한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/z0nam/hwp2pdf.git",
+        "ref": "v2026.11.05.2",
+        "sha": "00a59212f9c237ef743625736ffe5150179f7594"
+      },
+      "homepage": "https://github.com/z0nam/hwp2pdf",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.11.05.2"
     }
   ]
 }
