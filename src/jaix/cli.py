@@ -408,7 +408,7 @@ def cmd_update(args, log):
         time.sleep(args.delay)
     log = Log(schedule.open_log(), quiet=True)
     log(_banner("update", "logon task") + " — 로그온 자동 갱신")
-    # 첫 단계: 본체 새 판 확인·받기·검증(묻지 않음). 묻는 것은 도구 갱신이 끝난 뒤 — 답을 기다리느라 갱신이 밀리지 않게
+    # 첫 단계: 본체 새 판 확인(묻지 않음·받지 않음). 묻는 것은 도구 갱신이 끝난 뒤 — 답을 기다리느라 갱신이 밀리지 않게
     pending = None if args.dry_run else selfupdate.logon_prepare(log)
     try:
         problems = _update(args, log)
@@ -551,8 +551,8 @@ def build_parser():
                    help="화면에 쓰지 않고 update.log·update-status.json에만 남김(로그온 자동 갱신용)")
     u.add_argument("--delay", type=int, default=0, help="--quiet 일 때 시작 전에 기다릴 초(시작프로그램 바로가기용)")
     u.add_argument("--self", dest="self_update", action="store_true",
-                   help="jaix 본체(설치본) 새 판을 지금 확인하고, 있으면 받아 검증한 뒤 물어서 설치기를 띄움")
-    u.add_argument("--yes", action="store_true", help="--self 에서 묻지 않고 바로 설치기를 띄움")
+                   help="jaix 본체(설치본) 새 판을 지금 확인하고, 있으면 물어서 브라우저로 설치기를 받게 엶(jaix 는 받거나 실행하지 않음)")
+    u.add_argument("--yes", action="store_true", help="--self 에서 묻지 않고 바로 브라우저를 엶")
     u.set_defaults(func=cmd_update)
 
     h = sub.add_parser("hermes", help="Hermes 관리자 명령")

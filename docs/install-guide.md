@@ -90,7 +90,7 @@ PC에 따라 이 창이 뜨지 않을 수 있습니다. 뜨면 [추가 정보] �
 - **설치·업데이트 뒤에는 Claude·Codex 앱을 완전히 닫았다 다시 연다**(4절 "왜 다시 여나"). 로그온 갱신 뒤라면 다음에 앱을 처음 열 때 이미 반영돼 있다.
 - Codex·Hermes 쪽과 jaix 자체는 **저절로 갱신되지 않는다**. 가끔 시작 메뉴 **JAIX 업데이트**(= `jaix update`)를 실행한다. `jaix doctor` 의 "jaix 본체" 줄이 새 판이 있으면 알린다.
   - 왜 로그온 자동 갱신이 없나: 서명 없는 jaix 를 로그온 때 저절로 띄우는 항목(예약 작업이든 시작프로그램 바로가기든)이 있으면 Windows Defender 가 jaix 를 악성으로 오인해 격리했다(2026-11-04·11-07 실측). 예전 판이 둔 시작프로그램 `JAIX 갱신` 바로가기는 새 설치기·`jaix update` 가 지운다.
-- **jaix 자체(설치본)의 새 판**: (아래는 로그온 갱신이 있던 때의 동작이다. 지금은 `jaix update` 를 실행할 때 같은 확인을 한다) 로그온 갱신이 6시간에 한 번 GitHub 최신 릴리스를 확인해, 새 판이면 설치기를 `%LOCALAPPDATA%\jaix\updates\` 에 받아 sha256 으로 검증해 둔다. 갱신이 끝나면 "JAIX 새 판이 있습니다 — 지금 업데이트할까요?" 창이 뜨고, **[예]를 누를 때만** 설치기가 이전 선택(Claude·Codex·Hermes, Hermes 모델) 그대로 진행 창만 띄워 설치한다. 그때 열려 있는 JAIX 창(Hermes 로그인 창·점검 중인 jaix 등)은 jaix 가 닫는다(열려 있으면 파일이 잠겨 설치가 멈춘다). 끝나면 결과 창이 뜨고 `updates\history.log` 에 한 줄 남는다. [아니요]면 다음 로그온 때 다시 묻는다. 지금 하려면 명령창에서 `jaix update --self`(묻지 않으려면 `--yes`). `jaix doctor` 의 "jaix 본체" 줄에도 새 판이 보인다. 급한 릴리스는 릴리스 본문에 `jaix-priority: critical` 줄을 넣으면 1시간 간격으로 확인한다.
+- **jaix 자체(설치본)의 새 판**: `jaix update`(시작 메뉴 'JAIX 업데이트')가 6시간에 한 번 GitHub 최신 릴리스를 확인한다. 새 판이면 "브라우저로 새 판 설치기를 받을까요?" 를 묻고, [예]면 **브라우저가** `jaix-setup.exe` 를 받는다. jaix 는 설치기를 받거나 실행하지 않는다 — 서명 없는 jaix 가 받은 exe 를 조용히 실행하는 흐름이 Defender 행동 탐지(`Behavior:Win32/Execution.A!ml`, 2026-11-07)에 걸렸기 때문이다. 받은 파일은 다운로드 목록에서 [파일 열기] → 'Windows의 PC 보호' 화면이 뜨면 [추가 정보] → [실행]. 설치기에는 지난번 고른 AI(Claude·Codex·Hermes, Hermes 모델)가 체크돼 있어 [다음]만 누르면 되고, 열려 있는 JAIX 창(Hermes 로그인 창 등)은 설치기가 닫는다. 지금 하려면 명령창에서 `jaix update --self`(묻지 않으려면 `--yes`). `jaix doctor` 의 "jaix 본체" 줄에도 새 판이 보인다. 급한 릴리스는 릴리스 본문에 `jaix-priority: critical` 줄을 넣으면 1시간 간격으로 확인한다.
 - 직접 맞추려면 시작 메뉴의 **JAIX 업데이트**를 누른다.
 
 ## 6. 문제가 있으면

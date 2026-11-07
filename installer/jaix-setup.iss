@@ -9,9 +9,11 @@
 ;             Hermes: /HERMESCODEFILE=<연결 코드 파일, jaix가 읽고 지움> [/HERMESMODEL=chatgpt|claude]
 ; 슬랙 연결 코드는 명령줄·설치 기록에 싣지 않는다 — 사용자 폴더의 파일로 넘기고 jaix가 읽자마자 지운다(docs/design-hermes-unattended.md §3.2)
 ; jaix setup이 실패하면 설치기는 종료 코드 10으로 끝난다(설치 자체는 남아 jaix doctor로 볼 수 있다).
-; 본체 자기 업데이트(src/jaix/selfupdate.py): 사용자가 [예]를 누르면 jaix 가
+; 본체 자기 업데이트(src/jaix/selfupdate.py): 이제 jaix 는 설치기를 받거나 띄우지 않는다 — 브라우저로 받게 열고 사용자가
+;   직접 실행한다(Defender Execution.A!ml, 11/7). 이전 선택은 ApplyPreviousChoice 가 체크 기본값으로 두고, 열린 jaix 창은
+;   CloseApplications=force 가 닫는다. 아래 /JAIXAUTOUPDATE=1 모드는 **이미 깔린 예전 jaix** 가 새 판 설치기를
 ;   jaix-setup.exe /SILENT /CURRENTUSER /FORCECLOSEAPPLICATIONS /JAIXAUTOUPDATE=1 /CHANNELS=<이전 선택> [/HERMESMODEL=…] /LOG=<updates\install-<판>.log>
-;   로 띄운다. 이전 선택은 jaix 가 넘기고, 로그인 페이지는 건너뛰며, 끝나면 결과를 %LOCALAPPDATA%\jaix\updates\history.log 에 남긴다.
+;   로 띄우므로 남겨 둔다(로그인 페이지 건너뜀, 결과는 %LOCALAPPDATA%\jaix\updates\history.log).
 
 #define AppName "JAIX 원내 AI 도구"
 ; AppVer 는 릴리스 빌드가 jaix-kit 묶음 태그 값으로 바꿔 찍는다
@@ -28,6 +30,9 @@ DefaultDirName={localappdata}\Programs\jaix
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 PrivilegesRequired=lowest
+; 설치 중 jaix 폴더 파일을 잡고 있는 jaix.exe(Hermes 로그인·점검 창 등)를 닫는다. 콘솔 프로그램은 재시작 관리자가
+; 점잖게 닫지 못해 /SILENT 에서도 Abort/Retry 로 멈췄다(#110) — force 는 /FORCECLOSEAPPLICATIONS 와 같다
+CloseApplications=force
 PrivilegesRequiredOverridesAllowed=commandline
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
