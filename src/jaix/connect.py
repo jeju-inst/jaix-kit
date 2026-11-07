@@ -12,6 +12,7 @@
   거기서 입력받고, 끝날 때까지 기다려 결과를 한 줄로 알린다.
 """
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -21,7 +22,7 @@ from argparse import Namespace
 from dataclasses import dataclass
 from pathlib import Path
 
-from jaix import gw, hermesbot, paths, proc, selftest, works
+from jaix import gw, hermesbot, paths, plugbin, proc, selftest, works
 from jaix.paths import IS_MAC, IS_WIN
 
 ITEMS = ("gw", "mail", "works", "hermes")
@@ -32,15 +33,21 @@ WAIT_LIMIT = 30 * 60  # 새 창에서 입력을 기다리는 최대 시간
 POLL = 1.0
 HINT = selftest.CONNECT_HINT
 
-# 종료 코드의 뜻. gw: jaix-gw skills/gw/SKILL.md · mail: mail-skill scripts/mail-setup(.ps1) 머리 주석
+# 종료 코드의 뜻. gw: jaix-gw skills/gw/SKILL.md · mail: mail-skill scripts/mail-setup(.ps1) 머리 주석.
+# 뜻 끝에 '다시' 를 붙이지 않는다 — 미완료 줄은 result_line 이 ' — 다시: <어디서>' 를 붙인다
 GW_RESULT = {0: "완료 — 로그인 정보를 이 PC 에 저장함",
-             2: "로그인 실패 — 대개 아이디·비밀번호가 틀림. 확인한 뒤 다시",
+             2: "로그인 실패 — 대개 아이디·비밀번호가 틀림",
              3: "취소했거나 5분 동안 입력하지 않음",
              4: "입력 창을 띄울 수 없음 — 명령창을 직접 열어 gw login"}
+# mail-setup 의 2 는 '사용법' — 터미널이 아닐 때와 입력값(메일 주소 형식 등)이 틀릴 때가 같다. jaix 는 늘 콘솔 창에서
+# 부르므로(connect_one) 사람이 보는 2 는 거의 입력값 문제다(실기 11/7: 빈 Enter → 주소 형식 [실패] 뒤 '터미널 아님' 오분류)
 MAIL_RESULT = {0: "완료 — 앱 비밀번호를 저장하고 로그인까지 확인함",
-               1: "메일 도구 런타임이 없음 — jaix setup 을 다시 실행한 뒤 다시",
-               2: "입력을 받을 창(터미널)이 아니라 시작하지 못함 — 시작 메뉴 'JAIX 계정 연결' 에서 다시",
-               3: "앱 비밀번호는 저장됐지만 로그인 확인 실패 — 웍스에서 앱 비밀번호를 새로 발급해 다시"}
+               1: "메일 도구 런타임이 없음 — 먼저 jaix setup 을 실행",
+               2: "입력한 값이 맞지 않아 멈춤 — 위 [실패] 줄의 안내 참고(메일 주소는 hong@ji.re.kr 처럼 전체 주소)",
+               3: "앱 비밀번호는 저장됐지만 로그인 확인 실패 — 웍스에서 앱 비밀번호를 새로 발급"}
+# 창을 닫거나 Ctrl+C 로 끝난 Windows 콘솔 프로세스의 종료 코드 STATUS_CONTROL_C_EXIT(0xC000013A, 부호 있는 값도)
+CLOSED = {0xC000013A, 0xC000013A - (1 << 32)}
+CLOSED_MEANING = "창을 닫았거나 Ctrl+C 로 멈춰 연결하지 않음"
 WORKS_RESULT = {0: "완료 — 웍스에 로그인함"}
 HERMES_RESULT = {0: "완료 — AI 구독에 로그인함", hermesbot.ALREADY: "이미 로그인돼 있어 그대로 둠",
                  hermesbot.CANCELLED: "취소함"}
@@ -178,17 +185,58 @@ def connect_gw(log, reachable=None, call=None):
     return (call or _call)(proc.command(exe, ["login"]))
 
 
+def _guide_mark():
+    return paths.data_dir() / "connect-mail-guide-opened"
+
+
+def _mail_ps1(exe):
+    """Windows: mailskill.cmd 가 넘기는 mailskill.ps1. jaix 심(plugbin)이면 그것이 부르는 원본 .cmd 를 따라간다.
+    .cmd 를 거치면 Ctrl+C 때 cmd 가 '일괄 작업을 끝내시겠습니까 (Y/N)?' 를 끼워 넣으므로 PowerShell 을 바로 부르려는 것"""
+    path = Path(exe)
+    if path.suffix.lower() not in (".cmd", ".bat"):
+        return None
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if plugbin.SHIM_MARK in text:
+        m = re.search(r'@call "([^"]+)"', text)
+        if not m:
+            return None
+        path = Path(m.group(1))
+    ps1 = path.with_suffix(".ps1")
+    return ps1 if ps1.is_file() else None
+
+
+def mail_command(exe):
+    """mailskill setup 명령. Windows 에서 .ps1 을 찾으면 mail-skill 의 .cmd 와 같은 방식으로 PowerShell 을 바로 부른다."""
+    ps1 = _mail_ps1(exe) if IS_WIN else None
+    if ps1:
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "setup"]
+    return proc.command(exe, ["setup"])
+
+
 def connect_mail(log, opener=None, call=None):
     exe = paths.which("mailskill")
     if not exe:
         log("메일 도구(mailskill)를 찾지 못했습니다 → jaix setup 을 다시 실행한 뒤 새 창에서 다시 하세요.")
         return 1
-    log("1) 브라우저에 '웍스 앱 비밀번호 발급' 안내를 엽니다. 안내대로 앱 비밀번호를 발급하세요.")
-    if not (opener or _open_url)(MAIL_GUIDE):
-        log(f"   브라우저를 열지 못했습니다. 주소창에 붙여 넣으세요: {MAIL_GUIDE}")
+    mark = _guide_mark()
+    if mark.exists():  # 할 때마다 브라우저 탭이 새로 쌓이지 않게(실기 11/7) — 처음 한 번만 연다
+        log(f"1) 웍스 앱 비밀번호 발급 안내(전에 브라우저로 열었음): {MAIL_GUIDE}")
+    else:
+        log("1) 브라우저에 '웍스 앱 비밀번호 발급' 안내를 엽니다. 안내대로 앱 비밀번호를 발급하세요.")
+        if (opener or _open_url)(MAIL_GUIDE):
+            try:
+                mark.parent.mkdir(parents=True, exist_ok=True)
+                mark.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + "\n", encoding="utf-8")
+            except OSError:
+                pass
+        else:
+            log(f"   브라우저를 열지 못했습니다. 주소창에 붙여 넣으세요: {MAIL_GUIDE}")
     log("2) 아래에서 묻는 곳에 발급한 앱 비밀번호를 붙여 넣으세요. 입력한 글자는 화면에 보이지 않는 것이 정상입니다.")
     log("")
-    return (call or _call)(proc.command(exe, ["setup"]))
+    return (call or _call)(mail_command(exe))
 
 
 def connect_works(log, login=None):
@@ -208,7 +256,13 @@ def run_here(item, log, **kw):
 def meaning(item, code):
     if code is None:
         return "결과를 받지 못함(창을 닫았거나 시간이 지남)"
-    return RESULT[item].get(code) or f"끝나지 않음(코드 {code}) — 창의 안내를 확인하고 다시"
+    if code in RESULT[item]:
+        return RESULT[item][code]
+    if code in CLOSED:
+        return CLOSED_MEANING
+    if code == hermesbot.CANCELLED:
+        return "취소함"
+    return f"끝나지 않음(코드 {code}) — 창의 안내를 확인"
 
 
 def result_line(item, code):
