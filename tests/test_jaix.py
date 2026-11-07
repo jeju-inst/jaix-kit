@@ -3219,3 +3219,57 @@ def test_hermes_rename_follows_base_name_only_when_install_set_it(isolated, monk
                        encoding="utf-8")
     assert hermesbot.cmd_rename(argparse.Namespace(id="ncho", dry_run=False), print) == 0
     assert (["config", "set", hermesbot.BASE_NAME_KEY, "Hermes-ncho"] in calls) is changed
+
+
+def test_yaml_scalar_block_values_count_as_user_set():
+    """리뷰 #145: 목록·하위 매핑으로 적은 값을 빈 값으로 읽어 덮어쓰지 않는다."""
+    text = "slack:\n  free_response_channels:\n    - C0MINE\n    - C0TWO\n  require_mention: true\n"
+    assert hermesbot._yaml_scalar(text, "slack", "free_response_channels") == hermesbot.YAML_BLOCK
+    assert hermesbot._yaml_scalar(text, "slack", "require_mention") == "true"
+    assert hermesbot._yaml_scalar("slack:\n  free_response_channels: [C1, C2]\n", "slack", "free_response_channels") \
+        == hermesbot.YAML_BLOCK
+    assert hermesbot._yaml_scalar("agent:\n  system_prompt: |\n    hi\n", "agent", "system_prompt") == hermesbot.YAML_BLOCK
+    assert hermesbot._yaml_scalar("slack:\n  free_response_channels:\n  x: 1\n", "slack", "free_response_channels") == ""
+
+
+def test_yaml_scalar_reads_folded_long_prompt():
+    """리뷰 #145: Hermes 가 긴 지시문을 여러 줄로 접어 써도 jaix 값으로 알아본다."""
+    words = hermesbot.SYSTEM_PROMPT.split(" ")
+    plain = "agent:\n  system_prompt: " + " ".join(words[:5]) + "\n" + \
+            "".join(f"    {' '.join(words[k:k + 5])}\n" for k in range(5, len(words), 5)) + "  max_turns: 150\n"
+    assert hermesbot._yaml_scalar(plain, "agent", "system_prompt") == hermesbot.SYSTEM_PROMPT
+    assert hermesbot._yaml_scalar(plain, "agent", "max_turns") == "150"
+    # PyYAML(allow_unicode 없음, 좁은 폭)이 실제로 쓴 모양 — CI 에 PyYAML 이 없어도 이 경로를 본다
+    pyyaml_out = ('agent:\n  system_prompt: "\\uC81C\\uC8FC\\\n    \\ \\uC5F0\\uAD6C\\uC6D0\\\n    \\ \\"\\uB3D5\\uB294\\"\\\n'
+                  '    \\ \\uBE44\\uC11C \\u2014\\\n    \\ \\uD55C \\uC904\\uB85C\\\n    \\ \\uB2F5\\uD55C\\uB2E4\\\n'
+                  '    . \\uD655\\uC778\\uC744\\\n    \\ \\uBC1B\\uB294\\uB2E4\\\n    ."\n')
+    assert hermesbot._yaml_scalar(pyyaml_out, "agent", "system_prompt") == '제주 연구원 "돕는" 비서 — 한 줄로 답한다. 확인을 받는다.'
+    yaml = pytest.importorskip("yaml")
+    for dumped in (yaml.safe_dump({"agent": {"system_prompt": hermesbot.SYSTEM_PROMPT}}, allow_unicode=True),
+                   yaml.safe_dump({"agent": {"system_prompt": hermesbot.SYSTEM_PROMPT}})):  # \u 이스케이프 판
+        assert hermesbot._yaml_scalar(dumped, "agent", "system_prompt") == hermesbot.SYSTEM_PROMPT
+
+
+def test_bot_room_keeps_user_channel_list(isolated, monkeypatch):
+    state, seen, calls = {}, [], []
+    _room_ready(monkeypatch, state, seen, calls)
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("slack:\n  free_response_channels:\n    - C0MINE\n", encoding="utf-8")
+    assert hermesbot.bot_room("hermes", "jitest", print)
+    assert seen == [] and not [c for c in calls if c[1:3] == ["config", "set"]]
+
+
+def test_quiet_keeps_owning_prompt_after_hermes_rewrites_it_folded(isolated, monkeypatch):
+    """jaix 가 넣은 지시문을 Hermes 가 접어 다시 써도(다른 설정 변경으로 지문이 바뀜) 사용자 것으로 오판하지 않는다."""
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    assert hermesbot.quiet("hermes", print)
+    words = hermesbot.SYSTEM_PROMPT.split(" ")
+    hermesbot.config_path().write_text(
+        "agent:\n  system_prompt: " + " ".join(words[:4]) + "\n    " + " ".join(words[4:]) + "\n", encoding="utf-8")
+    lines = []
+    assert hermesbot.quiet("hermes", lines.append)
+    assert not any("기본 지시문" in l and "그대로 둠" in l for l in lines)
+    assert hermesbot.recorded()["quiet"][hermesbot.PROMPT_KEY] == hermesbot.SYSTEM_PROMPT

@@ -813,22 +813,45 @@ def quiet(hermes, log):
     return ok
 
 
+YAML_BLOCK = "\x00block"  # 목록·하위 매핑·| > 블록 등 한 줄로 못 읽는 값 — 사용자 것으로 본다
+
+
 def _unquote(raw):
     raw = raw.strip()
     if len(raw) >= 2 and raw[0] == raw[-1] == "'":
         return raw[1:-1].replace("''", "'")
     if len(raw) >= 2 and raw[0] == raw[-1] == '"':
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return raw[1:-1]
+        return re.sub(r"\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)", _yaml_escape, raw[1:-1])
     return raw
 
 
+YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
+                "e": "\x1b", "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
+
+
+def _yaml_escape(m):
+    """큰따옴표 YAML 스칼라의 이스케이프(PyYAML 은 allow_unicode 없이 한글을 \\uXXXX, 접힌 줄 앞 공백을 '\\ ' 로 쓴다)."""
+    esc = m.group(1)
+    if esc[0] in "xuU" and len(esc) > 1:
+        return chr(int(esc[1:], 16))
+    return YAML_ESCAPES.get(esc, esc)  # '\\ ' '\\"' '\\/' '\\\\' 는 글자 그대로
+
+
+def _fold(first, more):
+    """여러 줄로 접힌 스칼라(PyYAML·ruamel 은 긴 값을 80자 근처에서 접는다)를 한 줄로. 접힌 줄 사이는 공백 하나,
+    큰따옴표 안의 줄 끝 '\\' 는 공백 없이 잇는다. 빈 줄(문단)은 지원하지 않고 그대로 공백으로 잇는다."""
+    out = first.strip()
+    for line in more:
+        part = line.strip()
+        out = out[:-1] + part if out.endswith("\\") and out.startswith('"') else f"{out} {part}"
+    return out
+
+
 def _yaml_scalar(text, *path):
-    """config.yaml 에서 path(블록 매핑) 끝의 한 줄 값. 없으면 None, 빈 값이면 ''. YAML 파서가 없어 들여쓰기만 본다 —
-    여러 줄 값(| >)·흐름 매핑은 그 첫 줄('|' 등)을 돌려준다. 부르는 쪽은 모르는 값을 사용자 것으로 본다."""
+    """config.yaml 에서 path(블록 매핑) 끝의 스칼라 값. 없으면 None, 빈 값이면 '', 목록·하위 매핑·블록 스칼라처럼
+    한 줄 값으로 읽을 수 없으면 YAML_BLOCK. YAML 파서가 없어 들여쓰기만 본다 — 부르는 쪽은 모르는 값을 사용자 것으로 본다."""
     lines = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+    depth = lambda l: len(l) - len(l.lstrip())
     i, parent = 0, -1
     for n, name in enumerate(path):
         child = None
@@ -836,16 +859,25 @@ def _yaml_scalar(text, *path):
         while i < len(lines):
             line = lines[i]
             i += 1
-            indent = len(line) - len(line.lstrip())
+            indent = depth(line)
             if indent <= parent:
                 return None
             child = indent if child is None else child
             m = key.match(line) if indent == child else None
             if m:
-                if n == len(path) - 1:
-                    return _unquote(m.group(1) or "")
-                parent = indent
-                break
+                if n < len(path) - 1:
+                    parent = indent
+                    break
+                more = []
+                while i < len(lines) and depth(lines[i]) > indent:
+                    more.append(lines[i])
+                    i += 1
+                value = (m.group(1) or "").strip()
+                if not value:
+                    return YAML_BLOCK if more else ""
+                if value[0] in "|>[{&*!" or (more and more[0].lstrip().startswith("- ")):
+                    return YAML_BLOCK
+                return _unquote(_fold(value, more))
         else:
             return None
     return None
@@ -853,7 +885,11 @@ def _yaml_scalar(text, *path):
 
 def _own_scalar(put, owned, key, current, want, log, label):
     """사용자가 정하지 않은 설정만 jaix 값으로. current 가 비었거나, jaix 가 지난번 넣은 값(owned[key]) 그대로면
-    jaix 것이다(새 판의 바뀐 값으로 올린다). 그 밖의 값은 사용자가 고친 것이라 그대로 둔다."""
+    jaix 것이다(새 판의 바뀐 값으로 올린다). jaix 가 넣은 뒤 config.yaml 이 바뀌지 않았으면(_Setter 기록) 읽은 값과
+    상관없이 jaix 것이다. 그 밖의 값은 사용자가 고친 것이라 그대로 둔다."""
+    if put.applied.get(key) == want:
+        owned[key] = want
+        return True
     if current and current not in (owned.get(key), want):
         log(f"    {label}: 사용자 설정이 있어 그대로 둠")
         owned.pop(key, None)
