@@ -47,6 +47,8 @@ def _guard_real_hermes(tmp_path, monkeypatch):
 def isolated(tmp_path, monkeypatch):
     """실제 사용자 설정을 건드리지 않게 모든 경로를 tmp로."""
     _guard_real_hermes(tmp_path, monkeypatch)
+    # 진짜 슬랙 API 도 부르지 않는다(봇 토큰으로 채널을 만드는 bot_room 등). 필요한 시험이 흉내를 단다
+    monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: pytest.fail(f"시험이 진짜 슬랙 API 를 부름: {a[:1]}"))
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "JAIX_DATA", "HERMES_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
@@ -1332,11 +1334,14 @@ def test_hermes_setup_connects_and_never_logs_secrets(isolated, monkeypatch, han
     _fake_windows(monkeypatch, isolated, calls)
     seen = {}
     monkeypatch.setattr(hermesbot, "connect_slack", lambda bundle, log: seen.update(bundle) or True)
+    rooms = []
+    monkeypatch.setattr(hermesbot, "bot_room", lambda h, ident, log, call=None: rooms.append(ident) or True)
     code_file = isolated / "pending" / "hermes-code"
     code_file.parent.mkdir()
     code_file.write_text(handoff_server["code"], encoding="utf-8")
     res = REAL_HERMES_SETUP(the_lock, lines.append, code_file=str(code_file), model="claude")
     assert res["status"] == "connected" and res["id"] == "demo" and seen["app_token"] == "xapp-TEST-1"
+    assert rooms == ["demo"]  # 처음 연결 뒤 전용 채널
     assert not code_file.exists()
     assert ["hermes", "config", "set", "model.provider", "anthropic"] in calls
     assert ["hermes", "tools", "disable", "browser", "computer_use", "--platform", "slack"] in calls
@@ -1720,7 +1725,7 @@ def test_hermes_quiet_keeps_user_settings(isolated, monkeypatch):
     lines = []
     assert hermesbot.quiet("hermes", lines.append)
     keys = [c[3] for c in calls if c[1:3] == ["config", "set"]]
-    assert keys == ["compression.codex_gpt55_autoraise_notice"]
+    assert keys == ["compression.codex_gpt55_autoraise_notice", hermesbot.PROMPT_KEY, hermesbot.FOOTER_KEY]  # 정하지 않은 것만
     assert any("사용자 설정" in l for l in lines)
 
 
@@ -3057,3 +3062,160 @@ def test_via_task_runs_console_jaix_not_jaixw(isolated, monkeypatch, tmp_path):
     assert Path(seen["cmd"][0]).name == "jaix.exe"
     assert "windowless=True" not in "".join(
         ln for ln in Path(cli.__file__).read_text(encoding="utf-8").split("def _setup_via_task", 1)[1].split("\ndef ", 1)[0])
+
+
+# --- 기본봇을 사용자 봇처럼(사용자 결정 11/8): 지시문·정보줄·이름 표시·전용 채널 ---------------------------------
+def _fake_slack(state, seen):
+    """conversations.list/create/invite 흉내. state: channels(이름→ID), create_error, invite_error."""
+    def call(method, token, **kw):
+        seen.append(method)
+        if method == "conversations.list":
+            return {"ok": True, "channels": [{"name": n, "id": i} for n, i in state.get("channels", {}).items()]}
+        if method == "conversations.create":
+            if state.get("create_error"):
+                return {"ok": False, "error": state["create_error"]}
+            assert kw == {"name": "hermes-jitest", "is_private": "true"}
+            state.setdefault("channels", {})[kw["name"]] = "G123"
+            return {"ok": True, "channel": {"id": "G123"}}
+        if method == "conversations.invite":
+            assert kw == {"channel": "G123", "users": "U123"}
+            err = state.get("invite_error")
+            return {"ok": False, "error": err} if err else {"ok": True}
+        raise AssertionError(method)
+    return call
+
+
+def test_yaml_scalar_reads_nested_block_values():
+    text = ("agent:\n  max_turns: 150\n  system_prompt: 'It''s mine'\ndisplay:\n  runtime_footer:\n    enabled: true\n"
+            "  platforms:\n    slack:\n      runtime_footer:\n        enabled: false\n"
+            "discord:\n  free_response_channels: 'D1'\nslack:\n  require_mention: true\n  free_response_channels: ''\n")
+    assert hermesbot._yaml_scalar(text, "agent", "system_prompt") == "It's mine"
+    assert hermesbot._yaml_scalar(text, "display", "platforms", "slack", "runtime_footer", "enabled") == "false"
+    assert hermesbot._yaml_scalar(text, "slack", "free_response_channels") == ""   # discord 것을 잡지 않음
+    assert hermesbot._yaml_scalar(text, "slack", "allowed_channels") is None
+    assert hermesbot._yaml_scalar("", "agent", "system_prompt") is None
+
+
+def test_quiet_sets_korean_prompt_and_hides_footer_unless_user_set(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    assert hermesbot.quiet("hermes", print)
+    sets = {c[3]: c[4] for c in calls if c[1:3] == ["config", "set"]}
+    assert sets[hermesbot.PROMPT_KEY] == hermesbot.SYSTEM_PROMPT and "한국어" in hermesbot.SYSTEM_PROMPT
+    assert sets[hermesbot.FOOTER_KEY] == "false"
+    # 사용자가 지시문을 고쳤으면(jaix 가 넣은 값과 다름) 덮지 않는다
+    calls.clear()
+    hermesbot.config_path().write_text("agent:\n  system_prompt: 'Be brief.'\ndisplay:\n  platforms:\n    slack:\n"
+                                       "      runtime_footer:\n        enabled: true\n", encoding="utf-8")
+    lines = []
+    assert hermesbot.quiet("hermes", lines.append)
+    keys = [c[3] for c in calls if c[1:3] == ["config", "set"]]
+    assert hermesbot.PROMPT_KEY not in keys and hermesbot.FOOTER_KEY not in keys
+    assert sum("사용자 설정이 있어 그대로 둠" in l for l in lines) == 2
+
+
+def test_quiet_upgrades_prompt_jaix_wrote_before(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    hermesbot._save_record({"quiet": {hermesbot.PROMPT_KEY: "옛 지시문"}})
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("agent:\n  system_prompt: 옛 지시문\n", encoding="utf-8")
+    assert hermesbot.quiet("hermes", print)
+    assert ["hermes", "config", "set", hermesbot.PROMPT_KEY, hermesbot.SYSTEM_PROMPT] in calls
+
+
+def _room_ready(monkeypatch, state, seen, calls):
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "slack_call", _fake_slack(state, seen))
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_ALLOWED_USERS=U123,U999\n")
+
+
+def test_bot_room_creates_private_channel_invites_owner_and_is_idempotent(isolated, monkeypatch):
+    state, seen, calls = {}, [], []
+    _room_ready(monkeypatch, state, seen, calls)
+    assert hermesbot.bot_room("hermes", "jitest", print)
+    assert seen == ["conversations.list", "conversations.create", "conversations.invite"]
+    sets = {c[3]: c[4] for c in calls if c[1:3] == ["config", "set"]}
+    assert sets == {hermesbot.ROOM_KEY: "G123"}   # base_name 은 install.py 몫(hermes-slackbot#24)
+    # 재실행(로그온 update): 슬랙을 다시 부르지 않고 설정도 그대로
+    seen.clear(), calls.clear()
+    assert hermesbot.bot_room("hermes", "jitest", print)
+    assert seen == [] and calls == []
+    # 기록이 지워져도 같은 이름의 채널을 찾아 쓴다(새로 만들지 않음)
+    hermesbot._save_record({})
+    assert hermesbot.bot_room("hermes", "jitest", print)
+    assert "conversations.create" not in seen and state["channels"] == {"hermes-jitest": "G123"}
+
+
+def test_bot_room_keeps_user_channels(isolated, monkeypatch):
+    state, seen, calls = {}, [], []
+    _room_ready(monkeypatch, state, seen, calls)
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("plugins:\n  entries:\n    slack-model-display:\n      settings:\n        base_name: 내봇\n"
+                   "slack:\n  free_response_channels: 'C0MINE'\n", encoding="utf-8")
+    lines = []
+    assert hermesbot.bot_room("hermes", "jitest", lines.append)
+    assert seen == [] and not [c for c in calls if c[1:3] == ["config", "set"]]
+    assert sum("그대로 둠" in l for l in lines) == 1
+
+
+@pytest.mark.parametrize("error", ["name_taken", "missing_scope", "restricted_action"])
+def test_bot_room_slack_refusal_does_not_block(isolated, monkeypatch, error):
+    state, seen, calls = {"create_error": error}, [], []
+    _room_ready(monkeypatch, state, seen, calls)
+    lines = []
+    assert hermesbot.bot_room("hermes", "jitest", lines.append)   # 설치를 막지 않음
+    assert hermesbot.ROOM_KEY not in [c[3] for c in calls if c[1:3] == ["config", "set"]]
+    assert len([l for l in lines if "전용 채널" in l]) == 1
+    if error in hermesbot.ROOM_ERRORS:
+        assert hermesbot.ROOM_ERRORS[error] in lines[-1]
+
+
+def test_bot_room_retries_invite_next_time(isolated, monkeypatch):
+    state, seen, calls = {"invite_error": "user_not_found"}, [], []
+    _room_ready(monkeypatch, state, seen, calls)
+    assert hermesbot.bot_room("hermes", "jitest", print)
+    assert hermesbot.recorded()["room"]["invited"] is False
+    seen.clear()
+    state["invite_error"] = "already_in_channel"
+    assert hermesbot.bot_room("hermes", "jitest", print)
+    assert seen == ["conversations.list", "conversations.invite"] and hermesbot.recorded()["room"]["invited"] is True
+
+
+def test_bot_room_network_error_is_skipped(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: (_ for _ in ()).throw(OSError("offline")))
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_ALLOWED_USERS=U123\n")
+    lines = []
+    assert hermesbot.bot_room("hermes", "jitest", lines.append)
+    assert any("OSError" in l for l in lines)
+
+
+def test_quiet_on_connected_pc_runs_bot_room(isolated, monkeypatch):
+    """기존 설치자: jaix update 가 부르는 quiet() 가 전용 채널까지 맞춘다."""
+    seen = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run([]))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    monkeypatch.setattr(hermesbot, "bot_room", lambda h, ident, log, call=None: seen.append(ident) or True)
+    assert hermesbot.quiet("hermes", print) and seen == []
+    hermesbot._save_record({**hermesbot.recorded(), "slack": {"id": "jitest"}})
+    assert hermesbot.quiet("hermes", print) and seen == ["jitest"]
+
+
+@pytest.mark.parametrize("current,changed", [("Hermes-namun", True), ("hermes-namun", True), ("내 봇", False), (None, False)])
+def test_hermes_rename_follows_base_name_only_when_install_set_it(isolated, monkeypatch, current, changed):
+    """base_name 은 install.py 가 Hermes-<id> 로 넣는다(hermes-slackbot#24). rename 은 install.py 를 거치지 않으므로
+    jaix 가 따라 바꾼다 — 옛 아이디 그대로일 때만. 사용자 이름·플러그인 없는 PC 는 그대로."""
+    calls = _connected(monkeypatch)
+    if current:
+        cfg = hermesbot.config_path()
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text(f"plugins:\n  entries:\n    slack-model-display:\n      settings:\n        base_name: {current}\n",
+                       encoding="utf-8")
+    assert hermesbot.cmd_rename(argparse.Namespace(id="ncho", dry_run=False), print) == 0
+    assert (["config", "set", hermesbot.BASE_NAME_KEY, "Hermes-ncho"] in calls) is changed

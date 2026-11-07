@@ -71,6 +71,20 @@ SLASH_ALLOWED = [
     "start", "status", "steer", "stop", "subgoal", "suggest", "suggestions", "tasks", "title", "topic", "undo",
     "update", "usage", "v", "verbose", "version", "voice", "whoami",
 ]
+# 기본봇을 사용자 봇(Hermes-namun)처럼 맞춘다(사용자 결정 11/8). 사용자가 정한 값은 덮지 않는다(_own_scalar).
+# agent.system_prompt 는 Hermes 시스템 프롬프트 뒤에 붙는 사용자 몫 덧붙임이다(hermes_cli/personality.py)
+SYSTEM_PROMPT = (
+    "제주연구원 연구원을 돕는 비서로서 한국어로 답한다. 답의 길이는 요청의 무게에 맞춘다 — 한 줄 질문에는 한 줄로 답하고, "
+    "끝낸 일은 무엇을 바꿨고 무엇을 확인했고 무엇이 남았는지만 짧게 보고하며 과정을 다시 늘어놓지 않는다. "
+    "\"좋은 질문입니다\", \"기꺼이 도와드리겠습니다\" 같은 군말, 요청을 되풀이하는 말, 이미 한 말의 재요약, "
+    "사용자에게 보이는 도구 호출 중계는 하지 않는다. 꾸밈말보다 사실로 말하고, 확실하지 않으면 그렇다고 분명히 말한다. "
+    "맞아서 동의하고, 사용자가 말했다는 이유로 동의하지 않는다. 자세한 설명은 사용자가 원하거나 가르치는 자리이거나 "
+    "중요한 일일 때만 한다. 메일 발송·결재 상신·파일 삭제처럼 되돌리기 어려운 일은 하기 전에 확인을 받는다."
+)
+FOOTER_KEY = "display.platforms.slack.runtime_footer.enabled"
+PROMPT_KEY = "agent.system_prompt"
+BASE_NAME_KEY = "plugins.entries.slack-model-display.settings.base_name"
+ROOM_KEY = "slack.free_response_channels"
 INSTALL_TIMEOUT = 3600  # 첫 설치 실측 14분·3GB(namun-ji). 느린 망을 넉넉히
 
 
@@ -414,6 +428,7 @@ def cmd_rename(args, log):
     if not ok:
         log("슬래시 명령을 바꾸지 못했습니다(위 기록). 아무것도 바꾸지 않았습니다.")
         return 1
+    _rename_base_name(hermes, old, new, log)
     if old != new:
         slack = dict(slack, id=new, renamed_from=old,
                      renamed=datetime.datetime.now().isoformat(timespec="seconds"))
@@ -426,6 +441,22 @@ def cmd_rename(args, log):
         return 1
     log(f"gateway 다시 시작함. 슬랙에서 /{want} help 를 쳐 보세요(DM 은 그대로 됩니다).")
     return 0
+
+
+def _rename_base_name(hermes, old, new, log):
+    """답 이름 표시(slack-model-display base_name)를 Hermes-<새 아이디>로. install.py 가 넣은 Hermes-<옛 아이디> 일 때만
+    바꾼다 — 없으면(플러그인을 안 쓰는 PC) 만들지 않고, 사용자가 고친 이름은 그대로 둔다. 실패해도 rename 은 계속한다."""
+    try:
+        text = config_path().read_text(encoding="utf-8")
+    except OSError:
+        return
+    cur = _yaml_scalar(text, "plugins", "entries", "slack-model-display", "settings", "base_name")
+    if not cur or cur.lower() == f"hermes-{new}" or cur.lower() != f"hermes-{old}":
+        return
+    if _run([hermes, "config", "set", BASE_NAME_KEY, f"Hermes-{new}"], log)[0]:
+        log(f"답 이름 표시: Hermes-{new}")
+    else:
+        log("답 이름 표시(base_name)를 바꾸지 못했습니다 — 답 위 이름이 옛 아이디로 보일 수 있습니다(위 기록).")
 
 
 def show_console():
@@ -767,9 +798,152 @@ def quiet(hermes, log):
             put.applied.pop("SLACK_HOME_CHANNEL", None)
             ok &= put("SLACK_HOME_CHANNEL", home, ["config", "set", "SLACK_HOME_CHANNEL", home])
             log("    슬랙 홈 채널: 본인과의 DM 으로 정함(첫 답의 'No home channel' 안내 없앰)")
+    ok &= _own_scalar(put, owned, PROMPT_KEY, _yaml_scalar(text, "agent", "system_prompt"), SYSTEM_PROMPT, log,
+                      "기본 지시문(agent.system_prompt)")
+    ok &= _own_scalar(put, owned, FOOTER_KEY,
+                      _yaml_scalar(text, "display", "platforms", "slack", "runtime_footer", "enabled"), "false", log,
+                      "슬랙 답 끝 정보줄(runtime_footer)")
     put.save()
     rec = recorded()
     rec["quiet"] = owned
+    _save_record(rec)
+    ident = (rec.get("slack") or {}).get("id")
+    if ident:  # 이미 연결된 PC(jaix update·재설치). 처음 연결은 setup() 이 connect_slack 뒤에 부른다
+        ok &= bot_room(hermes, ident, log)
+    return ok
+
+
+def _unquote(raw):
+    raw = raw.strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] == "'":
+        return raw[1:-1].replace("''", "'")
+    if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return raw[1:-1]
+    return raw
+
+
+def _yaml_scalar(text, *path):
+    """config.yaml 에서 path(블록 매핑) 끝의 한 줄 값. 없으면 None, 빈 값이면 ''. YAML 파서가 없어 들여쓰기만 본다 —
+    여러 줄 값(| >)·흐름 매핑은 그 첫 줄('|' 등)을 돌려준다. 부르는 쪽은 모르는 값을 사용자 것으로 본다."""
+    lines = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+    i, parent = 0, -1
+    for n, name in enumerate(path):
+        child = None
+        key = re.compile(rf"""\s*["']?{re.escape(name)}["']?\s*:(?:\s+(.*))?$""")
+        while i < len(lines):
+            line = lines[i]
+            i += 1
+            indent = len(line) - len(line.lstrip())
+            if indent <= parent:
+                return None
+            child = indent if child is None else child
+            m = key.match(line) if indent == child else None
+            if m:
+                if n == len(path) - 1:
+                    return _unquote(m.group(1) or "")
+                parent = indent
+                break
+        else:
+            return None
+    return None
+
+
+def _own_scalar(put, owned, key, current, want, log, label):
+    """사용자가 정하지 않은 설정만 jaix 값으로. current 가 비었거나, jaix 가 지난번 넣은 값(owned[key]) 그대로면
+    jaix 것이다(새 판의 바뀐 값으로 올린다). 그 밖의 값은 사용자가 고친 것이라 그대로 둔다."""
+    if current and current not in (owned.get(key), want):
+        log(f"    {label}: 사용자 설정이 있어 그대로 둠")
+        owned.pop(key, None)
+        return True
+    if current == want:
+        owned[key] = want
+        return True
+    if put(key, want, ["config", "set", key, want]):
+        owned[key] = want
+        return True
+    return False
+
+
+def _room_find(call, token, name):
+    """봇이 들어가 있는 비공개 채널 중 name. (id, 오류)."""
+    cursor = None
+    for _ in range(50):
+        r = call("conversations.list", token, types="private_channel", exclude_archived="true", limit=200,
+                 **({"cursor": cursor} if cursor else {}))
+        if not r.get("ok"):
+            return None, r.get("error") or "unknown"
+        for c in r.get("channels") or []:
+            if c.get("name") == name:
+                return c.get("id"), None
+        cursor = (r.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            break
+    return None, None
+
+
+ROOM_ERRORS = {
+    "name_taken": "같은 이름의 채널이 이미 있는데 봇이 들어가 있지 않아 전용 채널을 만들지 않았습니다(AI센터에 알려 주세요)",
+    "missing_scope": "슬랙 앱 권한이 옛 것이라 전용 채널을 만들지 않았습니다(AI센터가 앱 권한을 고친 뒤 jaix update)",
+}
+
+
+def _room(token, user, name, log, call):
+    """전용 비공개 채널 ID 와 주인 초대 여부. 실패는 설치를 막지 않는다 — 한 줄 안내 후 (None, False)."""
+    def skip(error):
+        log(f"    전용 채널 {name}: {ROOM_ERRORS.get(error, f'만들지 못해 건너뜀({error})')}")
+        return None, False
+    try:
+        cid, error = _room_find(call, token, name)
+        if error:
+            return skip(error)
+        if not cid:
+            r = call("conversations.create", token, name=name, is_private="true")
+            if not r.get("ok"):
+                return skip(r.get("error") or "unknown")
+            cid = (r.get("channel") or {}).get("id")
+            log(f"    전용 채널 {name}: 만듦")
+        r = call("conversations.invite", token, channel=cid, users=user)
+        invited = r.get("ok") or r.get("error") == "already_in_channel"
+        if not invited:
+            log(f"    전용 채널 {name}: 주인을 초대하지 못함({r.get('error')}) — 다음 jaix update 때 다시 함")
+        return cid, invited
+    except (OSError, ValueError) as e:
+        return skip(type(e).__name__)
+
+
+def bot_room(hermes, ident, log, call=None):
+    """전용 비공개 채널 hermes-<id>(주인 초대, 멘션 없이 답함). 재실행해도 같다. 사용자가 정한
+    slack.free_response_channels 는 덮지 않는다. 슬랙 쪽 실패는 설치를 막지 않는다. 답 이름 표시(slack-model-display
+    base_name)는 hermes-slackbot install.py 가 넣는다(hermes-slackbot#24) — jaix 는 rename 때만 따라 바꾼다."""
+    rec = recorded()
+    owned = rec.get("room") or {}
+    try:
+        text = config_path().read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    put = _Setter(hermes, log)
+    ok = True
+    current = _yaml_scalar(text, "slack", "free_response_channels")
+    mine = owned.get(ROOM_KEY)
+    if current and current != mine:
+        log("    전용 채널: 사용자 설정(slack.free_response_channels)이 있어 그대로 둠")
+        owned.pop(ROOM_KEY, None)
+    # 이미 넣었고(파일에 그 값이 있거나, 넣은 뒤 config.yaml 이 바뀌지 않음) 주인도 들어가 있으면 슬랙을 다시 부르지 않는다
+    elif not (mine and owned.get("invited") and (current == mine or put.applied.get(ROOM_KEY) == mine)):
+        token, user = env_value("SLACK_BOT_TOKEN"), (env_value("SLACK_ALLOWED_USERS") or "").split(",")[0].strip()
+        if token and user:
+            cid, invited = _room(token, user, f"hermes-{ident}".lower(), log, call or slack_call)
+            if cid:
+                owned["invited"] = invited
+                ok &= _own_scalar(put, owned, ROOM_KEY, current, cid, log, "전용 채널")
+                if owned.get(ROOM_KEY) == cid:
+                    log(f"    전용 채널 hermes-{ident}: 멘션 없이 답하게 함")
+    put.save()
+    rec = recorded()
+    rec["room"] = owned
     _save_record(rec)
     return ok
 
@@ -892,6 +1066,7 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
         return _done({"status": "failed", "error": str(e)}, dry_run, linked, log)
     if not connect_slack(bundle, log):
         return _done({"status": "failed", "error": "슬랙 연결 실패(gateway)"}, dry_run, linked, log)
+    bot_room(hermes, bundle["id"], log)  # 전용 채널. 실패해도 봇은 돈다(안내만)
     return _done({"status": "connected", "id": bundle["id"], "login": PROVIDERS[model]["login"]}, dry_run)
 
 
