@@ -1,20 +1,20 @@
-"""jaix 본체(설치본 jaix.exe·jaixw.exe) 자기 업데이트. 경험 설계는 hwp2pdf(src/hwp2pdf/updater.py)를 따른다.
+"""jaix 본체(설치본 jaix.exe·jaixw.exe) 자기 업데이트 — **jaix 가 설치기를 받거나 실행하지 않는다.**
 
-- 로그온 갱신(jaixw update --quiet)이 GitHub releases/latest 를 간격을 두고 조용히 확인하고(기본 6시간, 릴리스
-  본문에 CRITICAL_MARKER 가 있으면 1시간), 새 판이면 jaix-setup.exe 를 updates 폴더로 받아 릴리스 첨부의
-  sha256(digest)로 검증해 둔다.
-- **조용히 설치하지 않는다.** 갱신이 끝나면 작은 대화상자로 묻고, 사용자가 [예]를 누를 때만 설치기를
-  `/JAIXAUTOUPDATE=1` 로 띄운다. 서명 없는 설치기라 무인 다운로드+무인 실행은 Defender 행동 탐지 위험이 크다(#46).
-- 받기 실패·검증 실패·격리(파일이 사라짐)는 기록만 하고 다음 로그온에 다시 한다.
-- 이미 깐 판(지금 판 이하)의 받아 둔 설치기는 다음 확인 때 지운다(prune_installed). 남겨 두면 Defender 가 뒤늦게
-  격리 알림을 띄운다(jaix-test 11/7: .07.6 을 --self 로 깐 3초 뒤 updates 사본이 Behavior:Win32/Execution.A!ml).
+- GitHub releases/latest 를 간격을 두고 확인한다(기본 6시간, 릴리스 본문에 CRITICAL_MARKER 가 있으면 1시간).
+- 새 판이면 알리고, 사용자가 원하면 **브라우저로** jaix-setup.exe 를 받게 연다. 사용자가 받은 파일을 직접 실행한다.
+  예전에는 jaix 가 updates 폴더로 받아 sha256 확인 뒤 /SILENT 로 띄웠는데, 서명 없는 jaix 가 사용자 폴더의 서명 없는
+  exe 를 조용히 실행하는 흐름이 드로퍼 모양이라 Defender 행동 탐지에 걸렸다(jaix-test 11/7: .07.6 을 --self --yes 로
+  깐 3초 뒤 updates 사본이 Behavior:Win32/Execution.A!ml. 같은 경로 .07.3·.07.5 는 무사 — 확률적).
+  브라우저 다운로드는 Mark-of-the-Web + SmartScreen 평판 경로라 Windows 가 보통의 설치로 다룬다(#139 와 같은 원리:
+  서명 없는 jaix 가 스스로 무언가를 실행·상주시키지 않는다).
+- 이전 선택(채널·Hermes 모델)은 설치기가 setup-choice.json 을 읽어 체크 기본값으로 둔다(ApplyPreviousChoice).
+  열린 jaix 창은 설치기가 닫는다([Setup] CloseApplications=force — 예전 /FORCECLOSEAPPLICATIONS 와 같음).
+- 예전 흐름이 updates 폴더에 남긴 jaix-setup-*.exe 는 확인 때 지운다(prune_installers).
 - 수동: `jaix update --self`. 점검: doctor 의 "jaix 본체" 줄.
 """
 import ctypes
-import hashlib
 import json
 import os
-import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +29,7 @@ CRITICAL_INTERVAL = 60 * 60
 # GitHub 릴리스에는 중요도 칸이 없다 — 릴리스 본문에 이 줄을 넣으면 1시간 간격으로 확인한다(hwp2pdf 와 같은 방식)
 CRITICAL_MARKER = "jaix-priority: critical"
 GUIDE = "시작 메뉴 'JAIX 업데이트' 또는 명령창에서 jaix update --self"
+RELEASES = f"https://github.com/{REPO}/releases/latest"
 
 
 def updates_dir():
@@ -95,33 +96,28 @@ def _fetch():
     return net.get_json(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=15)
 
 
-def prune_installed(log=None):
-    """받아 둔 설치기 중 지금 판 이하(이미 깐 것)를 지운다. 지운 파일 목록. 개발판이면 아무것도 안 한다."""
-    cur = current()
-    if cur is None:
-        return []
+def prune_installers(log=None):
+    """예전 흐름이 updates 폴더에 받아 둔 설치기를 모두 지운다(이제 jaix 는 받지 않는다). 지운 파일 목록."""
     gone = []
     try:
         found = list(updates_dir().glob("jaix-setup-*.exe"))
     except OSError:
         return []
     for f in found:
-        v = parse_version(f.stem[len("jaix-setup-"):])
-        if v and v <= cur:
-            try:
-                f.unlink()
-                gone.append(f)
-            except OSError:  # 이미 격리됐거나 잠김 — 다음에 다시
-                continue
+        try:
+            f.unlink()
+            gone.append(f)
+        except OSError:  # 이미 격리됐거나 잠김 — 다음에 다시
+            continue
     if gone and log:
-        log(f"jaix 업데이트: 이미 깐 판의 받아 둔 설치기 {len(gone)}개 지움")
+        log(f"jaix 업데이트: 예전에 받아 둔 설치기 {len(gone)}개 지움")
     return gone
 
 
 def check(force=False, fetch=None, now=None):
     """최신 릴리스를 확인해 상태에 남기고 돌려준다. 간격 안이면(force 아니면) 묻지 않고 지난 상태.
     상태: latest(태그)·newer·url·digest·critical·checked_at·error."""
-    prune_installed()
+    prune_installers()
     state = load_state()
     if state.get("current") != __version__:  # 그사이 본체가 바뀜(자기 업데이트·수동 설치) — 지난 판정은 버린다
         state.pop("checked_at", None)
@@ -156,72 +152,6 @@ def _rejudge(state):
     cur = current()
     state["newer"] = bool(cur and state.get("url") and parse_version(state.get("latest")) > cur)
     return state
-
-
-def sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
-def _expected(state):
-    d = str(state.get("digest") or "")
-    return d.split(":", 1)[1].lower() if d.lower().startswith("sha256:") else None
-
-
-def installer_path(state):
-    return updates_dir() / f"jaix-setup-{state.get('latest')}.exe"
-
-
-def verified(state):
-    """받아 둔 설치기가 있고 digest 와 맞으면 그 경로. 격리로 사라졌거나 다르면 None."""
-    want, path = _expected(state), installer_path(state)
-    try:
-        return path if want and path.is_file() and sha256(path) == want else None
-    except OSError:
-        return None
-
-
-def fetch_installer(state, log, download=None):
-    """새 판 설치기를 받아 sha256 으로 검증한다. 성공하면 경로, 아니면 None(상태에 이유를 남김)."""
-    if not state.get("newer"):
-        return None
-    if not _expected(state):
-        state["error"] = "릴리스 첨부에 sha256 이 없어 받지 않음"
-        save_state(state)
-        return None
-    have = verified(state)
-    if have:
-        return have
-    path = installer_path(state)
-    for old in updates_dir().glob("jaix-setup-*.exe"):  # 지난 판 설치기는 지운다
-        if old != path:
-            old.unlink(missing_ok=True)
-    try:
-        (download or net.download)(state["url"], path)
-        got = sha256(path)
-    except Exception as e:  # 끊김·격리(쓰는 중 지워짐·접근 거부)
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        state["error"] = f"받기 실패: {e}"
-        save_state(state)
-        log(f"jaix 새 판 {state.get('latest')} 받기 실패: {e} — 다음에 다시")
-        return None
-    if got != _expected(state):
-        path.unlink(missing_ok=True)
-        state["error"] = f"sha256 불일치(받은 것 {got[:12]}…) — 지움"
-        save_state(state)
-        log(f"jaix 새 판 {state.get('latest')}: {state['error']}")
-        return None
-    state["error"] = None
-    state["downloaded"] = datetime.now().isoformat(timespec="seconds")
-    save_state(state)
-    log(f"jaix 새 판 {state.get('latest')} 받아 둠(sha256 확인): {path}")
-    return path
 
 
 def setup_choice():
@@ -317,66 +247,42 @@ def other_jaix(processes=None):
     return [(pid, Path(exe).name) for pid, exe in procs if pid != me and norm(Path(exe).parent) == norm(here)]
 
 
-def _terminate(pid):
-    from ctypes import wintypes
-    k = ctypes.WinDLL("kernel32", use_last_error=True)
-    k.OpenProcess.restype = wintypes.HANDLE
-    h = k.OpenProcess(0x0001 | 0x00100000, False, pid)  # PROCESS_TERMINATE | SYNCHRONIZE
-    if not h:
-        return False
-    try:
-        ok = bool(k.TerminateProcess(h, 1))
-        k.WaitForSingleObject(h, 3000)
-        return ok
-    finally:
-        k.CloseHandle(h)
-
-
-def close_others(log, find=None, kill=None):
-    """다른 jaix 창을 닫는다. 못 닫은 것이 있어도 진행(설치기의 /FORCECLOSEAPPLICATIONS 가 한 번 더 한다)."""
-    others = (find or other_jaix)()
-    for pid, name in others:
-        ok = (kill or _terminate)(pid)
-        log(f"jaix 업데이트: 열려 있던 {name}(pid {pid}) {'닫음' if ok else '닫지 못함'}")
-    return others
-
-
 def open_windows_note():
     n = len(other_jaix())
-    return f"\n열려 있는 JAIX 창 {n}개(Hermes 로그인·점검 창 등)는 닫고 업데이트합니다." if n else ""
+    return f"\n열려 있는 JAIX 창 {n}개(Hermes 로그인·점검 창 등)는 설치기가 설치 중에 닫습니다." if n else ""
 
 
-def installer_args(state):
-    channels, model = setup_choice()
-    args = ["/SILENT", "/CURRENTUSER", "/FORCECLOSEAPPLICATIONS", "/JAIXAUTOUPDATE=1", f"/CHANNELS={','.join(channels)}",
-            f"/LOG={updates_dir() / ('install-' + str(state.get('latest')) + '.log')}"]
-    if "hermes" in channels:
-        args.append(f"/HERMESMODEL={model}")
-    return args
-
-
-def launch(state, log, popen=None, close=None):
-    """검증된 설치기를 띄우고 곧장 돌아온다(호출자는 바로 끝나야 설치기가 jaix 폴더를 바꿀 수 있다)."""
-    path = verified(state)
-    if not path:
-        state["error"] = "받아 둔 설치기가 없거나 sha256 이 다름(격리됐을 수 있음) — 다음에 다시 받음"
-        save_state(state)
-        log(f"jaix 업데이트: {state['error']}")
-        return False
-    (close or close_others)(log)
-    cmd = [str(path), *installer_args(state)]
-    flags = (0x00000008 | 0x00000200) if IS_WIN else 0  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+def _open_url(url):
     try:
-        (popen or subprocess.Popen)(cmd, creationflags=flags, close_fds=True, cwd=str(updates_dir()))
-    except OSError as e:  # 실행 차단(Defender·SmartScreen)
-        state["error"] = f"설치기 실행 실패: {e}"
-        save_state(state)
-        log(f"jaix 업데이트: {state['error']}")
+        if IS_WIN:
+            os.startfile(url)  # noqa: S606 — 기본 브라우저
+            return True
+        import webbrowser
+        return bool(webbrowser.open(url))
+    except OSError:
         return False
-    state["launched"] = datetime.now().isoformat(timespec="seconds")
+
+
+def steps(state):
+    """사용자가 할 일(브라우저 다운로드 → 실행 → 설치기)."""
+    return [f"브라우저에서 jaix-setup.exe({state.get('latest')})를 받습니다. 받기가 끝나면:",
+            "  1) 브라우저의 다운로드 목록에서 [파일 열기]",
+            "  2) 'Windows의 PC 보호' 파란 화면이 뜨면 [추가 정보] → [실행]",
+            "  3) 설치기: 지난번 고른 AI 가 체크돼 있습니다 — [다음] 을 눌러 끝까지(열린 JAIX 창은 설치기가 닫음)",
+            f"브라우저가 안 열리면 여기서 받으세요: {RELEASES}"]
+
+
+def open_download(state, log, opener=None):
+    """새 판 설치기를 브라우저로 받게 연다. jaix 는 파일을 받거나 실행하지 않는다."""
+    url = state.get("url") or RELEASES
+    ok = (opener or _open_url)(url)
+    state["opened"] = datetime.now().isoformat(timespec="seconds")
     save_state(state)
-    log(f"jaix 업데이트 설치기 실행: {' '.join(cmd)}")
-    return True
+    for line in steps(state):
+        log(line)
+    if not ok:
+        log("(브라우저를 열지 못했습니다 — 위 주소를 직접 여세요)")
+    return ok
 
 
 def ask_dialog(state):
@@ -384,7 +290,7 @@ def ask_dialog(state):
     if not IS_WIN:
         return False
     text = (f"JAIX 새 판이 있습니다.\n\n지금: {__version__}\n새 판: {state.get('latest')}\n\n"
-            f"지금 업데이트할까요? 몇 분 걸리며, 끝나면 알려 드립니다.{open_windows_note()}\n"
+            f"[예]를 누르면 브라우저가 새 판 설치기를 받습니다. 받은 파일을 열어 설치하세요.{open_windows_note()}\n"
             f"[아니요]를 누르면 다음 로그온 때 다시 묻습니다({GUIDE} 로도 할 수 있습니다).")
     MB_YESNO, MB_ICONINFORMATION, MB_SETFOREGROUND, MB_TOPMOST, IDYES = 0x4, 0x40, 0x10000, 0x40000, 6
     try:
@@ -394,22 +300,20 @@ def ask_dialog(state):
         return False
 
 
-def logon_prepare(log, fetch=None, download=None):
-    """로그온 갱신 첫 단계: 확인·받기·검증만 한다(묻지 않음). 실패해도 갱신을 막지 않는다."""
+def logon_prepare(log, fetch=None):
+    """로그온 갱신 첫 단계: 새 판 확인만 한다(받지 않음). 실패해도 갱신을 막지 않는다."""
     if not applies():
         return None
     try:
         state = check(fetch=fetch)
-        if not state.get("newer"):
-            return None
-        return state if fetch_installer(state, log, download) else None
+        return state if state.get("newer") else None
     except Exception as e:  # 자기 업데이트 때문에 도구 갱신이 멈추면 안 된다
         log(f"jaix 새 판 확인 중 오류(무시): {e}")
         return None
 
 
-def logon_offer(state, log, ask=None, popen=None):
-    """로그온 갱신 끝: 받아 둔 새 판이 있으면 묻고, [예]면 설치기를 띄운다."""
+def logon_offer(state, log, ask=None, opener=None):
+    """로그온 갱신 끝: 새 판이 있으면 묻고, [예]면 브라우저로 받게 연다."""
     if not state:
         return False
     if not (ask or ask_dialog)(state):
@@ -417,14 +321,14 @@ def logon_offer(state, log, ask=None, popen=None):
         save_state(state)
         log(f"jaix 새 판 {state.get('latest')}: 사용자가 나중에 하기로 함")
         return False
-    return launch(state, log, popen)
+    return open_download(state, log, opener)
 
 
-def cmd_self(args, log, fetch=None, download=None, popen=None, ask=None):
-    """jaix update --self: 지금 확인하고, 새 판이면 받아 검증한 뒤 물어서(--yes 면 묻지 않고) 설치기를 띄운다."""
+def cmd_self(args, log, fetch=None, opener=None, ask=None):
+    """jaix update --self: 지금 확인하고, 새 판이면 물어서(--yes 면 묻지 않고) 브라우저로 설치기를 받게 연다."""
     if not IS_WIN or paths.exe_dir() is None:
         log("jaix 본체 업데이트는 Windows 설치본(jaix-setup)에서만 합니다. 여기서는 새 판을 받아 다시 설치하세요: "
-            f"https://github.com/{REPO}/releases/latest")
+            + RELEASES)
         return 1
     if current() is None:
         log(f"개발판(jaix {__version__})이라 본체 업데이트를 하지 않습니다.")
@@ -437,26 +341,19 @@ def cmd_self(args, log, fetch=None, download=None, popen=None, ask=None):
     if not state.get("newer"):
         log(f"jaix {__version__} — 최신입니다.")
         return 0
+    log(f"새 판 {state.get('latest')} 이 있습니다(지금 {__version__}).")
     if dry_run:
-        log(f"새 판 {state.get('latest')} 이 있습니다(지금 {__version__}). --dry-run 이라 받거나 설치하지 않습니다.")
+        log("--dry-run 이라 브라우저를 열지 않습니다.")
         return 0
-    log(f"새 판 {state.get('latest')} 이 있습니다(지금 {__version__}). 설치기를 받는 중…")
-    if not fetch_installer(state, log, download):
-        log(f"받지 못했습니다: {state.get('error')}. 잠시 뒤 다시 하거나 "
-            f"https://github.com/{REPO}/releases/latest 에서 jaix-setup.exe 를 받아 실행하세요.")
-        return 1
     if not getattr(args, "yes", False):
         try:
-            note = open_windows_note().strip()
-            if note:
-                log(note)
-            answer = (ask or input)("지금 업데이트할까요? 설치기가 열리고 이 창의 jaix 는 끝납니다 [y/N] ")
+            answer = (ask or input)("브라우저로 새 판 설치기를 받을까요? [y/N] ")
         except (EOFError, KeyboardInterrupt):
             answer = ""
         if str(answer).strip().lower() not in ("y", "yes", "예", "ㅛ"):
             log("나중에 하기로 했습니다.")
             return 0
-    return 0 if launch(state, log, popen) else 1
+    return 0 if open_download(state, log, opener) else 1
 
 
 def doctor_status(check_now=True, fetch=None):
