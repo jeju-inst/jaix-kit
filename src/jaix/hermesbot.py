@@ -36,10 +36,18 @@ CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
 SLACKBOT_SHA = "d3511e93d15b3150668b08eb327f8d22b49c6115"  # hermes-slackbot#18: 소유자 DM 을 홈 채널로
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
+    # open: hermes 의 openai-codex 로그인은 device code 방식이라 브라우저를 스스로 열지 않는다(주소와 코드만 찍음,
+    # hermes_cli/auth_codex.py) → jaix 가 그 주소를 연다(jaix-win 11/5). anthropic 은 hermes 가 직접 연다
     "chatgpt": {"provider": "openai-codex", "default": "gpt-6.1-sol",
-                "base_url": "https://chatgpt.com/backend-api/codex", "login": ["auth", "add", "openai-codex"]},
+                "base_url": "https://chatgpt.com/backend-api/codex", "login": ["auth", "add", "openai-codex"],
+                "open": "https://auth.openai.com/codex/device",
+                "how": ["잠시 뒤 브라우저에 OpenAI 로그인 페이지가 열립니다. ChatGPT 계정으로 로그인한 뒤,",
+                        "이 창에 나오는 코드(예: ABCD-12345)를 그 페이지에 넣으세요."]},
     "claude": {"provider": "anthropic", "default": "claude-sonnet-5-5",
-               "login": ["auth", "add", "anthropic", "--type", "oauth"]},
+               "login": ["auth", "add", "anthropic", "--type", "oauth"],
+               "how": ["회사 Claude 계정(Team)으로 로그인하세요 — 개인 Claude Pro 구독은 Hermes 에서 동작하지 않습니다.",
+                       "브라우저에 Claude 승인 페이지가 열립니다(안 열리면 이 창에 나온 주소를 복사해 브라우저에 붙여 넣으세요).",
+                       "승인하면 나오는 코드를 복사해 이 창에 붙여 넣고 Enter 를 누르세요."]},
 }
 OFF_TOOLSETS = ["browser", "computer_use"]
 # 비개발자에게 소음·혼선이면 설치 때 막는다(jaix-kit-dev 10-30, jaix-win 2차 실측 관찰)
@@ -80,8 +88,9 @@ def code_key(code):
     return hashlib.sha256(code.encode("ascii")).hexdigest()
 
 
-def slack_call(method, token, timeout=20):
-    req = urllib.request.Request(f"https://slack.com/api/{method}", data=b"",
+def slack_call(method, token, timeout=20, **params):
+    import urllib.parse
+    req = urllib.request.Request(f"https://slack.com/api/{method}", data=urllib.parse.urlencode(params).encode("ascii"),
                                  headers={"Authorization": f"Bearer {token}",
                                           "Content-Type": "application/x-www-form-urlencoded"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -368,6 +377,57 @@ def cmd_approvals(args, log):
     return 0
 
 
+# hermes-slackbot make_manifest.ID_RE 와 같다(슬랙 슬래시 명령: 소문자, "/hermes-" 포함 32자 이하)
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,20}$")
+
+
+def slash_command(ident):
+    return f"hermes-{ident}"
+
+
+def cmd_rename(args, log):
+    """관리자가 슬랙 앱을 Hermes-<새 아이디>로 바꾼 뒤(hermes-slackbot provision_app.py rename), 이 PC 쪽을 맞춘다:
+    HERMES_SLACK_SLASH → hermes-<새 아이디>, gateway 재시작, 연결 기록 갱신. 토큰·앱은 그대로다."""
+    new = (args.id or "").strip().lower().removeprefix("hermes-")
+    if not ID_RE.match(new):
+        log(f"아이디 '{args.id}' 는 쓸 수 없습니다 — 소문자·숫자·-·_ 로 21자 이하(AI센터가 알려 준 새 아이디 그대로)")
+        return 2
+    rec = recorded()
+    slack = rec.get("slack") or {}
+    old = slack.get("id")
+    if rec.get("status") != "connected" or not old:
+        log("이 PC의 Hermes 는 jaix 로 슬랙에 연결된 기록이 없습니다. 먼저 jaix-setup 으로 연결하세요.")
+        return 1
+    hermes = find_hermes()
+    if not hermes:
+        log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
+        return 1
+    want = slash_command(new)
+    if old == new and env_value("HERMES_SLACK_SLASH") == want:
+        log(f"이미 Hermes-{new} (/{want}) 입니다. 바꿀 것이 없습니다.")
+        return 0
+    if args.dry_run:
+        log(f"(예정) Hermes-{old} → Hermes-{new}: HERMES_SLACK_SLASH={want}, gateway 재시작, 연결 기록 갱신")
+        return 0
+    # UPPER_SNAKE 키는 hermes 가 .env 에 쓴다(공식 경로 — setup_pc·install.py 와 같은 값)
+    ok, _ = _run([hermes, "config", "set", "HERMES_SLACK_SLASH", want], log)
+    if not ok:
+        log("슬래시 명령을 바꾸지 못했습니다(위 기록). 아무것도 바꾸지 않았습니다.")
+        return 1
+    if old != new:
+        slack = dict(slack, id=new, renamed_from=old,
+                     renamed=datetime.datetime.now().isoformat(timespec="seconds"))
+        rec["slack"] = slack
+        _save_record(rec)
+    log(f"슬래시 명령: /{want} (Hermes-{old} → Hermes-{new})")
+    ok, _ = _run([hermes, "gateway", "restart"], log, timeout=180)
+    if not ok:
+        log("gateway 를 다시 시작하지 못했습니다. 새 명령창에서 `hermes gateway restart` 를 실행하세요.")
+        return 1
+    log(f"gateway 다시 시작함. 슬랙에서 /{want} help 를 쳐 보세요(DM 은 그대로 됩니다).")
+    return 0
+
+
 def show_console():
     """jaix.exe 는 hide_console="hide-early"(installer/jaix.spec)로 빌드돼, 설치기가 띄워 콘솔을 혼자 가지면 창이
     숨는다. 로그인은 기기 코드를 읽고 붙여 넣어야 하므로 다시 보이게 한다(Codex #86 P1). Windows 외·콘솔 없음은 그대로."""
@@ -401,6 +461,120 @@ def _call_login(cmd):
 
 
 CANCELLED = 130
+ALREADY = 3  # 이미 로그인돼 있어 다시 하지 않음(설치기 페이지가 '이미 로그인됨'으로 보인다)
+
+
+def _strip_ansi(text):
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
+
+# hermes_cli/auth_codex.py 의 기기 코드 안내: "2. Enter this code:\n     <코드>"
+# 코드 뒤에 공백·줄바꿈이 와야 받는다 — 파이프가 코드 중간에서 끊겨 오면 앞부분만 복사하게 된다(Codex #109)
+DEVICE_CODE = re.compile(r"Enter this code:\s*([A-Z0-9]{4,}-[A-Z0-9]{4,})(?=\s)")
+
+
+# hermes_cli/auth_commands.py _warn_same_codex_account 의 영문 경고
+SAME_ACCOUNT_WARNING = re.compile(r"same OpenAI account as openai-codex credential|keep just one", re.I)
+
+
+def _call_login_tee(cmd, on_text):
+    """chatgpt(기기 코드) 로그인만: 출력을 파이프로 받아 그대로 창에 쓰며 on_text 로 넘긴다(코드를 클립보드에).
+    표준 입력은 그대로 물려준다. 파이프면 Python 이 출력을 모아 두므로 PYTHONUNBUFFERED, 색 코드는 지우고 쓴다."""
+    import codecs
+    import sys
+    env = {**_child_env(), "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+    p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    dec = codecs.getincrementaldecoder("utf-8")("replace")
+    try:
+        while True:
+            chunk = p.stdout.read1(4096)
+            if not chunk:
+                break
+            text = _strip_ansi(dec.decode(chunk))
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            on_text(text)
+        return p.wait()
+    except KeyboardInterrupt:
+        try:
+            p.wait(timeout=10)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            p.kill()
+        return CANCELLED
+
+
+def _copy_clipboard(text):
+    if not IS_WIN:
+        return False
+    try:
+        return subprocess.run(["clip"], input=text.encode("ascii", "ignore"), creationflags=paths.NO_WINDOW,
+                              timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _auth(hermes, args, timeout=60):
+    """hermes auth 공식 명령(list·remove)을 창 없이. (종료 코드, 출력)."""
+    try:
+        r = subprocess.run([hermes, "auth", *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           stdin=subprocess.DEVNULL, env=_child_env(), creationflags=paths.NO_WINDOW, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, str(e)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+# `hermes auth list <provider>` 의 줄: "  #1  <label>   oauth   id=<id> priority=0 <source>..."
+CRED_ROW = re.compile(r"^\s*#(\d+)\s+(.+?)\s+(\S+)\s+id=(\S+)\s+priority=(-?\d+)")
+
+
+def credentials(hermes, provider, auth=None):
+    """provider 의 자격 목록 [{index, label, id}]. 목록을 못 읽으면 None(모름 — 정리하지 않는다)."""
+    code, out = (auth or (lambda a: _auth(hermes, a)))(["list", provider])
+    if code != 0:
+        return None
+    rows = []
+    for line in out.splitlines():
+        m = CRED_ROW.match(line)
+        if m:
+            rows.append({"index": int(m.group(1)), "label": m.group(2).strip(), "id": m.group(4)})
+    return rows
+
+
+def prune_credentials(hermes, provider, old_ids, log, auth=None, warned=False):
+    """새로 로그인한 뒤 같은 provider 의 예전 자격을 지운다(공식 `hermes auth remove`, id 로). 새 자격이 목록에
+    있을 때만 한다 — 같은 OpenAI 계정이면 예전 것은 OpenAI 가 이미 폐기했고, Hermes 가 그것을 고르면 봇이 실패한다."""
+    run = auth or (lambda a: _auth(hermes, a))
+    after = credentials(hermes, provider, run)
+    if not after or not old_ids:
+        return 0
+    if not [c for c in after if c["id"] not in old_ids]:
+        log("  (새 자격을 목록에서 찾지 못해 예전 자격은 그대로 둡니다)")
+        return 0
+    removed = 0
+    for c in after:
+        if c["id"] in old_ids:
+            code, out = run(["remove", provider, c["id"]])
+            if code == 0:
+                removed += 1
+            else:
+                log(f"  예전 자격 #{c['index']} 정리 실패(새 자격은 그대로): {out.strip().splitlines()[-1:] or ''}")
+    if removed and warned:  # Hermes 의 영문 경고가 'hermes auth remove …' 를 치라고 한다 — 연구원이 따라 치지 않게
+        log(f"  ↑ 위 영문 경고(warning: … keep just one / hermes auth remove …)는 신경 쓰지 마세요 — "
+            f"jaix 가 예전 {provider} 자격 {removed}개를 정리했습니다(새로 로그인한 것만 남김).")
+    elif removed:
+        log(f"  예전 {provider} 자격 {removed}개를 정리했습니다(새로 로그인한 것만 남김).")
+    return removed
+
+
+def duplicate_credentials():
+    """doctor 용: 기록된 모델의 provider 자격이 둘 이상이면 (provider, 개수, 모델), 아니면 None."""
+    hermes = find_hermes()
+    if not hermes:
+        return None
+    model = recorded().get("model") or "chatgpt"
+    provider = PROVIDERS.get(model, PROVIDERS["chatgpt"])["provider"]
+    rows = credentials(hermes, provider)
+    return (provider, len(rows), model) if rows and len(rows) > 1 else None
 
 
 def _login_record(model, code):
@@ -414,10 +588,45 @@ def _login_record(model, code):
         pass
 
 
-def cmd_login(args, log, run=None, wait=None):
-    """AI 구독 로그인 창: 설치기 마지막 화면이 이것을 연다(설치기가 cmd.exe 를 직접 띄우지 않게, #86).
-    hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다. 성공·실패·취소 모두
-    결과를 보이고 Enter 를 기다린다(Windows)."""
+OPEN_DELAY = 3  # 기기 코드가 창에 찍힌 뒤에 브라우저가 앞으로 오게
+CLOSE_AFTER = {0: 5, ALREADY: 5}  # --no-wait(설치기 페이지): 결과를 읽을 틈. 성공·이미 로그인 5초, 그 밖 15초
+CLOSE_AFTER_OTHER = 15
+
+
+def _open_url(url):
+    try:
+        if IS_WIN:
+            os.startfile(url)  # 기본 브라우저
+            return True
+        import webbrowser
+        return bool(webbrowser.open(url))
+    except OSError:
+        return False
+
+
+def _pause(seconds, log):
+    """Enter 를 누르거나 seconds 가 지나면 돌아온다(Windows 콘솔). 설치기 페이지가 결과를 다시 보여 주지만, 승인 직후
+    창이 바로 닫혀 무슨 일이 있었는지 못 봤다(jaix-win 11/5)."""
+    log(f"이 창은 {seconds}초 뒤 저절로 닫힙니다(Enter 를 누르면 바로).")
+    try:
+        import msvcrt
+    except ImportError:
+        return
+    import time
+    end = time.monotonic() + seconds
+    try:
+        while time.monotonic() < end:
+            if msvcrt.kbhit() and msvcrt.getwch() in ("\r", "\n"):
+                return
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+
+
+def cmd_login(args, log, run=None, wait=None, opener=None, pause=None, auth=None, ask=None, copy=None):
+    """AI 구독 로그인 창: 설치기 'AI 구독 로그인' 페이지·시작 메뉴가 이것을 연다(설치기가 cmd.exe 를 직접 띄우지
+    않게, #86). hermes 의 로그인은 브라우저 승인과 붙여넣기를 받으므로 이 콘솔을 그대로 물려준다. 성공·실패·취소
+    모두 결과를 보이고, Enter 를 기다리거나(Windows) --no-wait 면 몇 초 보인 뒤 닫는다."""
     show_console()  # 숨은 창이면 안내·기기 코드·Enter 대기를 아무도 못 본다 — 무엇보다 먼저
     again = f"jaix hermes login --model {args.model}"
     hermes = find_hermes()
@@ -425,22 +634,78 @@ def cmd_login(args, log, run=None, wait=None):
         log("Hermes 가 없습니다. jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
         code = 1
     else:
-        log(f"Hermes AI 로그인 ({args.model}) — 브라우저가 열리면 승인하세요.")
+        prov = PROVIDERS[args.model]
+        before = credentials(hermes, prov["provider"], auth)
+        code = None
+        if before and not getattr(args, "force", False):
+            who = ", ".join(c["label"] for c in before)
+            if getattr(args, "no_wait", False):  # 설치기 페이지: 묻지 않고 건너뜀(한 번 더 누르면 --force)
+                log(f"이미 로그인돼 있습니다({who}). 다시 로그인하려면 [다시 로그인]을 한 번 더 누르세요.")
+                code = ALREADY
+            else:
+                try:
+                    answer = (ask or input)(f"이미 로그인돼 있습니다({who}). 다시 로그인할까요? [y/N] ")
+                except (EOFError, KeyboardInterrupt):
+                    answer = ""
+                if str(answer).strip().lower() not in ("y", "yes", "예", "ㅛ"):
+                    log("그대로 둡니다.")
+                    code = ALREADY
+    if hermes and code is None:
+        log(f"Hermes AI 로그인 ({args.model})")
+        for line in prov.get("how", []):
+            log(f"  {line}")
         log("승인을 기다리는 동안에는 키를 눌러도 반응이 없습니다. 그만두려면 Ctrl+C.")
+        log("")
+        timer = None
+        if prov.get("open"):
+            import threading
+
+            def _open(url=prov["open"]):
+                if not (opener or _open_url)(url):
+                    log(f"\n브라우저를 열지 못했습니다. 브라우저 주소창에 {url} 을 붙여 넣고, 이 창의 코드를 넣으세요.")
+            timer = threading.Timer(OPEN_DELAY, _open)
+            timer.daemon = True
+            timer.start()
+        seen = {"buf": "", "copied": False, "warned": False}
+
+        def on_text(text):  # 기기 코드를 클립보드에(chatgpt 만 — anthropic 은 붙여넣기 입력을 받으니 파이프로 바꾸지 않는다)
+            seen["buf"] = (seen["buf"] + text)[-600:]
+            if SAME_ACCOUNT_WARNING.search(seen["buf"]):
+                seen["warned"] = True
+            if seen["copied"]:
+                return
+            m = DEVICE_CODE.search(seen["buf"])
+            if m:
+                seen["copied"] = True
+                if (copy or _copy_clipboard)(m.group(1)):
+                    log(f"\n  ▶ 코드 {m.group(1)} 를 복사해 두었습니다 — 브라우저 입력칸에서 Ctrl+V\n")
         try:
-            code = (run or _call_login)([hermes, *PROVIDERS[args.model]["login"]])
+            if run:
+                code = run([hermes, *prov["login"]])
+            elif prov.get("open"):
+                code = _call_login_tee([hermes, *prov["login"]], on_text)
+            else:
+                code = _call_login([hermes, *prov["login"]])
         except OSError as e:
             log(f"로그인을 시작하지 못함: {e}")
             code = 1
+        finally:
+            if timer:
+                timer.cancel()  # 곧바로 끝났으면(오류) 브라우저를 열지 않는다
+        log("")
         if code == 0:
-            log("로그인했습니다.")
+            log("로그인 완료.")
+            if before:
+                prune_credentials(hermes, prov["provider"], {c["id"] for c in before}, log, auth, warned=seen["warned"])
         elif code == CANCELLED:
             log(f"로그인을 취소했습니다. 나중에 새 명령창에서 `{again}` 로 다시 하세요.")
         else:
             log(f"로그인이 끝나지 않았습니다(코드 {code}). 새 명령창에서 `{again}` 로 다시 하세요.")
         _login_record(args.model, code)
-    if IS_WIN and not getattr(args, "no_wait", False):
-        try:  # 설치기가 띄운 창은 끝나면 바로 닫힌다 — 결과를 읽을 틈을 준다
+    if IS_WIN and getattr(args, "no_wait", False):  # 설치기 페이지: 결과를 잠깐 보이고 닫혀 페이지로 돌아간다
+        (pause or _pause)(CLOSE_AFTER.get(code, CLOSE_AFTER_OTHER), log)
+    elif IS_WIN:
+        try:  # 시작 메뉴로 연 창은 끝나면 바로 닫힌다 — 결과를 읽을 틈을 준다
             (wait or input)("창을 닫으려면 Enter 를 누르세요.")
         except (EOFError, KeyboardInterrupt):
             pass
@@ -492,6 +757,16 @@ def quiet(hermes, log):
         ok &= put("skills.disabled", value, ["config", "set", "skills.disabled", value])
         owned["skills"] = off
         log(f"    기본 스킬 {len(off)}개 끔(jaix 스킬만 켬)")
+    # 첫 DM 답 앞의 "No home channel is set for Slack … /hermes sethome" 안내를 없앤다(jaix-win 11/5). 처음 연결 때
+    # setup_pc.py 가 넣지만, 그보다 먼저 연결된 PC 는 다시 설치해도 연결을 건너뛰어 비어 있다. 이미 있으면(사용자가
+    # /sethome 으로 고른 것 포함) 건드리지 않는다. 공식 경로: `hermes config set SLACK_HOME_CHANNEL …` 은 .env 에 쓴다
+    if env_has("SLACK_ALLOWED_USERS") and not env_has("SLACK_HOME_CHANNEL"):
+        home = home_channel()
+        if home:
+            # 지금 .env 에 없다는 것을 방금 확인했다 — 지난번에 넣은 값 기록(config.yaml 지문만 봄)으로 건너뛰지 않는다(Codex #111)
+            put.applied.pop("SLACK_HOME_CHANNEL", None)
+            ok &= put("SLACK_HOME_CHANNEL", home, ["config", "set", "SLACK_HOME_CHANNEL", home])
+            log("    슬랙 홈 채널: 본인과의 DM 으로 정함(첫 답의 'No home channel' 안내 없앰)")
     put.save()
     rec = recorded()
     rec["quiet"] = owned
@@ -643,6 +918,35 @@ def startup_entries():
         return []
     d = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
     return sorted(d.glob("Hermes_Gateway*.vbs")) if d.is_dir() else []
+
+
+def env_value(key):
+    """Hermes .env 의 값(없으면 None). 토큰을 읽을 때도 쓰므로 값을 기록하지 않는다."""
+    try:
+        lines = (paths.hermes_home() / ".env").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        if "=" in line and line.split("=", 1)[0].strip() == key:
+            return line.split("=", 1)[1].strip().strip('"').strip("'") or None
+    return None
+
+
+def home_channel(call=None):
+    """SLACK_HOME_CHANNEL 로 쓸 값: 봇과 소유자의 DM(D…, conversations.open — setup_pc.py 와 같다). Slack 이 거절하면
+    (im:write 없음·오프라인) 소유자 멤버 ID(U…) — chat.postMessage 는 U… 를 그 사람과의 DM 으로 보낸다."""
+    user = (env_value("SLACK_ALLOWED_USERS") or "").split(",")[0].strip()
+    if not user:
+        return None
+    token = env_value("SLACK_BOT_TOKEN")
+    if token:
+        try:
+            r = (call or slack_call)("conversations.open", token, users=user)
+            if r.get("ok") and (r.get("channel") or {}).get("id"):
+                return r["channel"]["id"]
+        except (OSError, ValueError):
+            pass
+    return user
 
 
 def env_has(key):

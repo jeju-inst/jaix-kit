@@ -3,15 +3,18 @@ import dataclasses
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, runtimes, schedule, uvpython, winenv
+from jaix import claude, cli, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, runtimes, schedule, uvpython, winenv
 
 REAL_HWPJAR = {}
+REAL_CLIS = {}
 REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_UV_ENSURE = uvpython.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_GW_FOREIGN = gw.foreign  # isolated 픽스처가 막기 전의 진짜 함수
@@ -20,10 +23,30 @@ LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplac
 
 REAL_HERMES_SETUP = hermesbot.setup
 REAL_PLUGBIN_ENSURE = plugbin.ensure
+REAL_REMOVE_USER_ENV_UNDER = winenv.remove_user_env_under
+
+def _guard_real_hermes(tmp_path, monkeypatch):
+    """시험이 이 PC의 진짜 hermes 를 부르지 못하게 한다. HERMES_HOME 만 tmp 로 돌린 채 진짜 hermes 가 돌면, Hermes 가
+    자기 설치 폴더의 런처(~/.hermes/hermes-agent/.hermes/bin/hermes)를 tmp 의 파이썬으로 다시 써서 그 PC 의 hermes 가
+    깨진다(studio 11/5: find_hermes 를 "hermes" 로 둔 doctor 시험이 `hermes auth list` 를 PATH 의 진짜 것으로 불렀다)."""
+    real_popen = subprocess.Popen
+    tmp = os.path.normcase(os.path.realpath(tmp_path))
+
+    class GuardedPopen(real_popen):
+        def __init__(self, args, *a, **kw):
+            exe = args[0] if isinstance(args, (list, tuple)) and args else None
+            if exe and Path(str(exe)).stem.lower() in ("hermes", "hermes-acp"):
+                where = shutil.which(str(exe))
+                if where and not os.path.normcase(os.path.realpath(where)).startswith(tmp):
+                    raise AssertionError(f"시험이 진짜 hermes 를 부름: {where} {list(args)[1:3]}")
+            super().__init__(args, *a, **kw)
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """실제 사용자 설정을 건드리지 않게 모든 경로를 tmp로."""
+    _guard_real_hermes(tmp_path, monkeypatch)
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "JAIX_DATA", "HERMES_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
@@ -36,12 +59,20 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(hwpjar, "ensure", lambda lock, log, dry_run=False, offline=False: True)
     monkeypatch.setattr(hwpjar, "dest", lambda: tmp_path / "hwp-agent" / "hwp2hwpx.jar")
     monkeypatch.setattr(hwprhwp, "ensure", lambda lock, log, dry_run=False, offline=False: True)
+    # 사용자 환경변수(HKCU)는 진짜로 쓰지 않는다(Windows 러너)
+    monkeypatch.setattr(winenv, "set_user_env", lambda name, value: False)
+    monkeypatch.setattr(winenv, "remove_user_env_under", lambda name, prefix: False)
     # 플러그인 bin 명령: 소스를 진짜로 받지 않고, 링크는 tmp 에(시험은 REAL_PLUGBIN_ENSURE 를 부른다)
     monkeypatch.setattr(plugbin, "ensure", lambda lock, log, dry_run=False, offline=False:
                         {"status": "ok", "commands": [], "failed": []})
     monkeypatch.setenv("JAIX_LINK_DIR", str(tmp_path / "linkbin"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # 한컴 옵션 파일도 tmp 로
     monkeypatch.setattr(paths, "desktop_installed", lambda: False)
+    # 새 창의 PATH(레지스트리)는 이 시험의 PATH 로 — Windows 러너의 진짜 uv·git 을 잡지 않게
+    monkeypatch.setattr(winenv, "fresh_path", lambda: os.environ.get("PATH", ""))
+    # 명령창 claude·codex 를 진짜로 받지 않는다(clis 시험은 test_clis.py)
+    REAL_CLIS["ensure"] = REAL_CLIS.get("ensure", clis.ensure)
+    monkeypatch.setattr(clis, "ensure", lambda name, log, dry_run=False, installer=None: {"status": "present", "path": name})
     # 예약 작업은 진짜로 등록하지 않는다(맥이면 launchctl이 시험 중에 update를 돌린다)
     monkeypatch.setenv("JAIX_LAUNCH_AGENTS", str(tmp_path / "LaunchAgents"))
     monkeypatch.setattr(schedule, "_run", lambda args: (True, ""))
@@ -470,6 +501,12 @@ def test_doctor_fails_when_plugins_missing(isolated, monkeypatch, the_lock):
     assert c.status == "fail" and f"{len(the_lock.plugins)}/{len(the_lock.plugins)}" in c.message
     assert "Code 탭" in c.fix
     monkeypatch.setattr(paths, "desktop_installed", lambda: True)
+    cowork = {c.area: c for c in doctor.check_claude(the_lock)}["Claude 데스크톱·Cowork"]
+    # 관리자 배포 없음(개인 구독 계정): 직접 추가 안내. 있으면 관리자 배포 대상으로 생략
+    assert cowork.status == "info" and "Add → Add marketplace → Add from a repository → jeju-inst/jaix-kit → Sync" in cowork.message
+    assert "GitHub 앱 접근 허용" in cowork.message and "메일 제외" in cowork.message
+    assert doctor.render([cowork]).startswith("[안내] Claude 데스크톱·Cowork:")
+    monkeypatch.setattr(claude, "managed_declaration", lambda: "remote-settings.json")
     assert {c.area: c for c in doctor.check_claude(the_lock)}["Claude 데스크톱·Cowork"].status == "skip"
 
 
@@ -1284,6 +1321,8 @@ def _fake_windows(monkeypatch, isolated, calls):
     monkeypatch.setattr(hermesbot, "IS_WIN", True)
     monkeypatch.setattr(hermesbot, "install_hermes", lambda log, dry_run=False: True)
     monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    # 자격 목록(hermes auth list)은 _run 을 거치지 않는다 — 가짜로 막지 않으면 PATH 의 진짜 hermes 가 돈다
+    monkeypatch.setattr(hermesbot, "_auth", lambda hermes, args, timeout=60: (0, ""))
     monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
     monkeypatch.setattr(hermes, "install", lambda lock, log, dry_run=False: [])
 
@@ -1726,7 +1765,7 @@ def test_hermes_approval_mode_read_and_doctor_warns_off(isolated, monkeypatch):
     cfg.write_text("model:\n  mode: x\napprovals:\n  timeout: 60\n  mode: off\nother: 1\n", encoding="utf-8")
     assert hermesbot.approval_mode() == "off"
     hermesbot._save_record({"status": "connected", "slack": {"id": "a", "connected": "t"}})
-    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")  # 진짜 hermes 를 부르지 않게
     monkeypatch.setattr(hermesbot, "env_has", lambda k: True)
     monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
     assert [c.status for c in doctor.check_hermes_bot()] == ["ok", "warn"]
@@ -1906,13 +1945,81 @@ def test_hermes_login_ctrl_c_keeps_window_and_records(isolated, monkeypatch):
         def kill(self):
             raise AssertionError("자식이 스스로 끝났으면 죽이지 않는다")
 
+    monkeypatch.setattr(hermesbot, "credentials", lambda *a, **k: [])  # 자격 목록(hermes auth list)은 이 시험 밖
     monkeypatch.setattr(hermesbot.subprocess, "Popen", Child)
     seen, waited = [], []
-    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False), seen.append, wait=waited.append)
+    rc = hermesbot.cmd_login(argparse.Namespace(model="claude", no_wait=False), seen.append, wait=waited.append)
     assert rc == hermesbot.CANCELLED and Child.waits == 2 and waited
-    assert any("취소" in m and "jaix hermes login --model chatgpt" in m for m in seen)
+    assert any("취소" in m and "jaix hermes login --model claude" in m for m in seen)
     rec = (paths.data_dir() / "hermes-login.log").read_text(encoding="utf-8")
-    assert "model=chatgpt code=130" in rec
+    assert "model=claude code=130" in rec
+
+
+def test_hermes_login_tee_ctrl_c_is_cancel(monkeypatch):
+    """chatgpt(기기 코드)는 출력을 파이프로 읽는다 — 읽는 중 Ctrl+C 도 '취소'(130)."""
+    class Out:
+        def read1(self, n):
+            raise KeyboardInterrupt
+
+    class Child:
+        def __init__(self, cmd, env=None, stdout=None, stderr=None):
+            self.stdout = Out()
+            assert env.get("PYTHONUNBUFFERED") == "1"
+
+        def wait(self, timeout=None):
+            return 1
+
+        def kill(self):
+            raise AssertionError("스스로 끝났으면 죽이지 않는다")
+    monkeypatch.setattr(hermesbot.subprocess, "Popen", Child)
+    assert hermesbot._call_login_tee(["/x/hermes"], lambda t: None) == hermesbot.CANCELLED
+
+
+def test_hermes_login_opens_device_page_and_shows_result_before_closing(isolated, monkeypatch):
+    """jaix-win 11/5: ① device code 방식이라 브라우저가 안 열림 → jaix 가 연다 ② 승인하자 창이 바로 닫힘 → 몇 초 보임."""
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 0)
+    import threading
+    import time as _t
+    opened, paused, seen = [], [], []
+    done = threading.Event()
+
+    def run(cmd):  # 로그인이 도는 동안 타이머가 브라우저를 연다
+        done.wait(2)
+        _t.sleep(0.05)  # 타이머가 안내 줄을 다 쓸 틈
+        return 0
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), seen.append, run=run,
+                             opener=lambda url: opened.append(url) or done.set() or True,
+                             pause=lambda sec, log: paused.append(sec),
+                             wait=lambda q: pytest.fail("--no-wait 는 Enter 를 기다리지 않는다"))
+    assert rc == 0 and opened == ["https://auth.openai.com/codex/device"] and paused == [5]
+    assert any("로그인 완료" in m for m in seen) and any("코드" in m for m in seen)
+    # 브라우저를 못 열면 주소를 붙여 넣으라고 안내
+    seen.clear()
+    done.clear()
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), seen.append, run=run,
+                        opener=lambda url: done.set() or False, pause=lambda sec, log: paused.append(sec))
+    assert any("https://auth.openai.com/codex/device" in m and "붙여 넣" in m for m in seen)
+    # 실패는 더 오래 보인다. claude 는 hermes 가 브라우저를 직접 연다 — jaix 는 열지 않는다
+    opened.clear()
+    hermesbot.cmd_login(argparse.Namespace(model="claude", no_wait=True), seen.append, run=lambda cmd: 1,
+                        opener=opened.append, pause=lambda sec, log: paused.append(sec))
+    _t.sleep(0.05)
+    assert not opened and paused[-1] == hermesbot.CLOSE_AFTER_OTHER
+
+
+def test_hermes_login_quick_failure_does_not_open_browser(isolated, monkeypatch):
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 0.3)
+    opened = []
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), lambda m="": None, run=lambda cmd: 2,
+                        opener=opened.append, pause=lambda sec, log: None)
+    import time as _t
+    _t.sleep(0.5)
+    assert not opened
 
 
 # --- 설치본 로그온 자동 갱신 = 설치기가 둔 시작프로그램 바로가기 (Defender Persistence.A!ml, jaix-win 11/4) ----------
@@ -2159,3 +2266,760 @@ def test_hermes_skills_use_shared_fetch(isolated, monkeypatch, the_lock):
     _fake_plugin_source(monkeypatch)
     p = _lock_with_mail_skill(the_lock).plugins[-1]
     assert [d.name for d in hermes.plugin_skills(p, isolated / "w")] == ["mail-skill"]
+
+
+# --- own_copy 런타임(hwp2pdf-cli 두 벌) -----------------------------------------------------------------
+def _fake_cli(folder, version):
+    """--version 에 version 을 찍는 가짜 hwp2pdf-cli. Windows 는 .cmd 심(TS-TEST-3)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        f = folder / "hwp2pdf-cli.cmd"
+        f.write_text(f"@echo hwp2pdf {version}\r\n", encoding="utf-8")
+    else:
+        f = folder / "hwp2pdf-cli"
+        f.write_text(f"#!/bin/sh\necho hwp2pdf {version}\n", encoding="utf-8")
+        f.chmod(0o755)
+    return f
+
+
+def test_own_copy_installs_jaix_copy_beside_foreign_and_exports_env(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    foreign = isolated / "ProgramFiles" / "hwp2pdf"
+    _fake_cli(foreign, "2026.9.28.1")
+    monkeypatch.setenv("PATH", str(foreign))  # 러너의 실제 PATH 는 섞지 않는다
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    installed, env = [], {}
+    monkeypatch.setattr(runtimes, "install_portable",
+                        lambda r, log: (installed.append(r.key), _fake_cli(r.path_dir(), "2026.11.5.1"))[1].parent)
+    monkeypatch.setattr(winenv, "set_user_env", lambda name, value: env.update({name: value}) or True)
+    msgs = []
+    found = runtimes.ensure(rt, msgs.append)
+    assert installed == ["hwp2pdf"]  # 밖의 사본이 쓸 만해도 jaix 사본을 깐다
+    assert found.managed and found.version == "2026.11.5.1"
+    assert env == {"HWP2PDF_CLI": found.path}
+    assert any("jaix 밖의 사본" in m for m in msgs)
+    assert [f.name for f in foreign.iterdir()] == ["hwp2pdf-cli.cmd" if os.name == "nt" else "hwp2pdf-cli"]  # 밖의 사본은 그대로
+    # 다음 번: jaix 사본이 있으면 다시 깔지 않고 env 만 맞춘다
+    installed.clear()
+    runtimes.ensure(rt, msgs.append)
+    assert installed == []
+
+
+def test_doctor_warns_two_copies_and_env(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    foreign = isolated / "ProgramFiles" / "hwp2pdf"
+    _fake_cli(foreign, "2026.9.28.1")
+    mine = _fake_cli(rt.path_dir(), "2026.11.5.1")
+    monkeypatch.setenv("PATH", str(foreign))  # 러너의 실제 PATH 는 섞지 않는다
+    monkeypatch.setattr(doctor, "IS_WIN", True)
+    found = runtimes.copies(rt)
+    assert [f.managed for f in found] == [False, True]  # 시스템 PATH 쪽이 먼저 잡힘
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: str(found[1].path))
+    checks = doctor.check_runtime_copies()
+    assert [c.area for c in checks] == ["hwp2pdf-cli 두 벌"]
+    assert "PATH에서 먼저 잡힘" in checks[0].message and "jaix 사본" in checks[0].message
+    assert "2026.9.28.1" in checks[0].message and "지우지 않음" in checks[0].fix
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: None)
+    areas = [c.area for c in doctor.check_runtime_copies()]
+    assert "hwp2pdf-cli 경로(HWP2PDF_CLI)" in areas
+    # 한 벌이면 조용
+    monkeypatch.setenv("PATH", str(isolated / "empty"))
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: str(mine))
+    assert [c for c in doctor.check_runtime_copies() if c.area.endswith("두 벌")] == []
+
+
+def test_cleanup_removes_env_only_when_it_points_into_jaix(isolated, monkeypatch):
+    removed = []
+    monkeypatch.setattr(winenv, "remove_user_env_under", lambda name, prefix: removed.append((name, prefix)) or True)
+    msgs = []
+    assert cli.cmd_cleanup(None, msgs.append) == 0
+    assert sorted(removed) == [("CLAUDE_CODE_GIT_BASH_PATH", paths.jaix_home()), ("HWP2PDF_CLI", paths.jaix_home())]
+    assert "환경변수 뺌: HWP2PDF_CLI" in msgs and "환경변수 뺌: CLAUDE_CODE_GIT_BASH_PATH" in msgs
+
+
+def test_remove_user_env_under_keeps_user_value(monkeypatch, tmp_path):
+    store = {"HWP2PDF_CLI": r"C:\\Program Files\\hwp2pdf\\hwp2pdf-cli.exe"}
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: store.get(name))
+    assert not REAL_REMOVE_USER_ENV_UNDER("HWP2PDF_CLI", tmp_path)  # 사용자가 바꾼 값은 둔다
+
+
+# --- Hermes 자격 누적(jaix-win v11.05.8: 설치기 2회+시작 메뉴 1회로 openai-codex 자격 #4) ----------------------------
+CRED_LIST = """openai-codex (2 credentials):
+  #1  a@ex.com             oauth   id=aaa111 priority=0 device_code ←
+  #2  a@ex.com             oauth   id=bbb222 priority=1 manual:device_code
+"""
+
+
+class FakeAuth:
+    def __init__(self, listing):
+        self.listing, self.calls = listing, []
+
+    def __call__(self, args):
+        self.calls.append(args)
+        if args[0] == "list":
+            return 0, self.listing
+        if args[0] == "remove":
+            return 0, f"Removed {args[1]} credential"
+        return 1, ""
+
+
+def _login_env(monkeypatch):
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 60)
+
+
+def test_credentials_parse_hermes_auth_list():
+    rows = hermesbot.credentials("/x/hermes", "openai-codex", FakeAuth(CRED_LIST))
+    assert [(r["index"], r["label"], r["id"]) for r in rows] == [(1, "a@ex.com", "aaa111"), (2, "a@ex.com", "bbb222")]
+    assert hermesbot.credentials("/x/hermes", "openai-codex", lambda a: (1, "boom")) is None
+    assert hermesbot.credentials("/x/hermes", "anthropic", FakeAuth("")) == []
+
+
+def test_login_when_already_logged_in(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    auth = FakeAuth(CRED_LIST)
+    seen, runs = [], []
+    # 설치기 페이지(--no-wait): 묻지 않고 건너뜀
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=False), seen.append,
+                             run=lambda cmd: runs.append(cmd) or 0, auth=auth, pause=lambda s, log: None)
+    assert rc == hermesbot.ALREADY and not runs and any("이미 로그인" in m for m in seen)
+    # 시작 메뉴: 묻고, N 이면 그대로
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=False), seen.append,
+                             run=lambda cmd: runs.append(cmd) or 0, auth=auth, ask=lambda q: "", wait=lambda q: None)
+    assert rc == hermesbot.ALREADY and not runs
+    assert not [c for c in auth.calls if c[0] == "remove"]
+
+
+def test_relogin_prunes_old_credentials_keeps_new(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    auth = FakeAuth(CRED_LIST)
+
+    def run(cmd):  # 로그인하면 새 자격 #3 이 생긴다
+        auth.listing = CRED_LIST.replace("(2 credentials)", "(3 credentials)") + \
+            "  #3  a@ex.com             oauth   id=ccc333 priority=2 manual:device_code\n"
+        return 0
+    seen = []
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=False), seen.append,
+                             run=run, auth=auth, ask=lambda q: "y", wait=lambda q: None)
+    assert rc == 0
+    removed = [c for c in auth.calls if c[0] == "remove"]
+    assert removed == [["remove", "openai-codex", "aaa111"], ["remove", "openai-codex", "bbb222"]]
+    assert any("2개를 정리" in m for m in seen)
+
+
+def test_prune_skipped_when_new_credential_not_seen(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    auth = FakeAuth(CRED_LIST)  # 로그인 '성공'인데 새 자격이 안 보임 → 아무것도 지우지 않는다
+    rc = hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=True), lambda m="": None,
+                             run=lambda cmd: 0, auth=auth, wait=lambda q: None)
+    assert rc == 0 and not [c for c in auth.calls if c[0] == "remove"]
+
+
+def test_prune_failure_keeps_going(isolated, monkeypatch):
+    seen = []
+
+    class Failing(FakeAuth):
+        def __call__(self, args):
+            if args[0] == "remove":
+                self.calls.append(args)
+                return 1, "error: locked"
+            return super().__call__(args)
+    auth = Failing(CRED_LIST + "  #3  a@ex.com             oauth   id=ccc333 priority=2 manual:device_code\n")
+    assert hermesbot.prune_credentials("/x/hermes", "openai-codex", {"aaa111", "bbb222"}, seen.append, auth) == 0
+    assert any("정리 실패(새 자격은 그대로)" in m for m in seen)
+
+
+def test_device_code_copied_to_clipboard(isolated, monkeypatch):
+    _login_env(monkeypatch)
+    copied = []
+
+    def tee(cmd, on_text):  # hermes 출력이 조각나 와도 코드를 찾는다
+        for part in ["To continue, follow these steps:\n\n  1. Open this URL in your browser:\n",
+                     "     https://auth.openai.com/codex/device\n\n  2. Enter this ", "code:\n     0AR3-3DC",
+                     "KV\n\nWaiting for sign-in..."]:
+            on_text(part)
+        return 0
+    monkeypatch.setattr(hermesbot, "_call_login_tee", tee)
+    seen = []
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=True), seen.append,
+                        auth=FakeAuth(""), copy=lambda code: copied.append(code) or True, pause=lambda s, log: None)
+    assert copied == ["0AR3-3DCKV"] and any("Ctrl+V" in m for m in seen)
+    # 코드 둘째 마디가 4자 넘게 온 뒤 끊겨도 끝(줄바꿈)을 기다린다(Codex #109)
+    copied.clear()
+
+    def tee2(cmd, on_text):
+        for part in ["  2. Enter this code:\n     0AR3-3DCK", "V\n"]:
+            on_text(part)
+        return 0
+    monkeypatch.setattr(hermesbot, "_call_login_tee", tee2)
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True, force=True), seen.append,
+                        auth=FakeAuth(""), copy=lambda code: copied.append(code) or True, pause=lambda s, log: None)
+    assert copied == ["0AR3-3DCKV"]
+
+
+def test_claude_login_keeps_console_tty(isolated, monkeypatch):
+    """anthropic 은 붙여넣기 입력을 받는다 — 파이프(tee)로 바꾸지 않는다."""
+    _login_env(monkeypatch)
+    used = []
+    monkeypatch.setattr(hermesbot, "_call_login_tee", lambda cmd, on_text: used.append("tee") or 0)
+    monkeypatch.setattr(hermesbot, "_call_login", lambda cmd: used.append("tty") or 0)
+    hermesbot.cmd_login(argparse.Namespace(model="claude", no_wait=True, force=True), lambda m="": None,
+                        auth=FakeAuth(""), pause=lambda s, log: None)
+    assert used == ["tty"]
+
+
+def test_doctor_warns_duplicate_credentials(isolated, monkeypatch):
+    monkeypatch.setattr(hermesbot, "duplicate_credentials", lambda: ("openai-codex", 4, "chatgpt"))
+    monkeypatch.setattr(hermesbot, "recorded", lambda: {"status": "connected", "slack": {"id": "x"}})
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "env_has", lambda k: True)
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["x"])
+    monkeypatch.setattr(hermesbot, "approval_mode", lambda: "smart")
+    rows = [c for c in doctor.check_hermes_bot() if c.area == "Hermes 자격"]
+    assert rows and rows[0].status == "warn" and "4개" in rows[0].message and "--force" in rows[0].fix
+
+
+def test_installer_handles_already_logged_in():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    click = iss.split("procedure LoginButtonClick", 1)[1].split("\nend;", 1)[0]
+    assert "ResultCode = 3" in click and "이미 로그인돼 있습니다" in click and "' --force'" in click
+
+
+# --- 슬랙 홈 채널(jaix-win 11/5: 첫 DM 답 앞 "No home channel is set for Slack … /hermes sethome") ----------------
+def _hermes_env(text):
+    f = paths.hermes_home() / ".env"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text, encoding="utf-8")
+
+
+def test_quiet_sets_slack_home_to_owner_dm_when_missing(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_APP_TOKEN=xapp-x\nSLACK_ALLOWED_USERS=U123\n")
+    seen = []
+    monkeypatch.setattr(hermesbot, "slack_call",
+                        lambda method, token, **kw: seen.append((method, kw)) or {"ok": True, "channel": {"id": "D999"}})
+    assert hermesbot.quiet("hermes", print)
+    assert ["hermes", "config", "set", "SLACK_HOME_CHANNEL", "D999"] in calls
+    assert seen == [("conversations.open", {"users": "U123"})]
+    # .env 가 다시 만들어져 홈 채널이 빠지면(config.yaml 은 그대로) 다시 넣는다(Codex #111)
+    calls.clear()
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_APP_TOKEN=xapp-x\nSLACK_ALLOWED_USERS=U123\n")
+    assert hermesbot.quiet("hermes", print)
+    assert ["hermes", "config", "set", "SLACK_HOME_CHANNEL", "D999"] in calls
+
+
+def test_slack_home_falls_back_to_user_id_and_respects_existing(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-x\nSLACK_ALLOWED_USERS=U123\n")
+    monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: {"ok": False, "error": "missing_scope"})
+    assert hermesbot.quiet("hermes", print)
+    assert ["hermes", "config", "set", "SLACK_HOME_CHANNEL", "U123"] in calls
+    calls.clear()
+    _hermes_env("SLACK_ALLOWED_USERS=U123\nSLACK_HOME_CHANNEL=C777\n")  # 사용자가 /sethome 으로 고른 것
+    monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: pytest.fail("이미 있으면 묻지 않는다"))
+    assert hermesbot.quiet("hermes", print)
+    assert not [c for c in calls if "SLACK_HOME_CHANNEL" in c]
+
+
+def test_prune_points_at_hermes_english_warning(isolated, monkeypatch):
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 60)
+    auth = FakeAuth(CRED_LIST)
+
+    def tee(cmd, on_text):
+        auth.listing = CRED_LIST + "  #3  a@ex.com             oauth   id=ccc333 priority=2 manual:device_code\n"
+        on_text("Added openai-codex OAuth credential #3\nwarning: this login is the same OpenAI account as "
+                "openai-codex credential #1 (...). Log into a different account instead, or keep just one "
+                "(`hermes auth remove openai-codex 1`).\n")
+        return 0
+    monkeypatch.setattr(hermesbot, "_call_login_tee", tee)
+    seen = []
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=False, force=True), seen.append,
+                        auth=auth, copy=lambda c: True, wait=lambda q: None)
+    assert any("위 영문 경고" in m and "신경 쓰지 마세요" in m and "2개" in m for m in seen)
+
+
+# --- 설치 전에 연 창·앱(옛 PATH) · 런타임 조용한 실패 (소모임 11/5) -------------------------------------------
+def test_find_sees_fresh_path_and_marks_stale(isolated, monkeypatch):
+    """winget 이 사용자 PATH 에만 넣은 것(Git Programs 폴더 등): 이 프로세스 PATH 엔 없어도 찾고, stale 로 표시."""
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    winget_dir = isolated / "Programs" / "hwp2pdf"
+    _fake_cli(winget_dir, "2026.11.5.1")
+    monkeypatch.setenv("PATH", str(isolated / "empty"))  # 설치 전에 연 창의 옛 PATH
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setenv("LOCALAPPDATA", str(isolated / "la"))
+    monkeypatch.setattr(winenv, "fresh_path", lambda: str(winget_dir))
+    found = runtimes.find(rt)
+    assert found.path and found.version == "2026.11.5.1" and found.stale
+    # 이 창 PATH 에도 있으면 stale 아님
+    monkeypatch.setenv("PATH", str(winget_dir))
+    assert not runtimes.find(rt).stale
+
+
+def test_doctor_warns_stale_runtime_instead_of_missing(isolated, monkeypatch, the_lock):
+    rt = runtimes.BY_KEY["uv"]
+    real = runtimes.find
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("C:/x/uv.exe", "0.9.1", 0, stale=True)
+                        if r is rt else real(r))
+    check = next(c for c in doctor.check_runtimes(the_lock) if c.area == rt.label)
+    assert check.status == "warn" and "새 창에서는 보이지만" in check.message
+    assert "Exit" in check.fix and "새로 열어" in check.fix
+
+
+def test_setup_counts_missing_required_runtime_as_failure(isolated, monkeypatch):
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "ensure", lambda rt, log, dry_run=False, upgrade=False:
+                        runtimes.Found(None, None) if rt.key == "git" else runtimes.Found("x", "1.0", 99))
+    guide = isolated / "guide.txt"
+    code = cli.main(["setup", "--channels", "claude", "--no-autoupdate", "--guide-out", str(guide),
+                     "--log", str(isolated / "s.log")])
+    assert code != 0
+    text = guide.read_text(encoding="utf-8-sig")
+    assert text.startswith("※ [실패]") and "Git" in text and "Code 탭" in text and "setup.log" in text
+    assert cli._setup_problems({"runtimes_missing": ["Git"]})
+
+
+def test_desktop_started_before_setup(isolated, monkeypatch):
+    msix = r"C:\Program Files\WindowsApps\Claude_1.0.0.0_x64__abc\app\claude.exe"
+    cli_exe = r"C:\Users\u\.local\bin\claude.exe"
+    assert not claude.desktop_started_before_setup([(1, msix, 100.0)])  # setup 기록 없음 → 모름
+    claude.mark_setup()
+    at = claude.setup_stamp().stat().st_mtime
+    assert claude.desktop_started_before_setup([(1, msix, at - 60), (2, msix, at + 5)])
+    assert not claude.desktop_started_before_setup([(1, msix, at + 60)])  # setup 뒤에 다시 켬
+    assert not claude.desktop_started_before_setup([(1, cli_exe, at - 60)])  # Claude Code CLI 는 앱이 아님
+    assert claude._is_desktop(r"C:\Users\u\AppData\Local\AnthropicClaude\app-0.9\claude.exe")
+
+
+def test_claude_setup_stamps_only_when_something_changed(isolated, monkeypatch, the_lock):
+    """로그온 자동 갱신이 아무것도 안 바꾸면 시각을 그대로 둔다(매일 '앱이 setup 전에 켜짐' 오탐 방지)."""
+    monkeypatch.setattr(claude, "find_cli", lambda: None)
+    claude.setup(the_lock, print)  # 처음: 설정에 마켓플레이스·플러그인을 넣음 → 찍음
+    stamp = claude.setup_stamp()
+    assert stamp.is_file()
+    os.utime(stamp, (1000, 1000))
+    claude.setup(the_lock, print)  # 바뀐 것 없음
+    assert stamp.stat().st_mtime == 1000
+    claude.setup(the_lock, print, dry_run=True)
+    assert stamp.stat().st_mtime == 1000
+
+
+def test_ensure_stale_runtime_reaches_child_processes(isolated, monkeypatch):
+    """설치 전에 연 창에서 setup: 찾은 런타임 폴더를 이 프로세스 PATH 에 붙여 뒤의 claude·uvx 가 찾게(사용자 PATH 는 그대로)."""
+    rt = runtimes.BY_KEY["hwp2pdf"]
+    winget_dir = isolated / "Programs" / "hwp2pdf"
+    _fake_cli(winget_dir, "2026.11.5.1")
+    monkeypatch.setenv("PATH", str(isolated / "empty"))
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(rt, "own_copy", False)
+    monkeypatch.setenv("LOCALAPPDATA", str(isolated / "la"))
+    monkeypatch.setattr(winenv, "fresh_path", lambda: str(winget_dir))
+    monkeypatch.setattr(winenv, "refresh_process_path", lambda: None)
+    found = runtimes.ensure(rt, print)
+    assert found.stale and str(winget_dir) in os.environ["PATH"].split(os.pathsep)
+    assert not runtimes.find(rt).stale
+
+
+# --- 다시 설치할 때 지난 선택을 체크 기본값으로(jaix-win 11/5) --------------------------------------------------
+def _record_says(rec, key, value, span=16):
+    """설치기 RecordSays 와 같은 판정(파스칼 Pos·Copy 를 그대로 옮김)."""
+    p = rec.find(f'"{key}"')
+    return p >= 0 and f'"{value}"' in rec[p + len(key) + 2:p + len(key) + 2 + span]
+
+
+def test_installer_reads_previous_choice_written_by_setup(isolated):
+    from jaix import selfupdate
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    code = iss.split("[Code]", 1)[1].replace("\r", "")
+    wizard = code.split("procedure InitializeWizard", 1)[1].split("\nend;", 1)[0]
+    # 페이지·기본값을 다 만든 뒤에 지난 선택으로 덮는다
+    apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
+    assert wizard.index("ApplyPreviousChoice();") > wizard.index("ModelPage.Add('회사 Claude 계정(Team)")
+    # 처음 설치는 Hermes 모델을 미리 고르지 않는다(사용자 결정 11/5) — 고르지 않고 [다음]이면 묻는다
+    assert "ModelPage.Values[" not in wizard
+    nxt = code.split("function NextButtonClick", 1)[1].split("\nend;", 1)[0]
+    assert "CurPageID = ModelPage.ID" in nxt and "not WizardSilent()" in nxt and "골라 주세요" in nxt
+    # 지난 선택은 Hermes 를 골랐을 때만 모델까지 채운다(chatgpt 도 채움)
+    assert "if ChannelPage.Values[2] then\n          SetModelChoice(" in apply
+    # 개인 Pro 로는 Hermes 가 안 된다(providers.md Subscription plans, studio 실측 11/5) — 화면에 밝힌다
+    assert "개인 Claude Pro로는 동작하지 않습니다" in wizard and "개인 Pro 구독은 안 됨" in wizard
+    assert "개인 Claude Pro 구독은 Hermes 에서 동작하지 않습니다" in hermesbot.PROVIDERS["claude"]["how"][0]
+    apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
+    assert "'setup-choice.json'" in apply and "'hermes.json'" in apply
+    assert "RecordSays(Rec, 'hermes_model', 'claude', 16)" in apply and "RecordSays(Rec, 'model', 'claude', 16)" in apply
+    # jaix setup 이 쓰는 꼴을 설치기 판정이 알아본다
+    selfupdate.save_choice(["claude", "hermes"], "claude")
+    rec = selfupdate.choice_file().read_text(encoding="utf-8")
+    chans = rec[rec.index('"channels"'):]
+    chans = chans[chans.index("["):chans.index("]") + 1]
+    assert '"hermes"' in chans and '"codex"' not in chans
+    assert _record_says(rec, "hermes_model", "claude")
+    selfupdate.save_choice(["codex"], "chatgpt")
+    assert not _record_says(selfupdate.choice_file().read_text(encoding="utf-8"), "hermes_model", "claude")
+    # 예전 판: hermes.json(indent=2) 의 model
+    hermesbot._save_record({"model": "claude", "status": "linked"})
+    assert _record_says(hermesbot._record_file().read_text(encoding="utf-8"), "model", "claude")
+
+def test_guard_blocks_real_hermes_outside_tmp(isolated, monkeypatch, tmp_path_factory):
+    """isolated 가 깐 가드: tmp 밖의 hermes 를 부르면 실행 전에 멈춘다(tmp 안의 가짜는 허용)."""
+    outside = tmp_path_factory.mktemp("realbin")
+    for d in (outside, isolated / "fakebin"):
+        d.mkdir(exist_ok=True)
+        f = d / ("hermes.cmd" if os.name == "nt" else "hermes")
+        f.write_text("@echo ok\r\n" if os.name == "nt" else "#!/bin/sh\necho ok\n", encoding="utf-8")
+        f.chmod(0o755)
+    monkeypatch.setenv("PATH", str(outside))
+    with pytest.raises(AssertionError, match="진짜 hermes"):
+        subprocess.run(["hermes", "auth", "list"], capture_output=True)
+    if os.name != "nt":  # Windows 는 .cmd 를 셸 없이 못 띄운다 — tmp 안의 가짜 허용은 맥·리눅스에서만 본다
+        monkeypatch.setenv("PATH", str(isolated / "fakebin"))
+        assert subprocess.run(["hermes"], capture_output=True).returncode == 0
+
+
+# --- jaix hermes rename (사용자 결정 11/5: 베타 아이디를 나중에 바꿀 수 있게) -------------------------------------
+def _connected(monkeypatch, ident="namun"):
+    hermesbot._save_record({"status": "connected", "model": "chatgpt", "slack": {"id": ident, "connected": "t"}})
+    env = paths.hermes_home() / ".env"
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text(f"SLACK_BOT_TOKEN=xoxb-x\nSLACK_APP_TOKEN=xapp-x\nHERMES_SLACK_SLASH=hermes-{ident}\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(cmd, log, timeout=600):
+        calls.append(cmd[1:])
+        if cmd[1:3] == ["config", "set"]:  # hermes 는 UPPER_SNAKE 를 .env 에 쓴다
+            env.write_text(env.read_text(encoding="utf-8").replace(f"HERMES_SLACK_SLASH=hermes-{ident}",
+                                                                   f"HERMES_SLACK_SLASH={cmd[4]}"), encoding="utf-8")
+        return True, ""
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "_run", fake_run)
+    return calls
+
+
+def test_hermes_rename_sets_slash_restarts_and_records(isolated, monkeypatch):
+    calls = _connected(monkeypatch)
+    lines = []
+    assert cli.main(["hermes", "rename", "Hermes-NCho", "--dry-run"]) == 0
+    assert calls == []
+    assert hermesbot.cmd_rename(argparse.Namespace(id="Hermes-NCho", dry_run=False), lines.append) == 0
+    assert calls == [["config", "set", "HERMES_SLACK_SLASH", "hermes-ncho"], ["gateway", "restart"]]
+    slack = hermesbot.recorded()["slack"]
+    assert slack["id"] == "ncho" and slack["renamed_from"] == "namun" and slack["connected"] == "t"
+    assert any("/hermes-ncho" in line for line in lines)
+    # 다시 하면 바꿀 것 없음
+    calls.clear()
+    assert hermesbot.cmd_rename(argparse.Namespace(id="ncho", dry_run=False), print) == 0 and calls == []
+    # doctor: 기록과 슬래시가 맞으면 조용, 이름 바꾼 이력은 보임
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
+    monkeypatch.setattr(hermesbot, "duplicate_credentials", lambda: [])
+    checks = doctor.check_hermes_bot()
+    assert [c.status for c in checks] == ["ok"] and "Hermes-namun 에서 이름 바꿈" in checks[0].message
+
+
+def test_hermes_rename_refuses_bad_id_and_unlinked(isolated, monkeypatch):
+    assert hermesbot.cmd_rename(argparse.Namespace(id="Bad Name!", dry_run=False), print) == 2
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    assert hermesbot.cmd_rename(argparse.Namespace(id="ncho", dry_run=False), print) == 1  # 연결 기록 없음
+
+
+def test_doctor_warns_slash_differs_from_record(isolated, monkeypatch):
+    _connected(monkeypatch)
+    env = paths.hermes_home() / ".env"
+    env.write_text("SLACK_BOT_TOKEN=x\nSLACK_APP_TOKEN=y\nHERMES_SLACK_SLASH=hermes-old\n", encoding="utf-8")
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
+    monkeypatch.setattr(hermesbot, "duplicate_credentials", lambda: [])
+    warn = [c for c in doctor.check_hermes_bot() if c.status == "warn"]
+    assert len(warn) == 1 and "/hermes-old" in warn[0].message and warn[0].fix == "jaix hermes rename namun"
+
+
+def test_guide_cowork_line_depends_on_managed_deployment():
+    """관리자 배포가 없는 PC(개인 구독 계정)는 Cowork 마켓을 직접 추가하라고 안내한다(jaix-win .16)."""
+    personal = cli.guide(["claude"], {"claude": {"cli": True, "managed": None}})
+    assert "기관 관리자 배포로 내려옵니다" not in personal
+    assert "Customize → Plugins → Add → Add marketplace" in personal and "Add from a repository → jeju-inst/jaix-kit → Sync" in personal
+    assert "메일 도구는 Cowork 에서 쓸 수 없습니다" in personal
+    org = cli.guide(["claude"], {"claude": {"cli": True, "managed": "remote-settings.json"}})
+    assert "기관 관리자 배포로 내려옵니다" in org and "Add marketplace" not in org
+
+# --- Git·uv·age: winget 없이 고정 판을 직접(소모임 11/5: winget 경유 셋만 전부 실패) ----------------------------
+import hashlib  # noqa: E402
+import zipfile  # noqa: E402
+
+
+def _zip_bytes(files):
+    import io
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def _serve_pinned(monkeypatch, key, files, sha=None):
+    data = _zip_bytes(files)
+    pin = dict(runtimes.PINNED[key], sha256=sha or hashlib.sha256(data).hexdigest())
+    monkeypatch.setitem(runtimes.PINNED, key, pin)
+    got = []
+
+    def fake_download(url, dest, timeout=120):
+        got.append(url)
+        Path(dest).write_bytes(data)
+        return Path(dest)
+    monkeypatch.setattr(runtimes.net, "download", fake_download)
+    return got
+
+
+def test_git_uv_age_pinned_without_winget():
+    for key in ("git", "uv", "age"):
+        rt = runtimes.BY_KEY[key]
+        assert rt.winget is None
+        name, url = rt.resolve()  # 네트워크 없이(API 를 부르지 않음 — 원내 한 IP 익명 한도와 무관)
+        pin = runtimes.PINNED[key]
+        assert (name, url) == (pin["name"], pin["url"]) and url.startswith("https://github.com/")
+        assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"])
+    assert runtimes.BY_KEY["git"].tree == "git" and runtimes.BY_KEY["git"].path_subdir == "cmd"
+
+
+def _fake_sfx(fail=False):
+    """PortableGit 자동 풀기 exe 흉내: -o<폴더> 에 cmd\\git.exe · bin\\bash.exe 를 만든다."""
+    seen = []
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        assert cmd[2] == "-y" and cmd[1].startswith("-o")
+        out = Path(cmd[1][2:])
+        if not fail:
+            (out / "cmd").mkdir(parents=True)
+            (out / "cmd" / "git.exe").write_bytes(b"g")
+            (out / "bin").mkdir()
+            (out / "bin" / "bash.exe").write_bytes(b"b")
+        return subprocess.CompletedProcess(cmd, 1 if fail else 0, b"", b"")
+    return run, seen
+
+
+def test_portablegit_unpacks_into_jaix_git_and_exports_bash(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    assert runtimes.PINNED["git"]["name"].startswith("PortableGit-") and runtimes.PINNED["git"]["name"].endswith(".7z.exe")
+    data = b"sfx"
+    monkeypatch.setitem(runtimes.PINNED, "git", dict(runtimes.PINNED["git"], sha256=hashlib.sha256(data).hexdigest()))
+    monkeypatch.setattr(runtimes.net, "download", lambda url, dest, timeout=120: (Path(dest).write_bytes(data), Path(dest))[1])
+    run, seen = _fake_sfx()
+    monkeypatch.setattr(runtimes.subprocess, "run", run)
+    old = paths.jaix_home() / "git" / "cmd"
+    old.mkdir(parents=True)
+    (old / "git.exe").write_bytes(b"mingit")  # 예전 MinGit 사본 → 바뀐다
+    where = runtimes.install_portable(rt, print)
+    assert where == paths.jaix_home() / "git" / "cmd" and (where / "git.exe").read_bytes() == b"g"
+    assert seen[0][1] == f"-o{paths.jaix_home() / 'git'}" and not (paths.jaix_home() / "git.old").exists()
+    # jaix 사본이면 Git Bash 위치를 알린다. 사용자가 다른 bash 를 가리켜 두었으면 그대로
+    env = {}
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(winenv, "get_user_env", lambda name: env.get(name))
+    monkeypatch.setattr(winenv, "set_user_env", lambda name, value: env.update({name: value}) or True)
+    found = runtimes.Found(str(where / "git.exe"), "2.56.0", 2, managed=True)
+    runtimes._export(rt, found, print)
+    assert env["CLAUDE_CODE_GIT_BASH_PATH"] == str(paths.jaix_home() / "git" / "bin" / "bash.exe")
+    mine = isolated / "MyGit" / "bin" / "bash.exe"
+    mine.parent.mkdir(parents=True)
+    mine.write_bytes(b"x")
+    env["CLAUDE_CODE_GIT_BASH_PATH"] = str(mine)
+    runtimes._export(rt, found, print)
+    assert env["CLAUDE_CODE_GIT_BASH_PATH"] == str(mine)
+    # 시스템 Git(jaix 사본 아님)이면 손대지 않는다
+    env.clear()
+    runtimes._export(rt, runtimes.Found(r"C:\Program Files\Git\cmd\git.exe", "2.50", 2), print)
+    assert env == {}
+
+
+def test_portablegit_failed_unpack_restores_previous_copy(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    prev = paths.jaix_home() / "git" / "cmd"
+    prev.mkdir(parents=True)
+    (prev / "git.exe").write_bytes(b"prev")
+    run, _ = _fake_sfx(fail=True)
+    with pytest.raises(RuntimeError, match="풀기 실패"):
+        runtimes._run_sfx(isolated / "PortableGit.7z.exe", rt, run=run)
+    assert (prev / "git.exe").read_bytes() == b"prev" and not (paths.jaix_home() / "git.old").exists()
+
+
+def test_pinned_sha_mismatch_refuses_to_install(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["uv"]
+    _serve_pinned(monkeypatch, "uv", {"uv.exe": b"evil"}, sha="0" * 64)
+    with pytest.raises(ValueError, match="sha256 불일치"):
+        runtimes.install_portable(rt, print)
+    assert not (paths.bin_dir() / "uv.exe").exists() and not runtimes._marker(rt).exists()
+
+
+def test_ensure_missing_git_never_calls_winget_and_reports_failure(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "_winget", lambda *a, **k: pytest.fail("winget 을 부름"))
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(None, None))
+    monkeypatch.setattr(runtimes, "install_portable", lambda r, log: (_ for _ in ()).throw(OSError("blocked")))
+    lines = []
+    found = runtimes.ensure(rt, lines.append)
+    assert found.path is None and any("설치 실패" in line for line in lines)  # setup 이 [실패]로 센다(#112)
+
+
+def test_ensure_keeps_existing_git(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["git"]
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(r"C:\Program Files\Git\cmd\git.exe", "2.50.1", 2))
+    monkeypatch.setattr(runtimes, "install_portable", lambda r, log: pytest.fail("이미 있는데 받음"))
+    assert runtimes.ensure(rt, print, upgrade=True).path.endswith("git.exe")
+
+
+# --- mail-skill 이 bin/ → cli/ 로(Cowork 호스팅 검사가 최상위 bin/ 거부, 2026-11-05) ----------------------------
+def _fake_cmd_plugin(monkeypatch, layout):
+    """layout: {폴더: {파일: 출력 문자열}}. 확장자 없는 것은 sh 스크립트, scripts/mail-secret 는 cli 의 심링크 대상."""
+    def fake_fetch(plugin, workdir):
+        root = Path(workdir) / plugin.name / "root"
+        (root / "skills" / plugin.name).mkdir(parents=True, exist_ok=True)
+        (root / "skills" / plugin.name / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+        if plugin.name == "mail-skill":
+            (root / "scripts").mkdir(exist_ok=True)
+            (root / "scripts" / "mail-secret").write_text("#!/bin/sh\necho secret\n", encoding="utf-8")
+            for d, files in layout.items():
+                (root / d).mkdir(exist_ok=True)
+                for f, say in files.items():
+                    p = root / d / f
+                    if say == "->scripts" and os.name != "nt":
+                        p.symlink_to(Path("..") / "scripts" / f)
+                    else:
+                        p.write_text("@echo off\r\n" if "." in f else f"#!/bin/sh\necho {say}\n", encoding="utf-8")
+        return root
+    monkeypatch.setattr(plugbin, "fetch_root", fake_fetch)
+
+
+def test_plugbin_reads_cli_dir_and_prefers_it_over_bin(isolated, monkeypatch, the_lock):
+    _fake_cmd_plugin(monkeypatch, {
+        "cli": {"mailskill": "from-cli", "mailskill.cmd": "", "mail-secret": "->scripts", "mail-secret.cmd": ""},
+        "bin": {"mailskill": "from-bin", "mailskill.cmd": "", "old-only": "from-bin"},
+    })
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), print)
+    assert res["status"] == "ok"
+    copy = plugbin.plugins_dir() / "mail-skill"
+    link = plugbin.link_dir()
+    made = [Path(c) for c in plugbin.recorded()["mail-skill"]["commands"]]
+    names = [p.name for p in made]
+    assert len(names) == len(set(n.lower() for n in names))  # 같은 이름은 한 번만
+    if paths.IS_WIN:
+        assert str(copy / "cli" / "mailskill.cmd") in (link / "mailskill.cmd").read_text(encoding="utf-8")
+        assert "/cli/mailskill" in (link / "mailskill").read_text(encoding="utf-8").replace("\\", "/")
+        assert (link / "old-only").is_file()  # bin 에만 있는 것도 전환기엔 올린다
+    else:
+        assert (link / "mailskill").resolve() == (copy / "cli" / "mailskill").resolve()
+        assert (link / "old-only").resolve() == (copy / "bin" / "old-only").resolve()
+        # Claude Code 는 cli/ 를 PATH 에 넣어 주지 않는다 → jaix 링크만으로 이름이 잡히고 실행돼야 한다
+        monkeypatch.setenv("PATH", str(link))
+        assert Path(shutil.which("mailskill")).parent == link
+        out = subprocess.run(["mailskill"], capture_output=True, text=True).stdout.strip()
+        assert out == "from-cli"
+        out = subprocess.run(["mail-secret"], capture_output=True, text=True).stdout.strip()
+        assert out == "secret"  # cli 의 심링크(→ ../scripts) 도 사본에서 그대로 돈다
+        checks = doctor.check_plugin_bin(_lock_with_mail_skill(the_lock))
+        assert [c.status for c in checks] == ["ok"] and "mailskill" in checks[0].message
+
+
+def test_plugbin_cli_only_plugin_without_bin(isolated, monkeypatch, the_lock):
+    _fake_cmd_plugin(monkeypatch, {"cli": {"mailskill": "from-cli", "mailskill.cmd": ""}})
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock), print)
+    assert res["status"] == "ok" and "mailskill" in res["commands"]
+    assert (plugbin.plugins_dir() / "mail-skill" / "cli").is_dir()
+
+
+# --- himalaya 는 1.x 고정: mailskill 이 1.x 문법(-o json·folder)을 쓴다. 2.x 가 깔린 PC 는 고정 판으로 다시 깐다 -----
+def test_himalaya_pinned_to_1x_and_2x_is_not_ok():
+    rt = runtimes.BY_KEY["himalaya"]
+    name, url = rt.resolve()  # GitHub latest API 를 부르지 않는다
+    assert "/v1.2.0/" in url and name == runtimes.PINNED["himalaya"]["name"]
+    assert re.fullmatch(r"[0-9a-f]{64}", runtimes.PINNED["himalaya"]["sha256"])
+    two = runtimes.Found("/x/himalaya", "2.2.1", 2)
+    assert runtimes.ok(rt, runtimes.Found("/x/himalaya", "1.2.0", 1)) and not runtimes.ok(rt, two)
+    assert "1.x 필요" in runtimes.need(rt, two) and "mailskill" in runtimes.need(rt, two)
+    assert runtimes.ok(runtimes.BY_KEY["java"], runtimes.Found("/x/java", "25.0.1", 25))  # 위 한도는 java 등엔 없음
+
+
+def test_himalaya_2x_with_same_asset_name_is_reinstalled(isolated, monkeypatch):
+    """latest 를 따라가던 때의 2.x 도 파일 이름이 같다(himalaya.x86_64-windows.zip) → 표식만 보고 건너뛰면 안 된다."""
+    rt = runtimes.BY_KEY["himalaya"]
+    got = _serve_pinned(monkeypatch, "himalaya", {"himalaya.exe": b"v1"})
+    paths.jaix_home().mkdir(parents=True, exist_ok=True)
+    runtimes._marker(rt).write_text(runtimes.PINNED["himalaya"]["name"], encoding="utf-8")
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/jaix/bin/himalaya.exe", "2.2.1", 2, managed=True))
+    runtimes.install_portable(rt, print)
+    assert got and (paths.bin_dir() / "himalaya.exe").read_bytes() == b"v1"
+    # 고정 판이 이미 있으면 받지 않는다
+    got.clear()
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/jaix/bin/himalaya.exe", "1.2.0", 1, managed=True))
+    runtimes.install_portable(rt, print)
+    assert not got
+
+
+def test_doctor_flags_himalaya_2x(monkeypatch):
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found("/x/" + r.exe, "2.2.1", 2) if r.key == "himalaya"
+                        else runtimes.Found(None, None))
+    lines = [c for c in doctor.check_runtimes() if c.area == "himalaya"]
+    assert lines and "2.2.1" in lines[0].message and "1.x 필요" in lines[0].message
+
+
+# --- 백신(Defender)이 포터블을 격리했을 때: 어디서 확인할지 알린다(예외는 관리자 권한이라 jaix 가 넣지 않음) -----
+def test_av_blocked_detects_virus_errors():
+    e = OSError(22, "Operation did not complete successfully because the file contains a virus")
+    assert runtimes.av_blocked(e)
+    w = OSError("x")
+    w.winerror = 225
+    assert runtimes.av_blocked(w) and not runtimes.av_blocked(OSError("disk full"))
+
+
+def test_install_quarantined_right_after_unpack_raises_and_keeps_no_marker(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["age"]
+    _serve_pinned(monkeypatch, "age", {"age/age.exe": b"a"})
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    real = runtimes._extract
+    monkeypatch.setattr(runtimes, "_extract", lambda f, r: real(f, r) or (paths.bin_dir() / "age.exe").unlink())
+    with pytest.raises(RuntimeError, match="보호 기록"):
+        runtimes.install_portable(rt, print)
+    assert not runtimes._marker(rt).exists()
+
+
+def test_doctor_says_vanished_runtime_may_be_av(isolated, monkeypatch):
+    rt = runtimes.BY_KEY["himalaya"]
+    paths.jaix_home().mkdir(parents=True, exist_ok=True)
+    runtimes._marker(rt).write_text(runtimes.PINNED["himalaya"]["name"], encoding="utf-8")
+    monkeypatch.setattr(runtimes, "IS_WIN", True)
+    monkeypatch.setattr(doctor, "IS_WIN", True, raising=False)
+    monkeypatch.setattr(runtimes, "find", lambda r: runtimes.Found(None, None))
+    assert runtimes.vanished(rt)
+    line = [c for c in doctor.check_runtimes() if c.area == "himalaya"][0]
+    assert "사라짐" in line.message and "보호 기록" in line.message + line.fix
+
+
+def test_plugbin_copy_in_use_keeps_old_copy_and_record(isolated, monkeypatch, the_lock):
+    """옛 사본을 누가 쓰고 있으면(Windows 에서 mailskill·python 이 파일을 잡음) 반쯤 지우지 않고 그대로 두며,
+    기록도 옛 커밋으로 남겨 다음 update 가 다시 시도한다. 로그에 '닫고 다시' 를 알린다."""
+    _fake_plugin_source(monkeypatch)
+    REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="a" * 40), print)
+    copy = plugbin.plugins_dir() / "mail-skill"
+    real_rename = Path.rename
+
+    def busy(self, target):
+        if self == copy:
+            raise PermissionError(5, "Access is denied")
+        return real_rename(self, target)
+    monkeypatch.setattr(Path, "rename", busy)
+    lines = []
+    res = REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), lines.append)
+    assert res["failed"] == ["mail-skill"] and any("쓰는 중" in line for line in lines)
+    assert (copy / "scripts").is_dir() and plugbin.recorded()["mail-skill"]["sha"] == "a" * 40
+    assert not copy.with_name("mail-skill.jaix-new").exists() and not copy.with_name("mail-skill.jaix-old").exists()
+    monkeypatch.setattr(Path, "rename", real_rename)  # 닫고 다시 → 바뀐다
+    assert REAL_PLUGBIN_ENSURE(_lock_with_mail_skill(the_lock, sha="b" * 40), print)["status"] == "ok"
+    assert plugbin.recorded()["mail-skill"]["sha"] == "b" * 40 and not copy.with_name("mail-skill.jaix-old").exists()

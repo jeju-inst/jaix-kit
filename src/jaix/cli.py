@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, uvpython, winenv, works
+from jaix import __version__, claude, clis, codex, connect, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -68,19 +68,33 @@ class Log:
 def guide(channels, result):
     """채널별 "이렇게 쓰세요". 고른 채널만 보여 준다(ji-deploy-standards 3.1)."""
     out = []
+    missing = result.get("runtimes_missing") or []
+    if missing:
+        out += [f"※ [실패] 꼭 필요한 도구를 깔지 못했습니다: {', '.join(missing)}",
+                "  이대로는 일부 jaix 도구가 동작하지 않습니다"
+                + (" — Git 이 없으면 Claude 앱 Code 탭에 jaix 도구가 나타나지 않습니다." if "Git" in missing else "."),
+                "  잠시 뒤(다른 네트워크에서) jaix-setup 을 다시 실행하세요. 그래도 안 되면 새 명령창에서 `jaix doctor` 결과와",
+                f"  기록 파일 {paths.data_dir() / 'setup.log'} 을 AI센터에 보내 주세요.", ""]
     if "claude" in channels:
         quit_app = ("알림 영역(화면 오른쪽 아래 ^)에서 Claude 아이콘을 오른쪽 클릭 → Exit. "
                     "창의 X나 작업 표시줄에서 닫는 것만으로는 앱이 꺼지지 않습니다" if paths.IS_WIN
                     else "메뉴 막대의 Claude → Quit Claude(⌘Q). 창을 닫는 것만으로는 앱이 꺼지지 않습니다")
         out += [
             "■ Claude (데스크톱 앱의 Code 탭 · Claude Code)",
-            "  1. Claude 앱을 완전히 종료했다가 다시 여세요.",
+            "  1. Claude 앱을 완전히 종료했다가 다시 여세요(설치·업데이트 뒤마다).",
             f"     {quit_app}.",
+            "     켜져 있던 앱은 jaix가 새로 정한 도구 위치(예: HWP2PDF_CLI)를 모릅니다.",
             "  2. Code 탭에서 HWP 편집 · 업무일지 · 보고서 작성 표준 도구를 쓸 수 있습니다.",
             "     새 버전도 앱을 다시 열 때 저절로 받습니다.",
             "  3. 왼쪽 위 모델 선택에서 Sonnet을 고르세요. 사용량을 아낍니다.",
-            "  4. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려옵니다.",
         ]
+        if (result.get("claude") or {}).get("managed"):
+            out.append("  4. Cowork(채팅)에서 쓰는 도구는 기관 관리자 배포로 내려옵니다.")
+        else:  # 관리자 배포가 없는 PC(개인 구독 계정 — 11/10 전 베타 대부분, jaix-win .16 실측)
+            out += ["  4. Cowork(채팅)에서도 쓰려면 직접 추가하세요: 왼쪽 Customize → Plugins → Add → Add marketplace",
+                    "     → Add from a repository → jeju-inst/jaix-kit → Sync. GitHub 앱 접근을 허용한 뒤",
+                    "     jaix 플러그인을 하나씩 Add 하세요.",
+                    "     (메일 도구는 Cowork 에서 쓸 수 없습니다 — Code 탭에서 쓰세요)"]
         if result.get("claude") and not result["claude"].get("cli") and not result["claude"].get("managed"):
             out += ["  ※ 아직 Claude Code를 찾지 못해 도구를 직접 깔지 못했습니다. Claude 앱에서 Code 탭을 열었다 닫고",
                     "     한 번 더 여세요(첫 번째에 도구 목록을 받고, 두 번째에 설치합니다)."]
@@ -90,12 +104,21 @@ def guide(channels, result):
         if result.get("codex", {}).get("cli"):
             out += [
                 "■ Codex",
-                "  Codex를 다시 시작하세요. 플러그인 목록에 jaix 도구가 켜져 있습니다.",
+                "  Codex를 완전히 닫았다가 다시 여세요(설치·업데이트 뒤마다). 플러그인 목록에 jaix 도구가 켜져 있습니다.",
+                "  켜져 있던 Codex는 jaix가 새로 정한 도구 위치(예: HWP2PDF_CLI)를 모릅니다.",
             ]
             out.append("  새 버전은 로그온할 때 jaix가 저절로 맞춥니다." if result.get("autoupdate")
                        else "  Codex는 저절로 갱신되지 않습니다. 가끔 명령창에서 `jaix update`를 실행하세요.")
         else:
             out += ["■ Codex", "  이 PC에서 Codex를 찾지 못했습니다. Codex를 설치한 뒤 jaix-setup을 다시 실행하세요."]
+    terms = [n for n in ("claude", "codex") if n in channels and (result.get(f"{n}_cli") or {}).get("status")
+             in ("present", "path-added", "installed")]
+    failed = [n for n in ("claude", "codex") if n in channels and (result.get(f"{n}_cli") or {}).get("status") == "failed"]
+    if terms:
+        out += ["■ 명령창에서 쓰기",
+                f"  새 명령창(PowerShell·cmd)을 열고 {' 또는 '.join(terms)} 를 입력하세요. 처음 한 번은 로그인을 묻습니다."]
+    if failed:
+        out += [f"  ※ {', '.join(failed)} 명령을 깔지 못했습니다. 잠시 뒤 jaix-setup 을 다시 실행하거나 jaix doctor 결과를 AI센터에 보내 주세요."]
     if "hermes" in channels:
         out += ["■ 슬랙으로도 쓰기 (Hermes)", *_hermes_guide(result.get("hermes") or {})]
     if (result.get("gw") or {}).get("status") in ("installed", "current"):
@@ -103,6 +126,10 @@ def guide(channels, result):
                 "  gw 를 처음 쓰기 전에 한 번 로그인하세요. 아이디·비밀번호는 이 PC에 안전하게 저장됩니다.",
                 "  Claude·Codex 에게 'gw 로그인해 줘'라고 하면 입력 창이 뜹니다.",
                 "  새 명령창에서 직접 `gw login` 을 치면 그 자리에서 묻습니다."]
+    where = "시작 메뉴 'JAIX 계정 연결'(명령창이면 `jaix connect`)" if paths.IS_WIN else "명령창에서 `jaix connect`"
+    out += ["■ 계정 연결 (그룹웨어·회사메일·웍스·Hermes)",
+            f"  처음 한 번 본인 계정을 연결하세요: {where}.",
+            "  항목마다 입력 창이 뜨고, 비밀번호는 그 창에 직접 넣습니다(jaix·AI 는 값을 받지 않습니다)."]
     if net.rate_limit_hit:
         out += ["", f"※ {net.RATE_LIMIT_HINT}."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
@@ -177,6 +204,8 @@ def cmd_setup(args, log):
         return _setup_via_task(args)
     lock = lockmod.load(args.lock, args.channel, args.offline)
     chosen = _channels(args.channels)
+    if not args.dry_run:  # 본체 자기 업데이트가 설치기에 그대로 넘겨 이전 선택(Hermes 등)을 지킨다
+        selfupdate.save_choice(chosen, args.hermes_model)
     # --status-out 은 --via-task 가 작업에 넘길 때만 붙는다
     how = "via task" if args.status_out else "direct, task fallback" if getattr(args, "task_fallback", False) else "direct"
     log(_banner("setup", how))
@@ -188,10 +217,17 @@ def cmd_setup(args, log):
         for old in steps.run("PATH 정리", winenv.drop_old_exe_dir) or []:
             log(f"  PATH에서 뺌(예전 설치 위치): {old}")
     log("\n[1/3] 런타임")
+    missing = []
     for rt in _runtimes(args.runtimes, lock):
-        steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
+        found = steps.run(rt.label, runtimes.ensure, rt, log, dry_run=args.dry_run)
+        if paths.IS_WIN and not args.dry_run and found is not None and not runtimes.ok(rt, found):
+            missing.append(rt.label)
     # Claude 앱(MSIX) 안에서 uvx가 Python을 처음 받으면 가상화로 깨진다(jaix-kit#14) → 앱 밖인 지금 깐다
     result = {}
+    if missing:  # 내려받기가 막혀도 다음 단계는 하지만, 조용히 넘어가지 않는다(소모임 11/5: uv·Git·age 가 다 빠졌는데 설치는 성공)
+        result["runtimes_missing"] = missing
+        steps.failed.append("런타임(" + ", ".join(missing) + ")")
+        steps.code = max(steps.code, 1)
     # ensure 들은 실패를 예외가 아니라 False 로 알린다 — 지난 실패 기록을 덮을지 판단에 쓴다
     result["uvpython"] = steps.run("uv 관리 Python", lambda: uvpython.ensure(uvpython.needed(lock, args.offline), log,
                                                                           dry_run=args.dry_run))
@@ -216,6 +252,12 @@ def cmd_setup(args, log):
         result["plugbin"] = pb_res
     log("\n[2/3] Claude")
     if "claude" in chosen:
+        # 명령창의 claude: 있으면 그대로, PATH 에 없으면 올리고, 없으면 공식 네이티브 설치(사용자 요구 11/5).
+        # 플러그인 설치(claude.setup)보다 먼저 — 새로 깐 CLI 로 플러그인을 넣는다
+        res = steps.run("claude 명령", clis.ensure, "claude", log, dry_run=args.dry_run)
+        if res is not None:
+            result["claude_cli"] = res
+            _cli_failed(steps, "claude 명령", res)
         # 다시 설치할 때 이미 깔린 옛 판도 잠금에 맞춘다(update 와 같게). 빠뜨리면 Codex 만 맞고 Claude 는 옛 판으로
         # 남아 doctor 가 실패를 보였다(jaix-win 11/4 ③)
         res = steps.run("Claude", claude.setup, lock, log, dry_run=args.dry_run, update=True)
@@ -225,6 +267,10 @@ def cmd_setup(args, log):
         log("  선택 안 함")
     log("\n[3/3] Codex · Hermes")
     if "codex" in chosen:
+        res = steps.run("codex 명령", clis.ensure, "codex", log, dry_run=args.dry_run)
+        if res is not None:
+            result["codex_cli"] = res
+            _cli_failed(steps, "codex 명령", res)
         res = steps.run("Codex", codex.setup, lock, log, dry_run=args.dry_run)
         if res is not None:
             result["codex"] = res
@@ -253,15 +299,25 @@ def cmd_setup(args, log):
     return steps.summary()
 
 
+def _cli_failed(steps, area, res):
+    """명령창 claude·codex 를 못 깔았으면 설치 실패로 센다(다른 단계는 계속) — 설치기 종료 코드 10, 지난 실패 기록 유지."""
+    if res.get("status") == "failed":
+        steps.failed.append(area)
+        steps.code = max(steps.code, 1)
+
+
 def _setup_problems(result):
     codex_res = result.get("codex") or {}
     return bool((result.get("hermes") or {}).get("status") == "failed"
+                or (result.get("claude_cli") or {}).get("status") == "failed"
+                or (result.get("codex_cli") or {}).get("status") == "failed"
                 or result.get("uvpython") is False or result.get("hwpjar") is False or result.get("rhwp") is False
                 or result.get("hancom_consent") is False
                 or codex_res.get("error") or codex_res.get("failed")
                 or (result.get("gw") or {}).get("status") == "failed"
                 or (result.get("works") or {}).get("status") == "failed"
-                or (result.get("plugbin") or {}).get("status") == "failed")
+                or (result.get("plugbin") or {}).get("status") == "failed"
+                or bool(result.get("runtimes_missing")))
 
 
 def cmd_doctor(args, log):
@@ -278,28 +334,80 @@ def cmd_doctor(args, log):
     return 1 if failed else 0
 
 
+def cmd_selftest(args, log):
+    """도구를 실제로 한 번씩 돌려 본다(doctor 는 앞에서 한 번 돌려 실패 수만 알린다)."""
+    lock = lockmod.load(args.lock, args.channel, args.offline)
+    say = (lambda msg: print(msg, file=sys.stderr, flush=True)) if args.json else log  # --json 이면 진행 줄은 stderr 로
+    say(f"jaix {__version__} 자가시험 · 잠금: {lock.source}")
+    if args.agent:
+        say("※ --agent: Claude 에게 실제로 두 번 요청합니다 — 본인 Claude 사용량을 조금 씁니다.")
+    try:
+        doc_failed = sum(1 for c in doctor.run(lock) if c.status == "fail")
+    except Exception as e:  # noqa: BLE001 — doctor 가 막혀도 시험은 한다
+        doc_failed, doc_error = None, f"{type(e).__name__}: {e}"
+    else:
+        doc_error = None
+    results = selftest.run_all(lock, agent=args.agent, keep=args.keep, log=say)
+    failed = any(r.status == "fail" for r in results)
+    if args.json:
+        print(json.dumps({"version": __version__, "lock": lock.source, "ok": not failed,
+                          "doctor_failed": doc_failed, "summary": selftest.counts(results),
+                          "checks": selftest.as_dicts(results)}, ensure_ascii=False, indent=2))
+        return 1 if failed else 0
+    log("")
+    if doc_failed is None:
+        log(f"{selftest.MARK['info']} jaix doctor: 돌리지 못함({doc_error})")
+    elif doc_failed:
+        log(f"{selftest.MARK['info']} jaix doctor: 실패 {doc_failed}건 — 자세히는 새 명령창에서 jaix doctor")
+    else:
+        log(f"{selftest.MARK['info']} jaix doctor: 실패 없음")
+    log(selftest.render(results))
+    log("\nPC 밖에서 직접 확인할 것:")
+    for line in selftest.OUTSIDE:
+        log(f"  - {line}")
+    log("\n" + selftest.summary_line(results))
+    if any(r.status == "setup" for r in results):
+        log("[설정 필요] 줄은 처음 한 번 직접 하는 설정입니다. 줄 끝의 방법대로 한 뒤 다시 시험하세요.")
+    if failed:
+        log("이 결과 전체를 소모임 채널에 올려 주세요.")
+    return 1 if failed else 0
+
+
 def cmd_update(args, log):
+    if getattr(args, "self_update", False):  # jaix update --self: 본체(설치본) 업데이트만
+        return selfupdate.cmd_self(args, log)
     if not args.quiet:
         log(_banner("update", "direct"))
         problems = _update(args, log)
         if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
             schedule.write_status(problems)
+        if selfupdate.applies() and not args.offline and not args.dry_run:
+            state = selfupdate.check()
+            if state.get("newer") and sys.stdin and sys.stdin.isatty():  # 시작 메뉴 'JAIX 업데이트' 창 — 그 자리에서 묻는다
+                log("")
+                selfupdate.cmd_self(argparse.Namespace(yes=False), log)
+            elif state.get("newer"):
+                log(f"\n※ jaix 새 판 {state.get('latest')} 이 있습니다(지금 {__version__}). 본체 업데이트: jaix update --self")
         return 1 if problems else 0
     # 로그온 자동 갱신(예약 작업·시작프로그램 바로가기)이 부르는 경로: 화면에 쓰지 않고 기록·상태만 남긴다
     if args.delay:  # 바로가기는 로그온 즉시 돈다 — 네트워크가 올라올 틈(예약 작업의 '지연 2분' 대신)
         time.sleep(args.delay)
     log = Log(schedule.open_log(), quiet=True)
     log(_banner("update", "logon task") + " — 로그온 자동 갱신")
+    # 첫 단계: 본체 새 판 확인·받기·검증(묻지 않음). 묻는 것은 도구 갱신이 끝난 뒤 — 답을 기다리느라 갱신이 밀리지 않게
+    pending = None if args.dry_run else selfupdate.logon_prepare(log)
     try:
         problems = _update(args, log)
     except Exception as e:  # 잠금을 못 받음(오프라인)·깨진 설정 등 — 다음 로그온에 다시 한다
         log(f"멈춤: {e}")
         log(traceback.format_exc().rstrip())
         schedule.write_status([], error=str(e))
+        selfupdate.logon_offer(pending, log)  # 새 판이 이 실패를 고친 것일 수도 있다
         return 1
     schedule.write_status(problems)
     for p in problems:
         log(f"문제: {p}")
+    selfupdate.logon_offer(pending, log)
     return 1 if problems else 0
 
 
@@ -356,8 +464,14 @@ def cmd_cleanup(args, log):
     사용자 설정은 그대로 둔다."""
     if schedule.unregister():
         log("로그온 자동 갱신을 지움")
+    clis.cleanup(log)  # jaix 가 깐 claude·codex 명령과 넣은 PATH 만
     for p in winenv.remove_from_path(paths.jaix_home()):
         log(f"PATH에서 뺌: {p}")
+    # 지워질 jaix 사본을 가리키는 환경변수(HWP2PDF_CLI 등)도 뺀다 — 남기면 플러그인이 없는 파일을 부른다
+    for rt in runtimes.RUNTIMES:
+        for name in ([rt.env_var] if rt.env_var else []) + list(rt.extra_env):
+            if winenv.remove_user_env_under(name, paths.jaix_home()):
+                log(f"환경변수 뺌: {name}")
     return 0
 
 
@@ -365,6 +479,13 @@ def cmd_works(args, log):
     if args.works_cmd == "login":
         return works.login(log)
     return 2
+
+
+def cmd_connect(args, log):
+    """본인 비밀이 필요한 첫 설정을 여는 곳(시작 메뉴 'JAIX 계정 연결'). 값은 사용자가 뜨는 창에 직접 넣는다."""
+    if not args.item:
+        return connect.connect_all(lockmod.load(args.lock, args.channel, args.offline), log)
+    return connect.connect_one(args.item, log, here=args.here, result_file=args.result_file)
 
 
 def build_parser():
@@ -398,11 +519,21 @@ def build_parser():
     d.add_argument("--json", action="store_true")
     d.set_defaults(func=cmd_doctor)
 
+    t = sub.add_parser("selftest", parents=[common], help="도구를 실제로 한 번씩 돌려 봄(HWP 변환·MCP 서버·그룹웨어 접속 등)")
+    t.add_argument("--json", action="store_true")
+    t.add_argument("--agent", action="store_true",
+                   help="Claude 에게 실제로 두 번 요청해 도구를 쓰는지까지 봄(본인 Claude 사용량을 씀, 기본 꺼짐)")
+    t.add_argument("--keep", action="store_true", help="시험 폴더를 지우지 않고 남김")
+    t.set_defaults(func=cmd_selftest)
+
     u = sub.add_parser("update", parents=[common], help="런타임 갱신 + 플러그인·Hermes 스킬을 잠금에 맞춤")
     u.add_argument("--dry-run", action="store_true")
     u.add_argument("--quiet", action="store_true",
                    help="화면에 쓰지 않고 update.log·update-status.json에만 남김(로그온 자동 갱신용)")
     u.add_argument("--delay", type=int, default=0, help="--quiet 일 때 시작 전에 기다릴 초(시작프로그램 바로가기용)")
+    u.add_argument("--self", dest="self_update", action="store_true",
+                   help="jaix 본체(설치본) 새 판을 지금 확인하고, 있으면 받아 검증한 뒤 물어서 설치기를 띄움")
+    u.add_argument("--yes", action="store_true", help="--self 에서 묻지 않고 바로 설치기를 띄움")
     u.set_defaults(func=cmd_update)
 
     h = sub.add_parser("hermes", help="Hermes 관리자 명령")
@@ -416,15 +547,27 @@ def build_parser():
     ap_ = hsub.add_parser("approvals", help="이 PC Hermes 의 위험 명령 승인 방식(smart·manual). off 는 AI센터 관리자만")
     ap_.add_argument("mode", choices=hermesbot.APPROVAL_MODES)
     ap_.set_defaults(func=hermesbot.cmd_approvals)
+    rn = hsub.add_parser("rename", help="AI센터가 슬랙 앱 이름을 바꾼 뒤: 이 PC 의 슬래시 명령을 /hermes-<새 아이디> 로")
+    rn.add_argument("id", help="새 아이디(Hermes-<아이디> 의 아이디)")
+    rn.add_argument("--dry-run", action="store_true")
+    rn.set_defaults(func=hermesbot.cmd_rename)
     lg = hsub.add_parser("login", help="Hermes 의 AI 구독 로그인(설치기 마지막 화면이 부름)")
     lg.add_argument("--model", choices=sorted(hermesbot.PROVIDERS), default="chatgpt")
     lg.add_argument("--no-wait", action="store_true", help="끝나고 Enter 를 기다리지 않음")
+    lg.add_argument("--force", action="store_true", help="이미 로그인돼 있어도 묻지 않고 다시 로그인(예전 자격은 정리)")
     lg.set_defaults(func=hermesbot.cmd_login)
 
     w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
     wsub = w.add_subparsers(dest="works_cmd", required=True)
     wsub.add_parser("login", help="브라우저로 웍스 로그인(처음 한 번, 본인 계정 권한)")
     w.set_defaults(func=cmd_works)
+
+    cn = sub.add_parser("connect", parents=[common],
+                        help="계정 연결(그룹웨어·회사메일·웍스·Hermes): 항목 없이 부르면 상태를 보이고 안 된 것을 물어 연결")
+    cn.add_argument("item", nargs="?", choices=connect.ITEMS, help="연결할 항목(입력 창이 뜨고 본인이 직접 입력)")
+    cn.add_argument("--here", action="store_true", help=argparse.SUPPRESS)  # 새 창 안에서 도는 자식
+    cn.add_argument("--result-file", help=argparse.SUPPRESS)  # 자식이 종료 코드를 남기는 파일(부모가 기다림)
+    cn.set_defaults(func=cmd_connect)
 
     c = sub.add_parser("cleanup", parents=[common], help=argparse.SUPPRESS)
     c.set_defaults(func=cmd_cleanup)

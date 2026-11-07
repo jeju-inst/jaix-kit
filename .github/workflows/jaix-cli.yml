@@ -57,6 +57,23 @@ jobs:
           $c = (Get-Content doctor.json -Raw | ConvertFrom-Json).checks | Where-Object area -eq 'uv 관리 Python'
           if ($c.status -ne 'ok') { throw "uv 관리 Python: $($c.status) $($c.message)" }
           Get-ChildItem "$env:APPDATA\uv\python"
+      # 도구를 실제로 한 번씩 돌려 본다: HWP 변환·추출(한글·띄어쓰기 경로)과 MCP 서버 주고받기는 러너에서도 통과해야 한다.
+      # 한컴·그룹웨어·Hermes 는 러너에 없어 건너뜀, 메일 앱 비밀번호는 '설정 필요'(실패 아님). --agent 는 돌리지 않는다
+      - name: jaix selftest
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+          jaix selftest --json > selftest.json
+          $code = $LASTEXITCODE
+          Get-Content selftest.json
+          $checks = (Get-Content selftest.json -Raw | ConvertFrom-Json).checks
+          foreach ($area in 'HWP → HWPX 변환', 'HWPX 본문 추출', 'MCP hwp-agent', 'MCP korea-rio') {
+            $c = $checks | Where-Object area -eq $area
+            if ($c.status -ne 'ok') { throw "selftest ${area}: $($c.status) $($c.message)" }
+          }
+          if ($code -ne 0) { throw "jaix selftest 실패" }
+          jaix selftest
       # 로그온 자동 갱신: 이 사용자로 못박은 예약 작업이 있고, 그 명령이 돌아 상태를 남기는지
       - name: Logon auto-update task
         shell: pwsh
@@ -119,3 +136,4 @@ jobs:
           path: |
             setup.log
             doctor.json
+            selftest.json
