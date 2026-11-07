@@ -69,7 +69,7 @@ def run(log, call=None, pause=None):
         log("처음 한 번은 Claude 로그인을 묻습니다(데스크톱 앱 로그인과 따로입니다):")
         log("  로그인 방법을 고르라고 하면 1번 'Claude account with subscription' → 브라우저에서 회사 계정(@ji.re.kr)으로 승인.")
         log("처음 한 번은 'Do you trust the files in this folder?'(이 폴더를 신뢰하나)를 묻습니다:")
-        log("  ↑ 키(또는 숫자 1)로 'Yes, I trust this folder' 를 고른 뒤 Enter. 그냥 Enter 를 치면 'No, exit' 로 꺼집니다.")
+        log("  ↑ 키로 'Yes, I trust this folder' 를 고른 뒤 Enter. 그냥 Enter 를 치면 'No, exit' 로 꺼집니다.")
         log("  이 폴더는 도우미 전용 빈 폴더라 신뢰해도 열리는 파일이 없습니다.")
         log("비밀번호는 이 창에 쓰지 마세요 — 계정 연결은 따로 뜨는 창에 직접 넣습니다. 끝내려면 /exit")
         log("")
