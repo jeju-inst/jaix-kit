@@ -332,6 +332,10 @@ jobs:
           $tag = "${{ github.ref_name }}"
           gh release delete $tag --yes 2>$null
           Compress-Archive -Path dist\jaix -DestinationPath jaix-windows.zip -Force
-          gh release create $tag ".\installer\Output\jaix-setup.exe" ".\jaix-windows.zip" --latest `
+          # 같은 설치기를 판 이름으로도 올린다(다운로드 폴더에 jaix-setup (13).exe 처럼 쌓여 판을 못 알아보던 것).
+          # jaix-setup.exe 는 그대로 둔다 — 고정 주소(latest/download)와 jaix update --self 가 이 이름으로 찾는다
+          $named = "jaix-setup-$($tag.TrimStart('v')).exe"
+          Copy-Item ".\installer\Output\jaix-setup.exe" ".\$named"
+          gh release create $tag ".\installer\Output\jaix-setup.exe" ".\$named" ".\jaix-windows.zip" --latest `
             --title "JAIX $tag" `
-            --notes "연구원 PC 설치: **jaix-setup.exe** 를 받아 실행하세요(관리자 권한 필요 없음).`n- jaix-setup.exe — 설치 프로그램. 런타임(uv·Git·Java·hwp2pdf)과 Claude·Codex 도구 등록까지 한 번에.`n- jaix-windows.zip — 같은 CLI(jaix setup · doctor · update)를 설치 없이 쓰는 폴더. 풀어서 jaix\jaix.exe 를 실행.`n고정 주소: https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe`nBuilt by .github/workflows/jaix-setup.yml."
+            --notes "연구원 PC 설치: **jaix-setup.exe** 를 받아 실행하세요(관리자 권한 필요 없음).`n- jaix-setup.exe — 설치 프로그램. 런타임(uv·Git·Java·hwp2pdf)과 Claude·Codex 도구 등록까지 한 번에.`n- $named — 위와 같은 파일(이름에 판 표시). 사람에게 직접 건넬 때 씀.`n- jaix-windows.zip — 같은 CLI(jaix setup · doctor · update)를 설치 없이 쓰는 폴더. 풀어서 jaix\jaix.exe 를 실행.`n고정 주소: https://github.com/jeju-inst/jaix-kit/releases/latest/download/jaix-setup.exe`nBuilt by .github/workflows/jaix-setup.yml."
