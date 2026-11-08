@@ -827,6 +827,8 @@ def refresh_kit(hermes, ident, log):
     if not python:
         log(f"    슬랙 플러그인 갱신: uv 관리 Python {uvpython.DEFAULT} 이 없어 건너뜀(다음 jaix update 때 다시)")
         return False
+    # 판마다 한 번이지만 받기·플러그인 켜기·gateway 재시작으로 몇 분 걸린다(jaix-test 실측 업데이트 1분 → 5분 40초)
+    log("    슬랙 플러그인 새 판을 받아 까는 중 — 몇 분 걸릴 수 있습니다(판마다 한 번)")
     try:
         text = config_path().read_text(encoding="utf-8")
     except OSError:
@@ -1125,7 +1127,7 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
         return {"status": "unsupported"}
     rec = recorded()
     # 이미 연결된 PC 에서 다시 설치(새 판 덮어 설치·같은 코드 재입력)해도 연결 기록을 잃지 않게 기억해 둔다(jaix-win 2차 12)
-    linked = (rec.get("slack") or {}).get("id") if rec.get("status") == "connected" else None
+    linked = linked_id(rec)
     rec.update({"model": model, "status": "installing"})
     if not dry_run:
         _save_record(rec)
@@ -1153,7 +1155,7 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
         return _done({"status": "failed", "error": code_error}, dry_run, linked, log)
     if not code:
         if linked:
-            log(f"    슬랙: 이미 Hermes-{linked} 로 연결돼 있어 그대로 둠")
+            log(f"    슬랙 연결: Hermes-{linked} 그대로 씀(새 연결 코드 없음 — 필요 없음)")
             return _done({"status": "connected", "id": linked, "login": PROVIDERS[model]["login"]}, dry_run)
         log("    슬랙 연결 코드가 없어 슬랙 연결은 건너뜀 — AI센터에서 코드를 받아 jaix-setup 을 다시 실행하세요")
         return _done({"status": "no-code", "login": PROVIDERS[model]["login"]}, dry_run)
@@ -1188,6 +1190,15 @@ def _done(result, dry_run, linked=None, log=None):
 
 
 # --- doctor 용 ------------------------------------------------------------------------------------
+def linked_id(rec=None):
+    """이 PC 가 jaix 로 슬랙에 연결된 봇 아이디(아니면 None): 연결 기록(slack.id)이 있고 Hermes .env 에 봇·앱 토큰이
+    있으면 연결된 것이다. status 는 보지 않는다 — 다시 설치가 중간에 끊겨 'installing' 으로 남았다가 코드 없는 다음
+    실행이 'no-code' 로 덮은 PC 도 봇은 그대로 돈다(jaix-kit-win .08.3 jaix-test: 로그·doctor 가 '연결 코드 없음')."""
+    rec = recorded() if rec is None else rec
+    ident = (rec.get("slack") or {}).get("id")
+    return ident if ident and env_has("SLACK_BOT_TOKEN") and env_has("SLACK_APP_TOKEN") else None
+
+
 def startup_entries():
     if not IS_WIN:
         return []

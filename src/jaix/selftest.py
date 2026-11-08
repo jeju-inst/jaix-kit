@@ -583,7 +583,7 @@ def check_hermes(credentials=None):
     if not hermes:
         return [_fail(area, "hermes 실행 파일이 없음", "jaix setup --channels hermes")]
     out = []
-    if rec["status"] == "no-code":
+    if rec["status"] == "no-code" and not hermesbot.linked_id(rec):
         out.append(_setup(area, "슬랙 연결 코드 없음", "AI센터에서 연결 코드를 받아 jaix-setup 다시"))
     else:
         out.append(_gateway())

@@ -3406,3 +3406,41 @@ def test_refresh_kit_restore_failure_keeps_user_name_for_retry(isolated, monkeyp
     assert back in calls
     slack = hermesbot.recorded()["slack"]
     assert slack["kit"] == hermesbot.SLACKBOT_SHA and "keep_name" not in slack
+
+
+# --- 연결된 PC 에 '연결 코드 없음'이 뜨던 것(jaix-kit-win .08.3 jaix-test) ----------------------------------------
+def test_hermes_setup_without_code_on_linked_pc_with_stale_status(isolated, monkeypatch, the_lock):
+    """다시 설치가 끊겨 status 가 'installing'(또는 다음 실행이 덮은 'no-code')로 남아도, 연결 기록과 토큰이 있으면
+    연결된 PC 다 — '코드가 없어 건너뜀' 대신 '그대로 씀', doctor 도 연결로 본다."""
+    for stale in ("installing", "no-code"):
+        _connected_before(isolated, monkeypatch)
+        rec = hermesbot.recorded()
+        rec["status"] = stale
+        hermesbot._save_record(rec)
+        lines = []
+        res = REAL_HERMES_SETUP(the_lock, lines.append)
+        text = "\n".join(lines)
+        assert res["status"] == "connected" and res["id"] == "jitest"
+        assert "Hermes-jitest 그대로 씀" in text and "코드가 없어" not in text
+        assert hermesbot.recorded()["status"] == "connected"
+        assert [c.status for c in doctor.check_hermes_bot()] == ["ok"]
+
+
+def test_doctor_no_code_record_with_tokens_is_connected(isolated, monkeypatch):
+    _connected_before(isolated, monkeypatch)
+    rec = hermesbot.recorded()
+    rec["status"] = "no-code"   # 고치기 전 판이 덮어쓴 기록
+    hermesbot._save_record(rec)
+    assert [c.status for c in doctor.check_hermes_bot()] == ["ok"]
+    (hermesbot.paths.hermes_home() / ".env").write_text("", encoding="utf-8")   # 토큰이 없으면 연결 안 된 것
+    checks = doctor.check_hermes_bot()
+    assert checks[0].status == "warn" and "연결 코드 없음" in checks[0].message
+
+
+def test_refresh_kit_says_it_may_take_minutes(isolated, monkeypatch, tmp_path):
+    _kit_ready(monkeypatch, tmp_path)
+    lines = []
+    assert REAL_REFRESH_KIT("/x/hermes", "namun", lines.append)
+    assert any("몇 분 걸릴 수 있습니다" in l for l in lines)
+    lines.clear()
+    assert REAL_REFRESH_KIT("/x/hermes", "namun", lines.append) and lines == []   # 같은 판이면 안내도 없음

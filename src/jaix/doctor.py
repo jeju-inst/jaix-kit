@@ -468,7 +468,7 @@ def check_hermes_bot():
         return [Check("fail", area, rec.get("error") or "설치 실패", "jaix setup --channels hermes (AI센터 연결 코드 필요)")]
     if not hermesbot.find_hermes():
         return [Check("fail", area, "hermes 실행 파일이 없음", "jaix setup --channels hermes")]
-    if rec["status"] == "no-code":
+    if rec["status"] == "no-code" and not hermesbot.linked_id(rec):  # 연결 기록·토큰이 있으면 연결된 것(아래 점검)
         return [Check("warn", area, "Hermes는 있으나 슬랙 연결 안 됨(연결 코드 없음)", "AI센터에서 연결 코드를 받아 jaix-setup 다시")]
     out = []
     if not (hermesbot.env_has("SLACK_BOT_TOKEN") and hermesbot.env_has("SLACK_APP_TOKEN")):
