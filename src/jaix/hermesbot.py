@@ -809,8 +809,53 @@ def quiet(hermes, log):
     _save_record(rec)
     ident = (rec.get("slack") or {}).get("id")
     if ident:  # 이미 연결된 PC(jaix update·재설치). 처음 연결은 setup() 이 connect_slack 뒤에 부른다
+        refresh_kit(hermes, ident, log)  # 실패해도 막지 않는다(다음 update 때 다시)
         ok &= bot_room(hermes, ident, log)
     return ok
+
+
+def refresh_kit(hermes, ident, log):
+    """이미 연결된 PC 에 hermes-slackbot 새 판의 플러그인을 깐다(install.py <id>). 처음 연결 때는 setup_pc.py 가
+    install.py 를 부르지만, 그 뒤 판에서 늘어난 기본 플러그인은 jaix update 로만 받을 수 있다(hermes-slackbot#24).
+    기록된 판(slack.kit)이 SLACKBOT_SHA 와 다를 때만, 판마다 한 번. 성공해야 기록을 바꾼다(실패는 다음 update 때 다시).
+    install.py 는 base_name 을 Hermes-<id> 로 덮으므로, 사용자가 다른 이름을 정해 뒀으면 끝난 뒤 되돌린다.
+    gateway 재시작은 install.py 를 실제로 돌렸을 때만."""
+    rec = recorded()
+    if (rec.get("slack") or {}).get("kit") == SLACKBOT_SHA:
+        return True
+    python = uvpython.find(uvpython.DEFAULT)
+    if not python:
+        log(f"    슬랙 플러그인 갱신: uv 관리 Python {uvpython.DEFAULT} 이 없어 건너뜀(다음 jaix update 때 다시)")
+        return False
+    try:
+        text = config_path().read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    before = _yaml_scalar(text, "plugins", "entries", "slack-model-display", "settings", "base_name")
+    keep = before if before and before != YAML_BLOCK and before.lower() != f"hermes-{ident}" else None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = _slackbot_dir(tmp)
+            ok, _ = _run([python, str(kit / "scripts" / "install.py"), ident], log, timeout=600)
+    except (OSError, ValueError, tarfile.TarError, StopIteration) as e:
+        log(f"    슬랙 플러그인 갱신: 받지 못해 건너뜀({type(e).__name__}) — 다음 jaix update 때 다시")
+        return False
+    if not ok:
+        log("    슬랙 플러그인 갱신 실패(위 기록) — 다음 jaix update 때 다시")
+        return False
+    if keep and not _run([hermes, "config", "set", BASE_NAME_KEY, keep], log)[0]:
+        log("    답 이름 표시를 원래 값으로 되돌리지 못함 — 다음 jaix update 때 다시")
+        return False
+    if keep:
+        log("    답 이름 표시: 사용자 설정을 그대로 둠")
+    rec = recorded()
+    rec.setdefault("slack", {})["kit"] = SLACKBOT_SHA
+    _save_record(rec)
+    if _run([hermes, "gateway", "restart"], log, timeout=180)[0]:
+        log("    슬랙 플러그인을 새 판으로 맞추고 Hermes gateway 를 다시 시작함")
+    else:
+        log("    슬랙 플러그인을 새 판으로 맞춤 — gateway 를 다시 시작하지 못해 다음 로그온부터 적용됩니다")
+    return True
 
 
 YAML_BLOCK = "\x00block"  # 목록·하위 매핑·| > 블록 등 한 줄로 못 읽는 값 — 사용자 것으로 본다
@@ -873,8 +918,9 @@ def _yaml_scalar(text, *path):
                     more.append(lines[i])
                     i += 1
                 value = (m.group(1) or "").strip()
-                if not value:
-                    return YAML_BLOCK if more else ""
+                if not value:  # 하위 줄이 있거나, 들여쓰지 않은 목록(키와 같은 깊이의 '- ')이면 값이 있는 것
+                    same_indent_list = i < len(lines) and depth(lines[i]) == indent and lines[i].lstrip().startswith("-")
+                    return YAML_BLOCK if more or same_indent_list else ""
                 if value[0] in "|>[{&*!" or (more and more[0].lstrip().startswith("- ")):
                     return YAML_BLOCK
                 return _unquote(_fold(value, more))
@@ -956,6 +1002,12 @@ def bot_room(hermes, ident, log, call=None):
     base_name)는 hermes-slackbot install.py 가 넣는다(hermes-slackbot#24) — jaix 는 rename 때만 따라 바꾼다."""
     rec = recorded()
     owned = rec.get("room") or {}
+    # 기록은 이 연결(봇)의 것이다. 새 연결 코드로 다른 봇을 붙였으면 그 봇은 옛 채널에 없으니 다시 확인한다(Codex #145).
+    # rename 은 같은 봇이라 연결 시각을 그대로 둔다
+    linked = (rec.get("slack") or {}).get("connected")
+    if owned.get("connected") != linked:
+        owned["invited"] = False
+    owned["connected"] = linked
     try:
         text = config_path().read_text(encoding="utf-8")
     except OSError:
@@ -1048,7 +1100,9 @@ def connect_slack(bundle, log):
         if "already set" in out:
             log("    이 PC의 Hermes 에 다른 슬랙 토큰이 있어 바꾸지 않았습니다. AI센터에 알려 주세요.")
         return False
-    rec["slack"] = {"id": bundle["id"], "connected": datetime.datetime.now().isoformat(timespec="seconds")}
+    # setup_pc.py 가 이 판의 install.py 까지 돌렸다 → refresh_kit 이 같은 판을 다시 깔지 않게 기록
+    rec["slack"] = {"id": bundle["id"], "connected": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "kit": SLACKBOT_SHA}
     _save_record(rec)
     log(f"    슬랙: Hermes-{bundle['id']} 연결됨")
     return True

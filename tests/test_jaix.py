@@ -18,6 +18,7 @@ REAL_CLIS = {}
 REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_UV_ENSURE = uvpython.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_GW_FOREIGN = gw.foreign  # isolated 픽스처가 막기 전의 진짜 함수
+REAL_REFRESH_KIT = hermesbot.refresh_kit  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
@@ -49,6 +50,9 @@ def isolated(tmp_path, monkeypatch):
     _guard_real_hermes(tmp_path, monkeypatch)
     # 진짜 슬랙 API 도 부르지 않는다(봇 토큰으로 채널을 만드는 bot_room 등). 필요한 시험이 흉내를 단다
     monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: pytest.fail(f"시험이 진짜 슬랙 API 를 부름: {a[:1]}"))
+    # hermes-slackbot 을 진짜로 받지 않는다. 연결된 PC 의 플러그인 갱신은 REAL_REFRESH_KIT 시험에서만
+    monkeypatch.setattr(hermesbot, "_slackbot_dir", lambda workdir: pytest.fail("시험이 hermes-slackbot 을 진짜로 받음"))
+    monkeypatch.setattr(hermesbot, "refresh_kit", lambda hermes, ident, log: True)
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "JAIX_HOME", "JAIX_DATA", "HERMES_HOME"):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     monkeypatch.setenv("JAIX_LOCK", str(LOCK_FILE))
@@ -3273,3 +3277,106 @@ def test_quiet_keeps_owning_prompt_after_hermes_rewrites_it_folded(isolated, mon
     assert hermesbot.quiet("hermes", lines.append)
     assert not any("기본 지시문" in l and "그대로 둠" in l for l in lines)
     assert hermesbot.recorded()["quiet"][hermesbot.PROMPT_KEY] == hermesbot.SYSTEM_PROMPT
+
+
+# --- 연결된 PC 의 슬랙 플러그인 갱신(조율 결정 11/8: hermes-slackbot#24 새 기본 플러그인을 jaix update 로) ----------
+def _kit_ready(monkeypatch, tmp_path, base_name=None, install_ok=True):
+    _connected(monkeypatch)
+    calls = []
+    kit = tmp_path / "kit"
+    (kit / "scripts").mkdir(parents=True)
+    monkeypatch.setattr(hermesbot, "_slackbot_dir", lambda workdir: kit)
+    monkeypatch.setattr(hermesbot.uvpython, "find", lambda v: "/x/python")
+
+    def run(cmd, log, timeout=600):
+        calls.append([Path(cmd[0]).name, *cmd[1:]])
+        if cmd[1:2] == [str(kit / "scripts" / "install.py")]:
+            if not install_ok:
+                return False, "boom"
+            hermesbot.config_path().write_text(  # install.py 는 base_name 을 Hermes-<id> 로 덮는다
+                "plugins:\n  entries:\n    slack-model-display:\n      settings:\n        base_name: Hermes-namun\n",
+                encoding="utf-8")
+        return True, ""
+    monkeypatch.setattr(hermesbot, "_run", run)
+    if base_name:
+        hermesbot.config_path().write_text(
+            f"plugins:\n  entries:\n    slack-model-display:\n      settings:\n        base_name: {base_name}\n",
+            encoding="utf-8")
+    return calls, kit
+
+
+def test_refresh_kit_runs_install_once_per_release_and_restarts(isolated, monkeypatch, tmp_path):
+    calls, kit = _kit_ready(monkeypatch, tmp_path)
+    lines = []
+    assert REAL_REFRESH_KIT("/x/hermes", "namun", lines.append)
+    assert calls == [["python", str(kit / "scripts" / "install.py"), "namun"], ["hermes", "gateway", "restart"]]
+    assert hermesbot.recorded()["slack"]["kit"] == hermesbot.SLACKBOT_SHA
+    assert any("gateway 를 다시 시작함" in l for l in lines)
+    calls.clear()
+    assert REAL_REFRESH_KIT("/x/hermes", "namun", print) and calls == []   # 같은 판이면 안 돎(재시작도 없음)
+
+
+@pytest.mark.parametrize("before,restored", [(None, False), ("Hermes-namun", False), ("hermes-namun", False),
+                                             ("내 봇", True)])
+def test_refresh_kit_keeps_user_base_name(isolated, monkeypatch, tmp_path, before, restored):
+    calls, _ = _kit_ready(monkeypatch, tmp_path, base_name=before)
+    assert REAL_REFRESH_KIT("/x/hermes", "namun", print)
+    back = ["hermes", "config", "set", hermesbot.BASE_NAME_KEY, "내 봇"]
+    assert (back in calls) is restored
+    if restored:  # install.py 뒤, 재시작 전에 되돌린다
+        assert calls.index(back) < calls.index(["hermes", "gateway", "restart"])
+
+
+def test_refresh_kit_failure_keeps_record_and_no_restart(isolated, monkeypatch, tmp_path):
+    calls, _ = _kit_ready(monkeypatch, tmp_path, install_ok=False)
+    assert not REAL_REFRESH_KIT("/x/hermes", "namun", print)
+    assert "kit" not in hermesbot.recorded()["slack"]
+    assert ["hermes", "gateway", "restart"] not in calls
+    monkeypatch.setattr(hermesbot, "_slackbot_dir", lambda w: (_ for _ in ()).throw(OSError("offline")))
+    lines = []
+    assert not REAL_REFRESH_KIT("/x/hermes", "namun", lines.append)
+    assert "kit" not in hermesbot.recorded()["slack"] and any("OSError" in l for l in lines)
+
+
+def test_quiet_refresh_kit_failure_does_not_fail_update(isolated, monkeypatch):
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run([]))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    monkeypatch.setattr(hermesbot, "bot_room", lambda h, ident, log, call=None: True)
+    seen = []
+    monkeypatch.setattr(hermesbot, "refresh_kit", lambda h, ident, log: seen.append(ident) or False)
+    hermesbot._save_record({"slack": {"id": "jitest"}})
+    assert hermesbot.quiet("hermes", print) and seen == ["jitest"]
+
+
+def test_connect_records_kit_release(isolated, monkeypatch):
+    """처음 연결은 setup_pc.py 가 install.py 를 돌리므로 그 판을 기록한다(바로 다음 update 에서 다시 깔지 않음)."""
+    monkeypatch.setattr(hermesbot.uvpython, "find", lambda v: "/x/python")
+    monkeypatch.setattr(hermesbot, "_slackbot_dir", lambda w: Path(w))
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (True, ""))
+    assert hermesbot.connect_slack({"id": "demo", "user": "U1", "bot_token": "b", "app_token": "a"}, print)
+    assert hermesbot.recorded()["slack"]["kit"] == hermesbot.SLACKBOT_SHA
+
+
+def test_yaml_scalar_indentationless_list_is_user_set():
+    """Codex #145: 키와 같은 깊이의 '- ' 목록도 값이 있는 것이다."""
+    text = "slack:\n  free_response_channels:\n  - C0MINE\n  require_mention: true\n"
+    assert hermesbot._yaml_scalar(text, "slack", "free_response_channels") == hermesbot.YAML_BLOCK
+    assert hermesbot._yaml_scalar(text, "slack", "require_mention") == "true"
+
+
+def test_bot_room_rechecks_after_new_bot_connected(isolated, monkeypatch):
+    """Codex #145: 새 코드로 다른 봇을 붙이면 옛 채널 기록으로 건너뛰지 않는다. rename(연결 시각 그대로)은 건너뜀."""
+    state, seen, calls = {}, [], []
+    _room_ready(monkeypatch, state, seen, calls)
+    hermesbot._save_record({"slack": {"id": "jitest", "connected": "t1"}})
+    assert hermesbot.bot_room("hermes", "jitest", print) and "conversations.create" in seen
+    seen.clear()
+    rec = hermesbot.recorded()
+    rec["slack"] = {"id": "jitest", "connected": "t1", "renamed_from": "old"}
+    hermesbot._save_record(rec)
+    assert hermesbot.bot_room("hermes", "jitest", print) and seen == []
+    rec = hermesbot.recorded()
+    rec["slack"] = {"id": "jitest", "connected": "t2"}   # 새 연결 코드
+    hermesbot._save_record(rec)
+    assert hermesbot.bot_room("hermes", "jitest", print)
+    assert seen[:1] == ["conversations.list"] and "conversations.invite" in seen
