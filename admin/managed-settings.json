@@ -15,6 +15,7 @@
     "mail-skill@jaix": true,
     "hwp2pdf@jaix": true,
     "jaix-help@jaix": true,
+    "jaix-works@jaix": true,
     "claude-for-nonprofits@synced": false
   },
   "model": "sonnet",
