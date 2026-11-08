@@ -385,3 +385,15 @@ def test_run_all_survives_crash(the_lock, monkeypatch):
     monkeypatch.setattr(selftest, "check_gw", lambda: [])
     res = selftest.run_all(the_lock, log=lambda m: None)
     assert any(r.area == "MCP 서버" and r.status == "fail" and "ZeroDivisionError" in r.message for r in res)
+
+
+def test_hermes_no_code_record_with_tokens_checks_gateway(monkeypatch):
+    """jaix-kit-win .08.3: 연결 기록·토큰이 있는 PC 는 status 가 no-code 로 남아도 '연결 코드 없음'이 아니다."""
+    monkeypatch.setattr(hermesbot, "recorded", lambda: {"status": "no-code", "model": "chatgpt", "slack": {"id": "jitest"}})
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    env = paths.hermes_home() / ".env"
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text("SLACK_BOT_TOKEN=x\nSLACK_APP_TOKEN=y\n", encoding="utf-8")
+    assert "연결 코드 없음" not in selftest.check_hermes(lambda h, p: [])[0].message
+    env.write_text("", encoding="utf-8")
+    assert "연결 코드 없음" in selftest.check_hermes(lambda h, p: [])[0].message
