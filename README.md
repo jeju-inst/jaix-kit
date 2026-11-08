@@ -104,3 +104,16 @@ claude plugin install calendar-worklog-ji@jaix
 도구 편입 표준은 [`docs/tool-standard.md`](docs/tool-standard.md)다. 형식·버전·잠금·MCP·Windows·토큰 예산 같은 규칙에 ID(`TS-…`)가 붙어 있고, 잠금 CI가 같은 ID로 검사한다. 편입 PR 본문 끝에 이 문서의 체크리스트를 붙인다.
 
 설계 근거: `docs/design.md`. 상위 표준이던 `ji-deploy-standards`(v1)는 `docs/tool-standard.md`에 흡수했다.
+
+## 라이선스
+[MIT](LICENSE). 이 저장소(jaix CLI·설치본·잠금 목록)에 한한다. 잠금 목록이 가리키는 각 도구는 그 저장소의 라이선스를 따른다.
+
+## Code signing policy
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). *(신청 중 — 승인되면 그 판부터 서명된 `jaix-setup.exe` 를 낸다.)*
+
+- **What is signed**: `jaix-setup.exe` and the `jaix.exe` / `jaixw.exe` it installs, built from this repository by `.github/workflows/jaix-setup.yml` (PyInstaller bootloader built from source).
+- **Team roles**
+  - Committers and reviewers: [jeju-inst/jaix-kit maintainers](https://github.com/jeju-inst/jaix-kit/graphs/contributors) — every change goes through a pull request with an automated review and CI.
+  - Approvers (signing requests): [@z0nam](https://github.com/z0nam)
+- **Privacy policy**: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It downloads its own updates and the tools it installs from GitHub releases. The tools it installs (Claude, Codex, Hermes and their plug-ins) talk to the AI services the user signs in to, under those services' own policies.
+- **Uninstall**: Windows *Settings → Apps → JAIX 원내 AI 도구* (or `unins000.exe` in `%LOCALAPPDATA%\Programs\jaix`).
