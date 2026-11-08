@@ -3380,3 +3380,29 @@ def test_bot_room_rechecks_after_new_bot_connected(isolated, monkeypatch):
     hermesbot._save_record(rec)
     assert hermesbot.bot_room("hermes", "jitest", print)
     assert seen[:1] == ["conversations.list"] and "conversations.invite" in seen
+
+
+def test_yaml_scalar_flow_mapping_ancestor_is_user_set():
+    """Codex #145: 조상이 흐름 매핑이면 값이 없다고 보지 않는다."""
+    assert hermesbot._yaml_scalar("slack: {free_response_channels: C0MINE}\n", "slack", "free_response_channels") \
+        == hermesbot.YAML_BLOCK
+    assert hermesbot._yaml_scalar("agent: {system_prompt: Be brief}\n", "agent", "system_prompt") == hermesbot.YAML_BLOCK
+    assert hermesbot._yaml_scalar("agent:  # 메모\n  system_prompt: hi\n", "agent", "system_prompt") == "hi"
+
+
+def test_refresh_kit_restore_failure_keeps_user_name_for_retry(isolated, monkeypatch, tmp_path):
+    """Codex #145: 되돌리기가 실패해 파일엔 Hermes-<id> 만 남아도, 다음 재시도에서 원래 이름을 되돌린다."""
+    calls, kit = _kit_ready(monkeypatch, tmp_path, base_name="내 봇")
+    real_run = hermesbot._run
+    back = ["hermes", "config", "set", hermesbot.BASE_NAME_KEY, "내 봇"]
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600:
+                        (calls.append([Path(cmd[0]).name, *cmd[1:]]), (False, ""))[1]
+                        if [Path(cmd[0]).name, *cmd[1:]] == back else real_run(cmd, log, timeout))
+    assert not REAL_REFRESH_KIT("/x/hermes", "namun", print)
+    assert "kit" not in hermesbot.recorded()["slack"] and hermesbot.recorded()["slack"]["keep_name"] == "내 봇"
+    calls.clear()
+    monkeypatch.setattr(hermesbot, "_run", real_run)   # 이번엔 되돌리기 성공(파일은 이미 Hermes-namun)
+    assert REAL_REFRESH_KIT("/x/hermes", "namun", print)
+    assert back in calls
+    slack = hermesbot.recorded()["slack"]
+    assert slack["kit"] == hermesbot.SLACKBOT_SHA and "keep_name" not in slack

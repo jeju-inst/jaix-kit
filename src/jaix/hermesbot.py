@@ -832,7 +832,13 @@ def refresh_kit(hermes, ident, log):
     except OSError:
         text = ""
     before = _yaml_scalar(text, "plugins", "entries", "slack-model-display", "settings", "base_name")
-    keep = before if before and before != YAML_BLOCK and before.lower() != f"hermes-{ident}" else None
+    # 사용자 이름은 install.py 전에 기록에 남긴다 — 되돌리기가 실패하면 파일엔 Hermes-<id> 만 남아, 다음 재시도에서
+    # 원래 이름을 알 수 없게 된다(Codex #145)
+    keep = (rec.get("slack") or {}).get("keep_name") or (
+        before if before and before != YAML_BLOCK and before.lower() != f"hermes-{ident}" else None)
+    if keep:
+        rec.setdefault("slack", {})["keep_name"] = keep
+        _save_record(rec)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             kit = _slackbot_dir(tmp)
@@ -850,6 +856,7 @@ def refresh_kit(hermes, ident, log):
         log("    답 이름 표시: 사용자 설정을 그대로 둠")
     rec = recorded()
     rec.setdefault("slack", {})["kit"] = SLACKBOT_SHA
+    rec["slack"].pop("keep_name", None)
     _save_record(rec)
     if _run([hermes, "gateway", "restart"], log, timeout=180)[0]:
         log("    슬랙 플러그인을 새 판으로 맞추고 Hermes gateway 를 다시 시작함")
@@ -911,6 +918,9 @@ def _yaml_scalar(text, *path):
             m = key.match(line) if indent == child else None
             if m:
                 if n < len(path) - 1:
+                    inline = (m.group(1) or "").strip()
+                    if inline and not inline.startswith("#"):  # 흐름 매핑({…})·앵커 등 — 모르는 모양은 사용자 것
+                        return YAML_BLOCK
                     parent = indent
                     break
                 more = []
