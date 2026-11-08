@@ -1025,7 +1025,7 @@ def bot_room(hermes, ident, log, call=None):
     except OSError:
         text = ""
     put = _Setter(hermes, log)
-    ok = True
+    ok, restart = True, False
     current = _yaml_scalar(text, "slack", "free_response_channels")
     mine = owned.get(ROOM_KEY)
     if current and current != mine:
@@ -1041,6 +1041,14 @@ def bot_room(hermes, ident, log, call=None):
                 ok &= _own_scalar(put, owned, ROOM_KEY, current, cid, log, "전용 채널")
                 if owned.get(ROOM_KEY) == cid:
                     log(f"    전용 채널 hermes-{ident}: 멘션 없이 답하게 함")
+                    restart = current != cid
+    # gateway 는 설정을 시작할 때만 읽는다. 연결(setup_pc)·플러그인 갱신이 gateway 를 먼저 다시 띄운 뒤라, 새로 넣은
+    # 전용 채널은 한 번 더 다시 띄워야 먹는다(jaix-test 실측 11/9: 채널은 생겼는데 멘션 없는 말에 답 안 함)
+    if restart:
+        if _run([hermes, "gateway", "restart"], log, timeout=180)[0]:
+            log("    전용 채널 설정을 적용하려고 Hermes gateway 를 다시 시작함")
+        else:
+            log("    gateway 를 다시 시작하지 못해 전용 채널은 다음 로그온부터 멘션 없이 답합니다")
     put.save()
     rec = recorded()
     rec["room"] = owned

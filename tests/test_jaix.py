@@ -3144,6 +3144,8 @@ def test_bot_room_creates_private_channel_invites_owner_and_is_idempotent(isolat
     assert seen == ["conversations.list", "conversations.create", "conversations.invite"]
     sets = {c[3]: c[4] for c in calls if c[1:3] == ["config", "set"]}
     assert sets == {hermesbot.ROOM_KEY: "G123"}   # base_name 은 install.py 몫(hermes-slackbot#24)
+    # gateway 는 시작 때만 설정을 읽는다 — 새로 넣었으면 다시 띄운다(jaix-test 11/9)
+    assert ["hermes", "gateway", "restart"] in calls
     # 재실행(로그온 update): 슬랙을 다시 부르지 않고 설정도 그대로
     seen.clear(), calls.clear()
     assert hermesbot.bot_room("hermes", "jitest", print)
