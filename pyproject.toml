@@ -4,6 +4,7 @@ name = "jaix"
 version = "0.0.0+dev"
 description = "제주연구원 JAIX 도구 설치·점검·갱신 (setup · doctor · update)"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = []
 
 [project.scripts]
