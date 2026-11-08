@@ -59,7 +59,7 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | `enabledPlugins` `claude-for-nonprofits@synced` | `false` | ①과 이중 차단. 계정 동기화 플러그인 하나를 끄는 공식 형식이 `"<name>@synced": false` 다(settings-reference `syncClaudeAiPlugins` 절) |
 | `model` | `sonnet` | 좌석이 대부분 Pro의 1.25배라 한도 방지. 사용자의 `/model` 선택보다 우선하지만 `--model` 은 이긴다 |
 | `permissions.disableBypassPermissionsMode` | `disable` | 비개발자 PC에서 "전부 허용" 모드를 막는다. 잠금이 아니라 사고 방지 |
-| `companyAnnouncements` | 안내 1줄 | 시작 화면에 표시 |
+| `companyAnnouncements` | 안내 1줄 | 시작 화면에 표시. 조건 없이 전원에게 같은 문구가 뜨므로 jaix 설치 권유 같은 문구는 넣지 않는다(2026-11-09) |
 
 - **넣지 않은 것("느슨" 결정)**: `strictKnownMarketplaces`, `allowedMcpServers`/`deniedMcpServers`, `allowManagedPermissionRulesOnly`. 개인이 다른 마켓플레이스·MCP를 추가할 수 있다.
 - **주의 — 강제 켬의 비용**: `korea-rio-mcp` 처럼 일부 연구자만 쓰는 플러그인도 CLI에서는 모두에게 강제로 켜진다. 인수 시험 7절에서 상시 비용이 3k를 넘으면 그 플러그인만 `enabledPlugins` 에서 빼고 ①의 "Available to install"로 내린다.
