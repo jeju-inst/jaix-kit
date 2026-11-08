@@ -28,7 +28,7 @@ PC에 따라 이 창이 뜨지 않을 수 있습니다. 뜨면 [추가 정보] �
 ## 3. 설치 화면
 1. **어디에서 쓰시나요?** — 쓰는 AI를 고른다. Claude는 기본으로 체크돼 있고, Codex는 PC에 있으면 체크돼 있다. "슬랙으로도 쓰기(Hermes)"를 고르면 다음 두 화면이 더 나온다.
    - **슬랙 연결 코드**: AI센터에서 받은 `JX-…` 코드를 붙여 넣는다. 한 번만 쓸 수 있고 72시간 뒤 만료된다. **원내망에서 설치해야 한다.** 코드가 없으면 비워 두면 된다. 그러면 Hermes만 깔리고, 나중에 코드를 받아 다시 설치하면 슬랙이 연결된다.
-   - **Hermes가 쓸 AI**: 미리 골라져 있지 않으니 하나를 고른다. **ChatGPT 유료 구독(Plus 이상)** 또는 **회사 Claude 계정(Team)**. 개인 Claude Pro 구독으로는 Hermes가 동작하지 않는다(Hermes 문서 providers.md "Subscription plans" 표에서 Pro ❌. 회사 Team 계정은 2026-11-05 studio에서 실측해 동작함).
+   - **Hermes가 쓸 AI**: 미리 골라져 있지 않으니 하나를 고른다. **ChatGPT 유료 구독(Plus 이상)** 또는 **회사 Claude 계정(Team)**. 개인 Claude Pro 구독으로는 Hermes가 동작하지 않을 가능성이 높다(Hermes 문서 providers.md "Subscription plans" 표에서 Pro ❌. 회사 Team 계정은 2026-11-05 studio에서 실측해 동작함).
    - Hermes 설치는 처음에 10-20분 걸리고 약 3GB를 쓴다.
    (그림 3 — `setup-channels.png`)
 2. **도구 설치 중** — 런타임을 받고 AI에 도구를 등록한다. 몇 분 걸릴 수 있다. 기존 설정은 지우지 않고, 바꾸기 전에 백업한다.
