@@ -125,7 +125,7 @@ def test_cli_works_login_parses():
 
 
 def test_npm_launch_failure_is_a_failed_status(monkeypatch):
-    def boom(cli, args, timeout=600):
+    def boom(cli, args, timeout=600, cwd=None):
         raise works.subprocess.TimeoutExpired("npm", 900)
     monkeypatch.setattr(works, "_npm", lambda: "/x/npm")
     monkeypatch.setattr(works.proc, "run", boom)
@@ -169,6 +169,8 @@ def test_npm_failure_shows_npm_error_lines(monkeypatch):
     out = ("npm error code EPERM\nnpm error syscall rename\nnpm error path C:\\x\n"
            "npm error A complete log of this run can be found in: C:\\log.txt\n")
     monkeypatch.setattr(works, "_npm", lambda: "/x/npm")
-    monkeypatch.setattr(works.proc, "run", lambda c, a, timeout=600: (1, out))
+    seen = {}
+    monkeypatch.setattr(works.proc, "run", lambda c, a, timeout=600, cwd=None: (seen.update(cwd=cwd), (1, out))[1])
     ok, why = works._npm_install("1.3.1")
     assert not ok and "EPERM" in why and "rename" in why and "complete log" not in why
+    assert seen["cwd"] == str(works.home())  # Windows npm 은 현재 폴더의 package.json 을 읽는다

@@ -182,8 +182,10 @@ def _npm_install(version):
     if not npm:
         return False, "npm 을 찾지 못함"
     try:
+        # cwd 도 home() 으로 — Windows npm 은 --prefix 를 줘도 현재 폴더의 package.json 을 읽어 ENOENT 로 실패했다
+        # (CI 11/9: 'Could not read package.json ... D:\\a\\jaix-kit\\jaix-kit\\package.json'). 설치기는 {app} 에서 돈다
         code, out = proc.run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", str(home())],
-                             timeout=900)
+                             timeout=900, cwd=str(home()))
     except (OSError, subprocess.TimeoutExpired) as e:  # update 가 다른 단계까지 멈추지 않게 실패로 돌려준다
         return False, f"npm 실행 실패: {e}"
     lines = [ln.strip() for ln in out.strip().splitlines()]
