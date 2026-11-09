@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, runtimes, schedule, uvpython, winenv
+from jaix import claude, cli, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, runtimes, schedule, uvpython, winenv, works
 
 REAL_HWPJAR = {}
 REAL_CLIS = {}
@@ -71,6 +71,8 @@ def isolated(tmp_path, monkeypatch):
     # 플러그인 bin 명령: 소스를 진짜로 받지 않고, 링크는 tmp 에(시험은 REAL_PLUGBIN_ENSURE 를 부른다)
     monkeypatch.setattr(plugbin, "ensure", lambda lock, log, dry_run=False, offline=False:
                         {"status": "ok", "commands": [], "failed": []})
+    # 웍스(nworks): 잠금에 jaix-works 가 있어도 진짜 npm install 을 돌리지 않는다(시험은 test_works.py)
+    monkeypatch.setattr(works, "ensure", lambda lock, log, dry_run=False, offline=False: {"status": "absent"})
     monkeypatch.setenv("JAIX_LINK_DIR", str(tmp_path / "linkbin"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))  # 한컴 옵션 파일도 tmp 로
     monkeypatch.setattr(paths, "desktop_installed", lambda: False)
