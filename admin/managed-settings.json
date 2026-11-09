@@ -18,6 +18,7 @@
     "jaix-works@jaix": true,
     "claude-for-nonprofits@synced": false
   },
+  "channelsEnabled": true,
   "model": "sonnet",
   "permissions": {
     "disableBypassPermissionsMode": "disable"
