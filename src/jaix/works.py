@@ -132,13 +132,24 @@ def existing(want_version):
     return found, lines[-1].strip()
 
 
-def cli(want_version=None):
-    """스킬·로그인이 부를 nworks: jaix 가 깐 것, 없으면 이미 있던 것."""
+def _saved_want():
+    """setup 이 쓴 runtime.json 사본의 nworks(버전·무결성). 없으면 기본값."""
+    try:
+        nw = json.loads(saved_spec_file().read_text(encoding="utf-8"))["nworks"]
+        return {"version": nw["version"], "integrity": nw["integrity"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return dict(FALLBACK["nworks"])
+
+
+def cli():
+    """로그인·connect 가 부를 nworks. setup 의 판단과 같게: jaix 사본이 잠금과 맞으면 그것, 아니면 받아들인 기존 nworks,
+    둘 다 없을 때만 (낡았더라도) jaix 사본."""
+    want = _saved_want()
     mine = exe()
-    if mine:
+    if mine and installed() == (want["version"], want["integrity"]):
         return mine
-    got = existing(want_version or FALLBACK["nworks"]["version"])
-    return got[0] if got else None
+    got = existing(want["version"])
+    return got[0] if got else mine
 
 
 def client_file():

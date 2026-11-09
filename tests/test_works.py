@@ -174,3 +174,16 @@ def test_npm_failure_shows_npm_error_lines(monkeypatch):
     ok, why = works._npm_install("1.3.1")
     assert not ok and "EPERM" in why and "rename" in why and "complete log" not in why
     assert seen["cwd"] == str(works.home())  # Windows npm 은 현재 폴더의 package.json 을 읽는다
+
+
+def test_cli_prefers_accepted_external_over_stale_managed(monkeypatch):
+    """낡은 jaix 사본(1.2.9)과 받아들인 기존 nworks(1.3.2)가 같이 있으면 로그인도 기존 것을 쓴다(Codex #154)."""
+    monkeypatch.setattr(works, "exe", lambda: "/jaix/nworks")
+    monkeypatch.setattr(works, "installed", lambda: ("1.2.9", "sha512-old"))
+    monkeypatch.setattr(works, "existing", lambda want: ("/usr/local/bin/nworks", "1.3.2"))
+    assert works.cli() == "/usr/local/bin/nworks"
+    monkeypatch.setattr(works, "installed", lambda: (WANT["version"], WANT["integrity"]))
+    assert works.cli() == "/jaix/nworks"
+    monkeypatch.setattr(works, "installed", lambda: ("1.2.9", "sha512-old"))
+    monkeypatch.setattr(works, "existing", lambda want: None)
+    assert works.cli() == "/jaix/nworks"
