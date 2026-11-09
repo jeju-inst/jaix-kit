@@ -68,6 +68,10 @@ class Log:
 def guide(channels, result):
     """채널별 "이렇게 쓰세요". 고른 채널만 보여 준다(ji-deploy-standards 3.1)."""
     out = []
+    if (result.get("gw") or {}).get("status") == "offsite":
+        again = "시작 메뉴 'JAIX 업데이트'(명령창이면 `jaix update`)" if paths.IS_WIN else "`jaix update`"
+        out += ["※ 원내망이 아닌 곳에서 설치되어 그룹웨어(gw) 도구는 설치되지 않았습니다. 지금은 그룹웨어 기능을 쓸 수 없습니다.",
+                f"  사무실(원내망)에서 {again} 를 한 번 더 실행하면 설치됩니다. 다른 기능은 그대로 쓸 수 있습니다.", ""]
     missing = result.get("runtimes_missing") or []
     if missing:
         out += [f"※ [실패] 꼭 필요한 도구를 깔지 못했습니다: {', '.join(missing)}",
@@ -562,6 +566,8 @@ def build_parser():
     ho.add_argument("--user", required=True, help="구성원 슬랙 멤버 ID(U…) — 봇이 답할 유일한 사람")
     ho.add_argument("--ttl", type=float, default=hermesbot.TTL_HOURS, help="유효 시간(기본 72)")
     ho.add_argument("--spool", help=f"묶음 폴더(기본 {hermesbot.HANDOFF_SPOOL}, ji-gw-ai 배포처와 같게)")
+    ho.add_argument("--again", action="store_true",
+                    help="이미 코드를 낸 아이디에 다시 낼 때(만료·PC 교체). 한 봇을 두 PC 에서 돌리면 메시지가 나뉨")
     ho.set_defaults(func=hermesbot.cmd_handoff)
     ap_ = hsub.add_parser("approvals", help="이 PC Hermes 의 위험 명령 승인 방식(smart·manual). off 는 AI센터 관리자만")
     ap_.add_argument("mode", choices=hermesbot.APPROVAL_MODES)

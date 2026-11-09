@@ -134,6 +134,37 @@ def write_bundle(spool, ident, user, bot, app, ttl_hours=TTL_HOURS, code=None):
     return code, expires
 
 
+def issued_path(spool):
+    """코드 발급 기록(아이디·멤버·시각만, 코드·토큰 없음). 묶음 폴더 옆에 둔다 — 묶음은 받으면 지워지므로."""
+    return Path(spool).expanduser().parent / "issued.jsonl"
+
+
+def issued_before(spool, ident):
+    """이 아이디에 코드를 낸 마지막 기록. 없으면 None."""
+    last = None
+    try:
+        lines = issued_path(spool).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if rec.get("id") == ident:
+            last = rec
+    return last
+
+
+def record_issued(spool, ident, user, expires):
+    path = issued_path(spool)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"id": ident, "user": user, "issued_at": now,
+                            "expires_at": expires.isoformat(timespec="seconds")}) + "\n")
+
+
 def cmd_handoff(args, log):
     """관리자(studio)용. 토큰은 숨김 입력으로만 받는다."""
     ident = args.id.strip().lower()
@@ -143,6 +174,13 @@ def cmd_handoff(args, log):
     if not args.user.startswith("U"):
         log("--user 는 U로 시작하는 슬랙 멤버 ID")
         return 2
+    spool = args.spool or HANDOFF_SPOOL
+    before = issued_before(spool, ident)
+    if before and not getattr(args, "again", False):
+        log(f"Hermes-{ident} 에는 이미 연결 코드를 낸 적이 있습니다({before.get('issued_at', '?')}, {before.get('user', '?')}).")
+        log("봇 하나를 두 PC 에서 돌리면 슬랙 메시지가 두 PC 로 나뉘어 들어가 대화가 끊깁니다(Socket Mode 는 이벤트를 연결 하나에만 보냄).")
+        log("코드가 만료됐거나 PC 를 옮기는 것이면 --again 을 붙여 다시 내세요. PC 를 옮길 때는 예전 PC 의 Hermes 를 먼저 끄게 하세요.")
+        return 3
     log("토큰을 붙여 넣으세요. 글자 대신 *가 찍힙니다.")
     bot = secret.ask_secret("Bot User OAuth Token (xoxb-…)", secret.slack_token("xoxb-"), "xoxb-로 시작", log=log)
     app = bot and secret.ask_secret("App-Level Token (xapp-…)", secret.slack_token("xapp-"), "xapp-로 시작", log=log)
@@ -160,7 +198,8 @@ def cmd_handoff(args, log):
     if not conn.get("ok"):
         log(f"앱 수준 토큰을 슬랙이 거부: {conn.get('error')} (connections:write 범위가 필요)")
         return 1
-    code, expires = write_bundle(args.spool or HANDOFF_SPOOL, ident, args.user, bot, app, args.ttl)
+    code, expires = write_bundle(spool, ident, args.user, bot, app, args.ttl)
+    record_issued(spool, ident, args.user, expires)
     local = expires.astimezone().strftime("%m/%d %H:%M")
     log(f"확인됨: 봇 {auth.get('user')} · 워크스페이스 {auth.get('team')}")
     log(f"\n연결 코드 (1회용, {local}까지, 원내망에서만):\n\n  {code}\n")

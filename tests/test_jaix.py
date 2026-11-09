@@ -1270,6 +1270,29 @@ def test_cmd_handoff_checks_tokens_before_writing(tmp_path, monkeypatch, capsys)
     assert "xoxb-TEST" not in out and "xapp-TEST" not in out and re.search(r"JX-[A-Z2-7]{26}", out)
 
 
+def test_cmd_handoff_refuses_second_code_without_again(tmp_path, monkeypatch, capsys):
+    """한 봇을 두 PC 에 연결하면 메시지가 나뉜다 — 같은 아이디에 두 번째 코드는 --again 이 있어야 낸다."""
+    monkeypatch.setattr(hermesbot.secret, "masked_input",
+                        lambda prompt, out=None: ("xoxb-" if "xoxb" in prompt else "xapp-") + "TEST-1" + "x" * 40)
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
+    spool = tmp_path / "share" / "hermes"
+    args = type("A", (), {"id": "demo", "user": "U0TEST", "ttl": 72, "spool": str(spool), "again": False})()
+    assert hermesbot.cmd_handoff(args, print) == 0
+    ledger = (tmp_path / "share" / "issued.jsonl").read_text(encoding="utf-8")
+    assert '"id": "demo"' in ledger and "xoxb" not in ledger and "JX-" not in ledger
+    capsys.readouterr()
+    assert hermesbot.cmd_handoff(args, print) == 3          # 두 번째는 멈춤, 토큰도 묻지 않음
+    assert "--again" in capsys.readouterr().out and len(list(spool.glob("*.json"))) == 1
+    args.again = True
+    assert hermesbot.cmd_handoff(args, print) == 0 and len(list(spool.glob("*.json"))) == 2
+
+
+def test_guide_warns_offsite_install_has_no_gw():
+    text = cli.guide(["claude"], {"gw": {"status": "offsite"}})
+    assert text.startswith("※ 원내망이 아닌 곳") and "그룹웨어 기능을 쓸 수 없습니다" in text and "jaix update" in text
+    assert "원내망이 아닌 곳" not in cli.guide(["claude"], {"gw": {"status": "installed"}})
+
+
 def test_read_code_file_deletes_even_bad(tmp_path):
     f = tmp_path / "code"
     f.write_text("jx-" + "a" * 26 + "\n", encoding="utf-8")
