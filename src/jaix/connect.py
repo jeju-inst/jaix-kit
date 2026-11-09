@@ -93,7 +93,7 @@ def status_works(lock):
         return None
     if works.logged_in():
         return Status("works", "ok", "로그인돼 있음")
-    if not works.exe():
+    if not works.cli():
         return Status("works", "unavailable", "웍스 도구가 설치되지 않음 — jaix setup")
     if not works.saved_client():
         return Status("works", "unavailable", "기관 앱 정보가 없음 — 원내망(사무실·VPN)에서 jaix setup")
