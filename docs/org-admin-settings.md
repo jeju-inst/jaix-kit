@@ -81,7 +81,7 @@ API 크레딧 Console 조직 운영 규칙(어기면 추가 과금 경로가 열
 | Cloud code execution and file creation | 서버 코드 실행·문서 생성(스킬 필수) | 켜짐 | 유지 | ✅ |
 | Allow network egress | 코드 실행 환경 외부 접속 | 켜짐, Package managers only, 추가 도메인 없음 | 유지 | ✅ |
 | Computer access | 폰·웹에서 본인 컴퓨터 원격 접속 | 켜짐 | 유지 | ✅ |
-| Require trusted devices | 원격 접속(Computer access·Remote Control) 새 기기 인증 | **켜짐(11-10 변경)** | 계정 탈취 시 낯선 기기가 연구원 PC 에 붙는 것 방지. 새 기기 첫 연결 때 1회 등록 | ✅ |
+| Require trusted devices | 원격 접속(Computer access·Remote Control) 새 기기 인증 | **켜짐(11-10 변경)** | 계정 탈취 시 낯선 기기가 연구원 PC 에 붙는 것 방지. 새 기기 첫 연결 때 1회 등록. **켠 직후 이미 떠 있던 세션은 RC 가 403(`Remote Control server rejected the request`)으로 끊기고 `/login` 으로는 안 풀림** — 세션마다 `/exit` → `claude --resume` → `/rc` → enable → 약 10초 뒤 `/rc` 다시 하면 붙음(11-10 실측). 연결 유지 중인 세션은 끊기기 전까진 영향 없음 | ✅ |
 | Scheduled tasks | 예약·웹훅 작업 | 켜짐 | 유지 | ✅ |
 | Enable memory for your team | 본인 과거 대화 기억(본인만) | 켜짐 | 유지 | ✅ |
 | Sensitive topics in memory | 건강·종교 등 민감 정보 기억 | 꺼짐 | 유지 | ✅ |
