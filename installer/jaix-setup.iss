@@ -305,11 +305,11 @@ begin
     HermesPage.ID,
     'Hermes가 쓸 AI',
     '이미 쓰고 있는 구독을 고르세요.',
-    'Hermes는 ChatGPT 유료 구독 또는 회사 Claude 계정(Team)이 있어야 씁니다. 개인 Claude Pro로는 동작하지 않을 가능성이 높습니다. ' +
+    'Hermes는 ChatGPT 유료 구독 또는 회사 Claude 계정(Team)이 있어야 씁니다. 개인 Claude 구독(Pro·Max)도 연결은 되지만 약관상 권하지 않습니다. ' +
     '설치 마지막에 로그인 창을 여는 단계가 있습니다. 브라우저에서 승인하면 됩니다.',
     True, False);
   ModelPage.Add('ChatGPT 구독(Plus 이상)');
-  ModelPage.Add('회사 Claude 계정(Team) — 개인 Pro 구독은 안 될 가능성이 높음');
+  ModelPage.Add('회사 Claude 계정(Team) — 개인 Pro·Max 도 되나 약관상 비권장');
   // 기본 선택 없음 — 무인 설치·고르지 않은 경우의 chatgpt 는 HermesModel() 안의 내부 기본값일 뿐이다
   ApplyPreviousChoice();
 

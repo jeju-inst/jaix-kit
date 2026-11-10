@@ -45,7 +45,7 @@ PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal
                         "이 창에 나오는 코드(예: ABCD-12345)를 그 페이지에 넣으세요."]},
     "claude": {"provider": "anthropic", "default": "claude-sonnet-5-5",
                "login": ["auth", "add", "anthropic", "--type", "oauth"],
-               "how": ["회사 Claude 계정(Team)으로 로그인하세요 — 개인 Claude Pro 구독은 Hermes 에서 동작하지 않을 가능성이 높습니다.",
+               "how": ["회사 Claude 계정(Team)으로 로그인하세요 — 개인 Claude 구독(Pro·Max)도 연결은 되지만 Anthropic 약관상 권하지 않습니다.",
                        "브라우저에 Claude 승인 페이지가 열립니다(안 열리면 이 창에 나온 주소를 복사해 브라우저에 붙여 넣으세요).",
                        "승인하면 나오는 코드를 복사해 이 창에 붙여 넣고 Enter 를 누르세요."]},
 }
