@@ -188,8 +188,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/jaix-works.git",
-        "ref": "v2026.10.30.1",
-        "sha": "492280f47de436cf936892cfd0ff50080b1d22d4"
+        "ref": "v2026.11.10.1",
+        "sha": "660b848b860b1d6323ea5ca1294cb32c6b660d4a"
       },
       "homepage": "https://github.com/jeju-inst/jaix-works",
       "metadata": {
@@ -197,7 +197,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.1"
+      "version": "2026.11.10.1"
     }
   ]
 }
