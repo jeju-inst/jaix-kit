@@ -271,3 +271,20 @@ def test_installed_version_installer_is_pruned_next_check(su, monkeypatch):
     monkeypatch.setattr(selfupdate, "__version__", "0.0.0+dev")  # 개발판은 손대지 않는다
     path.write_bytes(PAYLOAD)
     assert selfupdate.prune_installed() == [] and path.exists()
+
+
+def test_locked_old_installer_does_not_stop_update(su, monkeypatch):
+    """지난 판 설치기의 완료 창이 열려 있어 파일이 잠겨도 새 판은 받는다(11/10 jaix-fresh 실측 WinError 32)."""
+    st = selfupdate.check(force=True, fetch=release)
+    old = selfupdate.updates_dir() / "jaix-setup-2000.01.01.1.exe"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_bytes(b"old")
+    real_unlink = type(old).unlink
+
+    def unlink(self, missing_ok=False):
+        if self.name == old.name:
+            raise PermissionError(32, "다른 프로세스가 파일을 사용 중")
+        return real_unlink(self, missing_ok=missing_ok)
+    monkeypatch.setattr(type(old), "unlink", unlink)
+    path = selfupdate.fetch_installer(st, lambda m="": None, download=fake_download())
+    assert path and path.read_bytes() == PAYLOAD and old.exists()

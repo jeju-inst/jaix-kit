@@ -198,7 +198,10 @@ def fetch_installer(state, log, download=None):
     path = installer_path(state)
     for old in updates_dir().glob("jaix-setup-*.exe"):  # 지난 판 설치기는 지운다
         if old != path:
-            old.unlink(missing_ok=True)
+            try:
+                old.unlink(missing_ok=True)
+            except OSError:  # 지난 설치기 완료 창이 열려 있으면 잠겨 있다 — 다음에 지우고 새 판은 그대로 받는다
+                pass
     try:
         (download or net.download)(state["url"], path)
         got = sha256(path)
