@@ -576,6 +576,10 @@ def build_parser():
     rn.add_argument("id", help="새 아이디(Hermes-<아이디> 의 아이디)")
     rn.add_argument("--dry-run", action="store_true")
     rn.set_defaults(func=hermesbot.cmd_rename)
+    sa = hsub.add_parser("slack-access",
+                         help="내 봇이 내 Slack 자격(DM·비공개 채널·검색·파일)도 쓰게: 브라우저에서 본인이 허용(쓰기는 매번 확인)")
+    sa.add_argument("--dry-run", action="store_true")
+    sa.set_defaults(func=hermesbot.cmd_slack_access)
     lg = hsub.add_parser("login", help="Hermes 의 AI 구독 로그인(설치기 마지막 화면이 부름)")
     lg.add_argument("--model", choices=sorted(hermesbot.PROVIDERS), default="chatgpt")
     lg.add_argument("--no-wait", action="store_true", help="끝나고 Enter 를 기다리지 않음")

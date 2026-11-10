@@ -3482,3 +3482,86 @@ def test_cmd_handoff_asks_xapp_before_xoxb(tmp_path, monkeypatch):
     args = type("A", (), {"id": "demo", "user": "U0TEST", "ttl": 72, "spool": str(tmp_path / "spool"), "again": False})()
     assert hermesbot.cmd_handoff(args, lambda *a: None) == 0
     assert "xapp" in asked[0] and "xoxb" in asked[1]
+
+
+# --- jaix hermes slack-access (11/10 사용자 결정: 공용 OAuth 앱으로 본인 사용자 토큰) -------------------------------
+def _oauth_fake(monkeypatch, start=(200, None), claims=None, setup_ok=True, owner="U0OWNER"):
+    hermesbot._save_record({"status": "connected", "slack": {"id": "demo", "connected": "t"}})
+    _hermes_env(f"SLACK_BOT_TOKEN=xoxb-mine\nSLACK_APP_TOKEN=xapp-mine\nSLACK_ALLOWED_USERS={owner}\n")
+    monkeypatch.setattr(hermesbot.uvpython, "find", lambda v: "/x/python")
+    posts, setups = [], []
+    claims = iter(claims or [(202, {"status": "pending"}), (200, {"user_token": "xoxp-T", "user": owner})])
+
+    def post(path, body, ctype, timeout=20):
+        posts.append((path, body, ctype))
+        if path == "start":
+            st, out = start
+            return st, out if out is not None else {"state": "s", "authorize_url": "https://slack.com/oauth/v2/authorize?x"}
+        return next(claims)
+
+    def fake_setup(python, ident, user, payload, extra, log):
+        setups.append((ident, user, payload, extra))
+        return setup_ok, ""
+    monkeypatch.setattr(hermesbot, "_oauth_post", post)
+    monkeypatch.setattr(hermesbot, "_setup_pc", fake_setup)
+    return posts, setups
+
+
+def _sa(lines, opener=lambda url: True):
+    t = iter(range(0, 10_000, 2))
+    return hermesbot.cmd_slack_access(argparse.Namespace(dry_run=False), lines.append, opener=opener,
+                                      sleep=lambda s: None, clock=lambda: next(t))
+
+
+def test_slack_access_본인_허용이면_setup_pc_에_사용자_토큰만(isolated, monkeypatch):
+    posts, setups = _oauth_fake(monkeypatch)
+    opened, lines = [], []
+    assert _sa(lines, opener=lambda u: opened.append(u) or True) == 0
+    start = json.loads(posts[0][1])
+    assert posts[0][0] == "start" and start["id"] == "demo" and start["bot_token"] == "xoxb-mine"
+    verifier = posts[1][1].decode()
+    import hashlib
+    assert hashlib.sha256(verifier.encode()).hexdigest() == start["verifier_sha256"] and verifier not in posts[0][1].decode()
+    assert opened == ["https://slack.com/oauth/v2/authorize?x"]
+    assert setups == [("demo", "U0OWNER", {"user_token": "xoxp-T"}, [])]
+    assert hermesbot.recorded()["slack"]["user_token"] and hermesbot.recorded()["slack"]["id"] == "demo"
+    assert not any("xoxp-T" in line or "xoxb-mine" in line for line in lines)
+
+
+@pytest.mark.parametrize("start,claims,word", [
+    ((403, {"error": "network"}), None, "원내망"),
+    ((0, {}), None, "원내망"),
+    ((503, {"error": "not_configured"}), None, "켜지 않았"),
+    ((403, {"error": "not_owner"}), None, "봇 토큰이 명단"),
+    ((200, None), [(403, {"error": "wrong_account"})], "본인이 아니"),
+    ((200, None), [(403, {"error": "denied"})], "허용하지 않아"),
+    ((200, None), [(202, {"status": "pending"})] * 400, "만료"),
+])
+def test_slack_access_실패는_설명하고_아무것도_안_넣는다(isolated, monkeypatch, start, claims, word):
+    _, setups = _oauth_fake(monkeypatch, start=start, claims=claims)
+    lines = []
+    assert _sa(lines) == 1 and setups == []
+    assert any(word in line for line in lines), lines
+
+
+def test_slack_access_다른_주인의_토큰은_안_넣는다(isolated, monkeypatch):
+    _, setups = _oauth_fake(monkeypatch, claims=[(200, {"user_token": "xoxp-T", "user": "U0OTHER"})])
+    assert _sa([]) == 1 and setups == []
+
+
+def test_slack_access_연결_안된_PC(isolated, monkeypatch):
+    lines = []
+    assert hermesbot.cmd_slack_access(argparse.Namespace(dry_run=False), lines.append) == 1
+    assert "jaix-setup" in lines[0]
+
+
+def test_slack_access_브라우저를_못_열면_주소를_보인다(isolated, monkeypatch):
+    _oauth_fake(monkeypatch)
+    lines = []
+    assert _sa(lines, opener=lambda u: False) == 0
+    assert any("https://slack.com/oauth/v2/authorize?x" in line for line in lines)
+
+
+def test_slack_access_cli_dry_run(isolated, monkeypatch):
+    posts, setups = _oauth_fake(monkeypatch)
+    assert cli.main(["hermes", "slack-access", "--dry-run"]) == 0 and posts == [] and setups == []

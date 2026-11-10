@@ -29,12 +29,15 @@ from jaix.paths import IS_WIN
 
 INSTALL_PS1 = "https://hermes-agent.nousresearch.com/install.ps1"
 HANDOFF_URL = "https://jaix.namun.net/hermes/handoff"
+# 구성원 본인 Slack 사용자 토큰(xoxp) 발급 — ji-gw-ai scripts/slack_oauth.py(공용 OAuth 앱, 11/10 사용자 결정)
+SLACK_OAUTH_URL = "https://jaix.namun.net/slack/oauth"
+SLACK_OAUTH_WAIT = 600  # 서버 state 수명(10분)과 같게
 HANDOFF_SPOOL = "~/.local/share/jaix-handoff/hermes"  # ji-gw-ai share/deploy.toml [handoff] spool 과 같게
 TTL_HOURS = 72
 CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
-SLACKBOT_SHA = "7df2086ad3a3464b3751eb52917d591ab16d85c7"  # hermes-slackbot#24: 기본 플러그인(slack-forwarded·slack-model-display)·base_name
+SLACKBOT_SHA = "bb709eefac6c22699ca740b5a8fbe67176fb3890"  # hermes-slackbot#28: setup_pc user_token 단독 파일(#26)·onboard_batch
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
     # open: hermes 의 openai-codex 로그인은 device code 방식이라 브라우저를 스스로 열지 않는다(주소와 코드만 찍음,
     # hermes_cli/auth_codex.py) → jaix 가 그 주소를 연다(jaix-win 11/5). anthropic 은 hermes 가 직접 연다
@@ -1135,6 +1138,22 @@ def _slackbot_dir(workdir):
     return next(out.iterdir())
 
 
+def _setup_pc(python, ident, user, payload, extra, log):
+    """hermes-slackbot setup_pc.py 를 비밀 파일로 부른다(읽자마자 setup_pc 가 지우고, 남아도 여기서 지운다)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        kit = _slackbot_dir(tmp)
+        pending = paths.data_dir() / "pending"
+        pending.mkdir(parents=True, exist_ok=True)
+        fd, secret = tempfile.mkstemp(dir=pending, prefix="slack-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        try:
+            return _run([python, str(kit / "scripts" / "setup_pc.py"), ident, "--user", user,
+                         "--secrets-file", secret, *extra], log, timeout=900)
+        finally:
+            Path(secret).unlink(missing_ok=True)
+
+
 def connect_slack(bundle, log):
     """받은 묶음을 setup_pc.py 에 파일로 넘긴다(읽자마자 setup_pc 가 지운다). 실패는 설치 실패다."""
     python = uvpython.find(uvpython.DEFAULT)
@@ -1144,18 +1163,9 @@ def connect_slack(bundle, log):
     rec = recorded()
     # jaix가 전에 넣은 토큰이면 바꾼다(관리자가 새 코드를 낸 경우). 사용자가 직접 넣은 토큰은 setup_pc 가 지킨다
     replace = rec.get("slack", {}).get("id") is not None
-    with tempfile.TemporaryDirectory() as tmp:
-        kit = _slackbot_dir(tmp)
-        pending = paths.data_dir() / "pending"
-        pending.mkdir(parents=True, exist_ok=True)
-        fd, secret = tempfile.mkstemp(dir=pending, prefix="slack-", suffix=".json")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"bot_token": bundle["bot_token"], "app_token": bundle["app_token"]}, f)
-        try:
-            ok, out = _run([python, str(kit / "scripts" / "setup_pc.py"), bundle["id"], "--user", bundle["user"],
-                            "--secrets-file", secret, *(["--replace"] if replace else [])], log, timeout=900)
-        finally:
-            Path(secret).unlink(missing_ok=True)
+    ok, out = _setup_pc(python, bundle["id"], bundle["user"],
+                        {"bot_token": bundle["bot_token"], "app_token": bundle["app_token"]},
+                        ["--replace"] if replace else [], log)
     if not ok:
         if "already set" in out:
             log("    이 PC의 Hermes 에 다른 슬랙 토큰이 있어 바꾸지 않았습니다. AI센터에 알려 주세요.")
@@ -1238,6 +1248,97 @@ def _done(result, dry_run, linked=None, log=None):
 
 
 # --- doctor 용 ------------------------------------------------------------------------------------
+# --- 연구원 PC: 내 봇이 내 Slack 자격도 쓰게(사용자 토큰) --------------------------------------------
+def slack_oauth_url():
+    return (os.environ.get("JAIX_SLACK_OAUTH_URL") or SLACK_OAUTH_URL).rstrip("/")
+
+
+def _oauth_post(path, body, ctype, timeout=20):
+    """(HTTP 상태, JSON). 연결 실패는 (0, {})."""
+    req = urllib.request.Request(f"{slack_oauth_url()}/{path}", data=body, method="POST",
+                                 headers={"User-Agent": net.UA, "Content-Type": ctype})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8") or "{}")
+        except ValueError:
+            return e.code, {}
+    except (urllib.error.URLError, OSError, ValueError):
+        return 0, {}
+
+
+OAUTH_ERRORS = {
+    "network": "원내망이 아니라 진행하지 못했습니다. 원내망에서 다시 해 주세요.",
+    "not_configured": "AI센터가 아직 이 기능을 켜지 않았습니다. 잠시 뒤 다시 해 주세요.",
+    "unknown_id": "이 PC 의 봇이 AI센터 명단에 없습니다. AI센터에 알려 주세요.",
+    "not_owner": "이 PC 의 봇 토큰이 명단의 봇과 다릅니다. AI센터에 알려 주세요.",
+    "bot_token_invalid": "이 PC 의 봇 토큰을 Slack 이 받지 않습니다. AI센터에 새 연결 코드를 요청하세요.",
+    "denied": "Slack 화면에서 허용하지 않아 아무것도 바꾸지 않았습니다.",
+    "wrong_account": "브라우저에 로그인된 Slack 계정이 본인이 아니었습니다. 받은 권한은 서버가 바로 취소했습니다. "
+                     "브라우저에서 본인 계정으로 로그인한 뒤 다시 해 주세요.",
+    "exchange_failed": "Slack 과 연결을 마치지 못했습니다. 잠시 뒤 다시 해 주세요.",
+    "expired": "10분 안에 허용하지 않아 만료됐습니다. 다시 해 주세요.",
+}
+
+
+def cmd_slack_access(args, log, opener=None, sleep=None, clock=None):
+    """내 봇(Hermes-<id>)이 내 Slack 자격(DM·비공개 채널·검색·파일)도 쓰게 한다. 본인이 브라우저에서 허용하면
+    배포처가 사용자 토큰을 한 번 건네고, setup_pc.py 가 본인 것인지 다시 확인해 넣는다. 쓰기는 매번 묻는다."""
+    import time
+    opener, sleep, clock = opener or _open_url, sleep or time.sleep, clock or time.monotonic
+    ident = linked_id()
+    user = (env_value("SLACK_ALLOWED_USERS") or "").split(",")[0].strip()
+    bot = env_value("SLACK_BOT_TOKEN")
+    if not (ident and user.startswith("U") and bot):
+        log("이 PC 의 Hermes 가 jaix 로 슬랙에 연결돼 있지 않습니다. 먼저 jaix-setup 에서 '슬랙으로도 쓰기'로 연결하세요.")
+        return 1
+    python = uvpython.find(uvpython.DEFAULT)
+    if not python:
+        log(f"uv 관리 Python {uvpython.DEFAULT} 이 없습니다. `jaix update` 뒤 다시 해 주세요.")
+        return 1
+    if args.dry_run:
+        log(f"(예정) Hermes-{ident}: 브라우저에서 본인 Slack 허용 → 사용자 토큰 수령 → slack-tools 켜기(쓰기는 매번 확인)")
+        return 0
+    verifier = secrets.token_urlsafe(32)
+    status, out = _oauth_post("start", json.dumps({
+        "id": ident, "verifier_sha256": hashlib.sha256(verifier.encode("ascii")).hexdigest(), "bot_token": bot,
+    }).encode("utf-8"), "application/json")
+    if status != 200 or not str(out.get("authorize_url", "")).startswith("https://slack.com/"):
+        err = "network" if status in (0, 403) and out.get("error") in (None, "network") else out.get("error", "")
+        log(OAUTH_ERRORS.get(err, f"배포처 오류({status} {err}). 잠시 뒤 다시 해 주세요."))
+        return 1
+    log("브라우저에서 Slack 허용 화면을 엽니다. 본인 계정인지 확인하고 '허용'을 눌러 주세요(10분 안에).")
+    if not opener(out["authorize_url"]):
+        log("브라우저를 열지 못했습니다. 아래 주소를 브라우저에 붙여 넣어 주세요.")
+        log(f"  {out['authorize_url']}")
+    deadline = clock() + SLACK_OAUTH_WAIT
+    while True:
+        status, got = _oauth_post("claim", verifier.encode("ascii"), "text/plain")
+        if status == 200 and str(got.get("user_token", "")).startswith("xoxp-"):
+            break
+        if status not in (0, 202) or clock() >= deadline:
+            err = got.get("error") or ("expired" if clock() >= deadline else "")
+            log(OAUTH_ERRORS.get(err, f"배포처 오류({status} {err}). 잠시 뒤 다시 해 주세요."))
+            return 1
+        sleep(2)
+    if got.get("user") != user:
+        log("받은 권한이 이 PC 봇의 주인과 다릅니다. 넣지 않았습니다. AI센터에 알려 주세요.")
+        return 1
+    ok, _ = _setup_pc(python, ident, user, {"user_token": got["user_token"]}, [], log)
+    got = None  # 토큰을 더 들고 있지 않는다
+    if not ok:
+        log("봇에 넣지 못했습니다(위 기록). 아무것도 바꾸지 않았을 수 있으니 AI센터에 알려 주세요.")
+        return 1
+    rec = recorded()
+    rec["slack"] = dict(rec.get("slack") or {}, user_token=datetime.datetime.now().isoformat(timespec="seconds"))
+    _save_record(rec)
+    log(f"완료: Hermes-{ident} 가 이제 본인 DM·비공개 채널·검색·파일을 볼 수 있습니다. 보내기·올리기는 매번 확인을 받습니다.")
+    log("끄려면 Slack 앱 관리 화면에서 'JAIX Slack 연결' 권한을 취소하세요.")
+    return 0
+
+
 def linked_id(rec=None):
     """이 PC 가 jaix 로 슬랙에 연결된 봇 아이디(아니면 None): 연결 기록(slack.id)이 있고 Hermes .env 에 봇·앱 토큰이
     있으면 연결된 것이다. status 는 보지 않는다 — 다시 설치가 중간에 끊겨 'installing' 으로 남았다가 코드 없는 다음
