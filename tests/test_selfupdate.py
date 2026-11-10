@@ -288,3 +288,13 @@ def test_locked_old_installer_does_not_stop_update(su, monkeypatch):
     monkeypatch.setattr(type(old), "unlink", unlink)
     path = selfupdate.fetch_installer(st, lambda m="": None, download=fake_download())
     assert path and path.read_bytes() == PAYLOAD and old.exists()
+
+
+@pytest.mark.parametrize("answer,launches", [("", True), ("y", True), ("예", True), ("n", False), ("N", False), ("ㅜ", False)])
+def test_update_prompt_defaults_to_yes(su, answer, launches):
+    """'JAIX 업데이트' 에서 Enter 만 눌러도 진행한다([Y/n]). n 이면 나중에."""
+    launched = []
+    args = argparse.Namespace(yes=False)
+    rc = selfupdate.cmd_self(args, lambda m="": None, fetch=release, download=fake_download(),
+                             popen=lambda cmd, **k: launched.append(cmd), ask=lambda q: answer)
+    assert rc == 0 and bool(launched) is launches
