@@ -98,7 +98,7 @@ API 크레딧 Console 조직 운영 규칙(어기면 추가 과금 경로가 열
 | 독립 Claude Design(claude.ai/design) 12-14 종료 — 대화 안 Design 으로 통합 | 쓰는 사람이 있으면 Artifacts 설정의 Design·Design systems 가 켜져 있어야 함 | Artifacts 의 Design·Design systems 켜짐 확인(11-10) | ✅ |
 | managed settings 의 `sshHostAllowlist` 를 Claude Desktop 이 적용(빈 목록이면 SSH 꺼짐) | `admin/managed-settings.json` 에 `sshHostAllowlist` 없음(11-10 확인) → 영향 없음 | 앞으로 넣을 때는 빈 목록 금지 | ✅ |
 
-### 구독 계획 (11-10, 실무채널 확인 전)
+### 구독 계획 (11-10, 좌석 결제 완료 · 초대 진행)
 | 대상 | 등급 | 석 | 비고 |
 |---|---|---|---|
 | 본원 연구직(AI센터 Premium 대상 제외) | Standard | **24** | GW 인사 명부(11-10 05:37) 기준. 예산 25석 안, 1석 여유 |
@@ -184,6 +184,9 @@ API 크레딧 Console 조직 운영 규칙(어기면 추가 과금 경로가 열
 ### 결제 실측 (11-10)
 - 11/1 청구: 2석 **$80**(Nonprofit Premium 석당 월 $40). 12/1 예정액 $88 — 차액은 부가세 10% 로 보임. 예산은 처음부터 부가세 포함으로 잡혀 있음(사용자 확인).
 - 결제 카드는 법인카드. 결제 카드는 구독 갱신·usage credits·auto-reload 에 쓰이나 usage credits 는 꺼 둠.
+- **11-10 좌석 추가 결제**: Billing → Seats 옆 연필(별도 Manage 버튼 없음) → 등급별 좌석 수 조정 → Confirm changes. Nonprofit Premium 2→5, Standard 0→25(명단 24 + 연구년 복귀용 여유 1, 예산 범위). Standard 석당 월 $8.
+  - 당일 일할 결제 **$246.07**(Premium +3 $83.88 · Standard +25 $139.81 · 부가세 $22.37, 남은 기간 비율 약 0.699). 12/1부터 월 $400 + 부가세 = **$440**(Projected total 일치).
+  - 좌석 늘린 뒤 API credits 의 Monthly credit 표시가 $200 → $500 으로 바뀜(팀 규모 연동 크레딧으로 보임, 청구 아님).
 
 ## 도메인 인증 뒤 새로 나온 것 (11-09)
 
