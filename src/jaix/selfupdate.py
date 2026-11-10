@@ -198,7 +198,10 @@ def fetch_installer(state, log, download=None):
     path = installer_path(state)
     for old in updates_dir().glob("jaix-setup-*.exe"):  # 지난 판 설치기는 지운다
         if old != path:
-            old.unlink(missing_ok=True)
+            try:
+                old.unlink(missing_ok=True)
+            except OSError:  # 지난 설치기 완료 창이 열려 있으면 잠겨 있다 — 다음에 지우고 새 판은 그대로 받는다
+                pass
     try:
         (download or net.download)(state["url"], path)
         got = sha256(path)
@@ -450,10 +453,11 @@ def cmd_self(args, log, fetch=None, download=None, popen=None, ask=None):
             note = open_windows_note().strip()
             if note:
                 log(note)
-            answer = (ask or input)("지금 업데이트할까요? 설치기가 열리고 이 창의 jaix 는 끝납니다 [y/N] ")
+            # 'JAIX 업데이트' 를 직접 눌러 온 것이라 Enter 는 예(11/10 사용자 결정). 창이 닫히거나 Ctrl+C 면 아니오
+            answer = (ask or input)("지금 업데이트할까요? 설치기가 열리고 이 창의 jaix 는 끝납니다 [Y/n] ")
         except (EOFError, KeyboardInterrupt):
-            answer = ""
-        if str(answer).strip().lower() not in ("y", "yes", "예", "ㅛ"):
+            answer = "n"
+        if str(answer).strip().lower() in ("n", "no", "아니오", "아니요", "ㅜ"):
             log("나중에 하기로 했습니다.")
             return 0
     return 0 if launch(state, log, popen) else 1
