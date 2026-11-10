@@ -182,8 +182,9 @@ def cmd_handoff(args, log):
         log("코드가 만료됐거나 PC 를 옮기는 것이면 --again 을 붙여 다시 내세요. PC 를 옮길 때는 예전 PC 의 Hermes 를 먼저 끄게 하세요.")
         return 3
     log("토큰을 붙여 넣으세요. 글자 대신 *가 찍힙니다.")
-    bot = secret.ask_secret("Bot User OAuth Token (xoxb-…)", secret.slack_token("xoxb-"), "xoxb-로 시작", log=log)
-    app = bot and secret.ask_secret("App-Level Token (xapp-…)", secret.slack_token("xapp-"), "xapp-로 시작", log=log)
+    # xapp 먼저: 관리자는 App-Level Token 을 만든 직후라 클립보드에 xapp 가 있다(onboard_batch 첫 사용 피드백, 11/10)
+    app = secret.ask_secret("App-Level Token (xapp-…)", secret.slack_token("xapp-"), "xapp-로 시작", log=log)
+    bot = app and secret.ask_secret("Bot User OAuth Token (xoxb-…)", secret.slack_token("xoxb-"), "xoxb-로 시작", log=log)
     if not (bot and app):
         log("토큰을 받지 못해 멈춥니다(세 번 모두 형식이 맞지 않음).")
         return 2
