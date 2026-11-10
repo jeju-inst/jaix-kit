@@ -1256,13 +1256,13 @@ def test_handoff_code_and_bundle_0600(tmp_path):
 
 
 def test_cmd_handoff_checks_tokens_before_writing(tmp_path, monkeypatch, capsys):
-    tokens = iter(["xoxb-TEST-1" + "x" * 40, "xapp-TEST-1" + "x" * 40])
+    tokens = iter(["xapp-TEST-1" + "x" * 40, "xoxb-TEST-1" + "x" * 40])  # xapp 먼저 묻는다
     monkeypatch.setattr(hermesbot.secret, "masked_input", lambda prompt, out=None: next(tokens))
     monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-bob", "team": "T"})
     args = type("A", (), {"id": "demo", "user": "U0TEST", "ttl": 72, "spool": str(tmp_path / "spool")})()
     assert hermesbot.cmd_handoff(args, print) == 1          # 다른 사람 봇 → 멈춤, 묶음 없음
     assert not (tmp_path / "spool").exists()
-    tokens = iter(["xoxb-TEST-1" + "x" * 40, "xapp-TEST-1" + "x" * 40])
+    tokens = iter(["xapp-TEST-1" + "x" * 40, "xoxb-TEST-1" + "x" * 40])  # xapp 먼저 묻는다
     monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
     assert hermesbot.cmd_handoff(args, print) == 0
     out = capsys.readouterr().out
@@ -1620,7 +1620,7 @@ def test_hancom_version_from_com_server_path():
 
 def test_cli_hermes_handoff_runs_without_log_option(tmp_path, monkeypatch, capsys):
     """jaix-kit#67: hermes 하위 명령은 공통 옵션(--log)이 없어 main 이 AttributeError 로 죽었다."""
-    tokens = iter(["xoxb-TEST-1" + "x" * 40, "xapp-TEST-1" + "x" * 40])
+    tokens = iter(["xapp-TEST-1" + "x" * 40, "xoxb-TEST-1" + "x" * 40])  # xapp 먼저 묻는다
     monkeypatch.setattr(hermesbot.secret, "masked_input", lambda prompt, out=None: next(tokens))
     monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
     assert cli.main(["hermes", "handoff", "demo", "--user", "U0TEST", "--spool", str(tmp_path / "spool")]) == 0
@@ -3471,3 +3471,14 @@ def test_refresh_kit_says_it_may_take_minutes(isolated, monkeypatch, tmp_path):
     assert any("몇 분 걸릴 수 있습니다" in l for l in lines)
     lines.clear()
     assert REAL_REFRESH_KIT("/x/hermes", "namun", lines.append) and lines == []   # 같은 판이면 안내도 없음
+
+
+def test_cmd_handoff_asks_xapp_before_xoxb(tmp_path, monkeypatch):
+    """App-Level Token 을 만든 직후 클립보드에 있는 xapp 를 먼저 받는다(onboard_batch 피드백 11/10)."""
+    asked = []
+    monkeypatch.setattr(hermesbot.secret, "masked_input",
+                        lambda prompt, out=None: asked.append(prompt) or (("xapp-" if "xapp" in prompt else "xoxb-") + "T" * 40))
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
+    args = type("A", (), {"id": "demo", "user": "U0TEST", "ttl": 72, "spool": str(tmp_path / "spool"), "again": False})()
+    assert hermesbot.cmd_handoff(args, lambda *a: None) == 0
+    assert "xapp" in asked[0] and "xoxb" in asked[1]
