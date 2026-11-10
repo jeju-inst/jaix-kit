@@ -19,6 +19,7 @@
     "claude-for-nonprofits@synced": false
   },
   "channelsEnabled": true,
+  "remoteControlAtStartup": true,
   "model": "sonnet",
   "permissions": {
     "disableBypassPermissionsMode": "disable"

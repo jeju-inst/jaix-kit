@@ -60,6 +60,7 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | `model` | `sonnet` | 좌석이 대부분 Pro의 1.25배라 한도 방지. 사용자의 `/model` 선택보다 우선하지만 `--model` 은 이긴다 |
 | `permissions.disableBypassPermissionsMode` | `disable` | 비개발자 PC에서 "전부 허용" 모드를 막는다. 잠금이 아니라 사고 방지 |
 | `channelsEnabled` | `true` | Claude Code 채널(`--channels`, 텔레그램 등 외부 메시지 수신)을 조직에서 허용. 사용자가 직접 고른 서버만 연결돼 연구원 영향 없음. 콘솔에만 있던 값을 저장소에 맞춤(2026-11-10) |
+| `remoteControlAtStartup` | `true` | Claude Code CLI 세션을 열면 Remote Control 이 자동으로 켜져 휴대폰·claude.ai/code 에서 이어 쓸 수 있음. 사용자가 `/config` 에서 끄면 그 선택이 우선. 프로젝트 설정의 `true` 는 무시되는 키라 관리형 설정으로만 기본값을 줄 수 있음(2026-11-10) |
 | `companyAnnouncements` | 안내 1줄 | 시작 화면에 표시. 조건 없이 전원에게 같은 문구가 뜨므로 jaix 설치 권유 같은 문구는 넣지 않는다(2026-11-09) |
 
 - **넣지 않은 것("느슨" 결정)**: `strictKnownMarketplaces`, `allowedMcpServers`/`deniedMcpServers`, `allowManagedPermissionRulesOnly`. 개인이 다른 마켓플레이스·MCP를 추가할 수 있다.

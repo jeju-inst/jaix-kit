@@ -137,7 +137,7 @@ API 크레딧 Console 조직 운영 규칙(어기면 추가 과금 경로가 열
 | 항목 | 값 | 결정·근거 | 상태 |
 |---|---|---|---|
 | Managed settings | 콘솔본에 `jaix-works@jaix` 누락(PR #152 반영 전), 저장소에 없는 `channelsEnabled: true` 가 콘솔에만 있었음 | 저장소 `admin/managed-settings.json` 에 `channelsEnabled: true` 추가해 일치시킴 → 저장소본을 콘솔에 다시 붙여넣음(11-10 완료, jaix-works 포함). **원본은 저장소, 콘솔은 붙여넣기만** | ✅ |
-| Desktop · Cloud sessions · Remote Control | 켜짐 | 유지(기기 인증은 Capabilities 에서 켬) | ✅ |
+| Desktop · Cloud sessions · Remote Control | 켜짐 | 유지(기기 인증은 Capabilities 에서 켬). 조직 토글은 "사용 허용"일 뿐 세션마다 자동으로 켜지진 않음 → managed settings `remoteControlAtStartup: true` 로 기본 켬(11-10) | ⏳ 콘솔 붙여넣기 |
 | Default environment | No default | 유지 | ✅ |
 | Quick setup (Preview) | 켜짐 | 유지 | ✅ |
 | Fast mode | 꺼짐 | **유지** — usage credits 로 별도 과금, credits 꺼 둠 | ✅ |
