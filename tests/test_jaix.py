@@ -2684,9 +2684,9 @@ def test_installer_reads_previous_choice_written_by_setup(isolated):
     assert "CurPageID = ModelPage.ID" in nxt and "not WizardSilent()" in nxt and "골라 주세요" in nxt
     # 지난 선택은 Hermes 를 골랐을 때만 모델까지 채운다(chatgpt 도 채움)
     assert "if ChannelPage.Values[2] then\n          SetModelChoice(" in apply
-    # 개인 Pro 로는 Hermes 가 안 될 가능성이 높다(providers.md Subscription plans, studio 실측 11/5) — 화면에 밝힌다
-    assert "개인 Claude Pro로는 동작하지 않을 가능성이 높습니다" in wizard and "개인 Pro 구독은 안 될 가능성이 높음" in wizard
-    assert "개인 Claude Pro 구독은 Hermes 에서 동작하지 않을 가능성이 높습니다" in hermesbot.PROVIDERS["claude"]["how"][0]
+    # 개인 Pro·Max 도 연결은 된다(사용자 실사용 11/10, Codex 한도 때 Claude 개인으로 폴백) — 약관상 비권장임을 화면에 밝힌다
+    assert "개인 Claude 구독(Pro·Max)도 연결은 되지만 약관상 권하지 않습니다" in wizard and "개인 Pro·Max 도 되나 약관상 비권장" in wizard
+    assert "개인 Claude 구독(Pro·Max)도 연결은 되지만 Anthropic 약관상 권하지 않습니다" in hermesbot.PROVIDERS["claude"]["how"][0]
     apply = code.split("procedure ApplyPreviousChoice", 1)[1].split("\nend;", 1)[0]
     assert "'setup-choice.json'" in apply and "'hermes.json'" in apply
     assert "RecordSays(Rec, 'hermes_model', 'claude', 16)" in apply and "RecordSays(Rec, 'model', 'claude', 16)" in apply
