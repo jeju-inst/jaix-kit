@@ -227,14 +227,18 @@ def check_works(lock):
         return []
     want = works.spec(lock)["nworks"]
     have, integrity = works.installed()
-    if not have:
+    other = None if (have == want["version"] and integrity == want["integrity"]) else works.existing(want["version"])
+    if other:
+        out = [Check("ok", area, f"이미 설치된 {other[1]} 를 씀 ({other[0]})")]
+    elif not have:
         return [Check("fail", area, "설치 안 됨", "jaix setup")]
-    if have != want["version"] or integrity != want["integrity"]:
+    elif have != want["version"] or integrity != want["integrity"]:
         return [Check("warn", area, f"{have} 설치됨 — 잠금은 {want['version']}", "jaix update")]
-    out = [Check("ok", area, f"{have} (잠금과 같음, {works.home()})")]
-    if IS_WIN and not winenv.in_user_path(works.bin_dir()):
+    else:
+        out = [Check("ok", area, f"{have} (잠금과 같음, {works.home()})")]
+    if not other and IS_WIN and not winenv.in_user_path(works.bin_dir()):
         out.append(Check("warn", area, "실행 폴더가 사용자 PATH에 없음", "jaix setup"))
-    elif not IS_WIN and not works.on_path():
+    elif not other and not IS_WIN and not works.on_path():
         out.append(Check("warn", area, "PATH에서 jaix 가 깐 nworks 가 안 보임 — 스킬이 부르지 못함",
                          f"{works.link_dir()} 를 PATH에 추가하고 jaix setup"))
     if not works.saved_client():
