@@ -3565,3 +3565,63 @@ def test_slack_access_브라우저를_못_열면_주소를_보인다(isolated, m
 def test_slack_access_cli_dry_run(isolated, monkeypatch):
     posts, setups = _oauth_fake(monkeypatch)
     assert cli.main(["hermes", "slack-access", "--dry-run"]) == 0 and posts == [] and setups == []
+
+
+# --- jaix hermes remove: 한 봇을 두 PC 에 연결했을 때 이 PC 쪽만 뺀다 ---------------------------------------
+def _remove_ready(isolated, monkeypatch, calls):
+    _connected_before(isolated, monkeypatch)
+    home = hermesbot.paths.hermes_home()
+    (home / ".env").write_text("A=1\nSLACK_BOT_TOKEN=x\nSLACK_APP_TOKEN=y\nSLACK_ALLOWED_USERS=U1\n"
+                               "SLACK_USER_TOKEN=z\n", encoding="utf-8")
+    (home / ".env.bak-20261111-000000").write_bytes(b"SLACK_BOT_TOKEN=x\r\nB=2\r\n")  # Windows 줄 끝
+    vbs = isolated / "Hermes_Gateway.vbs"
+    vbs.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(hermesbot, "startup_entries", lambda: [p for p in [vbs] if p.exists()])
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd[1:]), (True, ""))[1])
+    from jaix import selfupdate
+    selfupdate.save_choice(["claude", "hermes"], "claude")
+    return home, vbs
+
+
+def test_hermes_remove_stops_bot_scrubs_tokens_and_forgets_link(isolated, monkeypatch):
+    calls = []
+    home, vbs = _remove_ready(isolated, monkeypatch, calls)
+    seen = []
+    args = argparse.Namespace(yes=False, dry_run=False)
+    assert hermesbot.cmd_remove(args, seen.append, ask=lambda _: "y") == 0
+    assert ["gateway", "stop"] in calls and ["gateway", "uninstall"] in calls
+    assert not vbs.exists()
+    assert (home / ".env").read_text(encoding="utf-8") == "A=1\nSLACK_ALLOWED_USERS=U1\n"
+    assert (home / ".env.bak-20261111-000000").read_bytes() == b"B=2\r\n"  # 줄 끝 그대로
+    assert hermesbot.recorded() == {} and hermesbot.linked_id() is None
+    assert json.loads(hermesbot._removed_record_file().read_text(encoding="utf-8"))["slack"]["id"] == "jitest"
+    from jaix import selfupdate
+    assert selfupdate.setup_choice()[0] == ["claude"]           # JAIX 업데이트 설치기가 Hermes 를 다시 고르지 않음
+    assert doctor.check_hermes_bot() == []
+    assert not any("TOKEN=" in m for m in seen)  # 토큰 줄·값은 찍지 않음
+
+
+def test_hermes_remove_declined_changes_nothing(isolated, monkeypatch):
+    calls = []
+    home, vbs = _remove_ready(isolated, monkeypatch, calls)
+    before = (home / ".env").read_text(encoding="utf-8")
+    assert hermesbot.cmd_remove(argparse.Namespace(yes=False, dry_run=False), print, ask=lambda _: "") == 1
+    assert calls == [] and vbs.exists() and (home / ".env").read_text(encoding="utf-8") == before
+    assert hermesbot.linked_id() == "jitest"
+
+
+def test_hermes_remove_dry_run_and_nothing_to_do(isolated, monkeypatch):
+    calls = []
+    _, vbs = _remove_ready(isolated, monkeypatch, calls)
+    assert hermesbot.cmd_remove(argparse.Namespace(yes=True, dry_run=True), print) == 0
+    assert calls == [] and vbs.exists() and hermesbot.linked_id() == "jitest"
+    assert hermesbot.cmd_remove(argparse.Namespace(yes=True, dry_run=False), print) == 0
+    seen = []
+    assert hermesbot.cmd_remove(argparse.Namespace(yes=True, dry_run=False), seen.append) == 0  # 두 번째는 할 일 없음
+    assert any("바꿀 것이 없습니다" in m for m in seen)
+
+
+def test_hermes_remove_cli_wired():
+    args = cli.build_parser().parse_args(["hermes", "remove", "--yes"])
+    assert args.func is hermesbot.cmd_remove and args.yes and not args.dry_run

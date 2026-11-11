@@ -580,6 +580,11 @@ def build_parser():
                          help="내 봇이 내 Slack 자격(DM·비공개 채널·검색·파일)도 쓰게: 브라우저에서 본인이 허용(쓰기는 매번 확인)")
     sa.add_argument("--dry-run", action="store_true")
     sa.set_defaults(func=hermesbot.cmd_slack_access)
+    rm = hsub.add_parser("remove",
+                         help="이 PC 에서만 Hermes 슬랙 봇을 뺌(한 봇을 두 PC 에 연결했을 때): 봇 멈춤·토큰 삭제·연결 기록 정리")
+    rm.add_argument("--yes", action="store_true", help="묻지 않고 진행")
+    rm.add_argument("--dry-run", action="store_true")
+    rm.set_defaults(func=hermesbot.cmd_remove)
     lg = hsub.add_parser("login", help="Hermes 의 AI 구독 로그인(설치기 마지막 화면이 부름)")
     lg.add_argument("--model", choices=sorted(hermesbot.PROVIDERS), default="chatgpt")
     lg.add_argument("--no-wait", action="store_true", help="끝나고 Enter 를 기다리지 않음")

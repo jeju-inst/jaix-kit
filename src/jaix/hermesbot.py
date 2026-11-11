@@ -1339,6 +1339,108 @@ def cmd_slack_access(args, log, opener=None, sleep=None, clock=None):
     return 0
 
 
+SLACK_SECRET_KEYS = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_USER_TOKEN")  # setup_pc.py 가 .env 에 넣는 토큰
+
+
+def _removed_record_file():
+    return paths.data_dir() / "hermes.removed.json"
+
+
+def _scrub_env(path, keys=SLACK_SECRET_KEYS):
+    """.env 꼴 파일에서 keys 줄만 뺀다(다른 줄·순서는 그대로). 뺀 줄이 있으면 True. 값은 읽어도 기록하지 않는다."""
+    try:
+        with open(path, encoding="utf-8", newline="") as f:  # 줄 끝(CRLF·LF)을 그대로 둔다
+            lines = f.read().splitlines(keepends=True)
+    except OSError:
+        return False
+    kept = [ln for ln in lines if not ("=" in ln and ln.split("=", 1)[0].strip().removeprefix("export ").strip() in keys)]
+    if len(kept) == len(lines):
+        return False
+    tmp = path.with_name(path.name + ".jaix-tmp")
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write("".join(kept))
+    os.replace(tmp, path)
+    return True
+
+
+def _confirm(prompt, ask=None):
+    try:
+        return (ask or input)(prompt).strip().lower() in ("y", "yes", "예", "네", "ㅇ")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+def cmd_remove(args, log, ask=None):
+    """한 봇을 두 PC 에 실수로 연결했을 때 이 PC 쪽만 뺀다: gateway 멈춤·로그온 자동 시작 지움, .env(와 setup_pc 백업)
+    의 슬랙 토큰 줄 삭제, jaix 연결 기록 정리(업데이트·재설치가 봇을 되살리지 않게). Slack 앱과 다른 PC 의 봇은 그대로다 —
+    토큰을 Slack 에서 취소(auth.revoke)하지 않는다. 같은 토큰을 쓰는 다른 PC 까지 끊기기 때문이다. Hermes 프로그램과
+    대화 기록·AI 구독 로그인도 남긴다(Hermes 를 통째로 지우려면 `hermes uninstall`)."""
+    rec = recorded()
+    ident = (rec.get("slack") or {}).get("id")
+    home = paths.hermes_home()
+    has_tokens = any(env_has(k) for k in SLACK_SECRET_KEYS)
+    if not (rec or has_tokens or startup_entries()):
+        log("이 PC 에는 jaix 가 연결한 Hermes 슬랙 봇이 없습니다. 바꿀 것이 없습니다.")
+        return 0
+    name = f"Hermes-{ident}" if ident else "Hermes 슬랙 봇"
+    plan = [f"이 PC 에서 {name} 를 뺍니다:",
+            "  - 봇(gateway)을 멈추고 로그온 때 저절로 켜지지 않게 합니다",
+            f"  - {home / '.env'} 와 그 백업에서 슬랙 토큰 줄을 지웁니다",
+            "  - jaix 연결 기록을 정리합니다(JAIX 업데이트·재설치가 봇을 다시 켜지 않게)",
+            "  Slack 앱과 다른 PC 의 봇, Hermes 프로그램·대화 기록·AI 구독 로그인은 그대로 둡니다."]
+    for line in plan:
+        log(line)
+    if args.dry_run:
+        return 0
+    if not args.yes:
+        show_console()
+        if not _confirm("계속할까요? [y/N] ", ask):
+            log("그만둡니다. 아무것도 바꾸지 않았습니다.")
+            return 1
+    ok = True
+    hermes = find_hermes()
+    if hermes:
+        _run([hermes, "gateway", "stop"], log, timeout=120)  # 이미 멈춰 있으면 실패해도 된다
+        if not _run([hermes, "gateway", "uninstall"], log, timeout=120)[0] and startup_entries():
+            log("    hermes gateway uninstall 이 실패해 시작프로그램 항목을 직접 지웁니다")
+    for entry in startup_entries():  # uninstall 이 남긴 것까지(로그온 때 되살아나지 않게)
+        try:
+            Path(entry).unlink()
+        except OSError as e:
+            log(f"    시작프로그램 항목을 지우지 못함: {Path(entry).name} ({type(e).__name__})")
+            ok = False
+    scrubbed = 0
+    for f in [home / ".env", *sorted(home.glob(".env.bak-*"))]:  # setup_pc 백업에도 토큰이 들어 있다
+        try:
+            scrubbed += _scrub_env(f)
+        except OSError as e:
+            log(f"    {f.name} 에서 토큰을 지우지 못함({type(e).__name__})")
+            ok = False
+    if any(env_has(k) for k in SLACK_SECRET_KEYS):
+        log("    .env 에 슬랙 토큰이 남아 있습니다(위 기록)")
+        ok = False
+    if rec:
+        rec = dict(rec, removed=datetime.datetime.now().isoformat(timespec="seconds"))
+        try:
+            _removed_record_file().write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+            _record_file().unlink()
+        except OSError as e:
+            log(f"    jaix 연결 기록을 정리하지 못함({type(e).__name__})")
+            ok = False
+    from jaix import selfupdate  # 순환을 피한다(selfupdate 가 hermesbot 을 부른다)
+
+    channels, model = selfupdate.setup_choice()
+    if "hermes" in channels:
+        selfupdate.save_choice([c for c in channels if c != "hermes"], model)
+    log(f"슬랙 토큰을 지운 파일 {scrubbed}개.")
+    if not ok:
+        log("일부를 끝내지 못했습니다(위 기록). 봇이 다시 뜨면 이 명령을 다시 실행하거나 AI센터에 알려 주세요.")
+        return 1
+    log(f"완료: 이 PC 에서 {name} 를 뺐습니다. 이제 다른 PC 의 봇이 메시지를 모두 받습니다.")
+    log("이 PC 에서 다시 쓰려면 AI센터에서 새 연결 코드를 받아 jaix-setup 에서 '슬랙으로도 쓰기'를 고르세요.")
+    return 0
+
+
 def linked_id(rec=None):
     """이 PC 가 jaix 로 슬랙에 연결된 봇 아이디(아니면 None): 연결 기록(slack.id)이 있고 Hermes .env 에 봇·앱 토큰이
     있으면 연결된 것이다. status 는 보지 않는다 — 다시 설치가 중간에 끊겨 'installing' 으로 남았다가 코드 없는 다음
