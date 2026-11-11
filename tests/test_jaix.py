@@ -3625,3 +3625,26 @@ def test_hermes_remove_dry_run_and_nothing_to_do(isolated, monkeypatch):
 def test_hermes_remove_cli_wired():
     args = cli.build_parser().parse_args(["hermes", "remove", "--yes"])
     assert args.func is hermesbot.cmd_remove and args.yes and not args.dry_run
+
+
+def test_hermes_remove_keeps_mode_and_retries_leftover_backup(isolated, monkeypatch):
+    """Codex #165: 0600 이 풀리지 않고, 백업 정리가 실패했던 PC 에서 다시 하면 백업까지 마저 지운다."""
+    calls = []
+    home, _ = _remove_ready(isolated, monkeypatch, calls)
+    backup = home / ".env.bak-20261111-000000"
+    if not sys.platform.startswith("win"):
+        (home / ".env").chmod(0o600)
+    real = hermesbot._scrub_env
+
+    def flaky(path, *a):
+        if path == backup:
+            raise PermissionError
+        return real(path, *a)
+
+    monkeypatch.setattr(hermesbot, "_scrub_env", flaky)
+    assert hermesbot.cmd_remove(argparse.Namespace(yes=True, dry_run=False), print) == 1
+    if not sys.platform.startswith("win"):
+        assert (home / ".env").stat().st_mode & 0o777 == 0o600
+    monkeypatch.setattr(hermesbot, "_scrub_env", real)
+    assert hermesbot.cmd_remove(argparse.Namespace(yes=True, dry_run=False), print) == 0
+    assert b"SLACK_BOT_TOKEN" not in backup.read_bytes()

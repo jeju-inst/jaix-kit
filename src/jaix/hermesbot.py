@@ -1359,8 +1359,22 @@ def _scrub_env(path, keys=SLACK_SECRET_KEYS):
     tmp = path.with_name(path.name + ".jaix-tmp")
     with open(tmp, "w", encoding="utf-8", newline="") as f:
         f.write("".join(kept))
+    shutil.copymode(path, tmp)  # 0600 .env 가 0644 로 풀리지 않게(남은 다른 비밀)
     os.replace(tmp, path)
     return True
+
+
+def _token_files(home):
+    """슬랙 토큰이 남아 있을 수 있는 파일: .env 와 setup_pc 백업(.env.bak-*)."""
+    return [home / ".env", *sorted(home.glob(".env.bak-*"))]
+
+
+def _has_token_lines(path, keys=SLACK_SECRET_KEYS):
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            return any("=" in ln and ln.split("=", 1)[0].strip().removeprefix("export ").strip() in keys for ln in f)
+    except OSError:
+        return False
 
 
 def _confirm(prompt, ask=None):
@@ -1378,7 +1392,7 @@ def cmd_remove(args, log, ask=None):
     rec = recorded()
     ident = (rec.get("slack") or {}).get("id")
     home = paths.hermes_home()
-    has_tokens = any(env_has(k) for k in SLACK_SECRET_KEYS)
+    has_tokens = any(_has_token_lines(f) for f in _token_files(home))  # 백업까지 — 지난번 일부 실패 뒤 다시 할 때
     if not (rec or has_tokens or startup_entries()):
         log("이 PC 에는 jaix 가 연결한 Hermes 슬랙 봇이 없습니다. 바꿀 것이 없습니다.")
         return 0
@@ -1410,7 +1424,7 @@ def cmd_remove(args, log, ask=None):
             log(f"    시작프로그램 항목을 지우지 못함: {Path(entry).name} ({type(e).__name__})")
             ok = False
     scrubbed = 0
-    for f in [home / ".env", *sorted(home.glob(".env.bak-*"))]:  # setup_pc 백업에도 토큰이 들어 있다
+    for f in _token_files(home):  # setup_pc 백업에도 토큰이 들어 있다
         try:
             scrubbed += _scrub_env(f)
         except OSError as e:
