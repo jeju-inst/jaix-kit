@@ -37,6 +37,7 @@
 |---|---|---|
 | Hermes 슬랙 봇 만들기 | `provision_app.py` + `jaix hermes handoff` → JX 코드 DM | 운영 중 |
 | Hermes 봇 이름 바꾸기 | 슬랙 앱 이름 변경 → 사용자 PC `jaix hermes rename`(원격 안내) | 운영 중 |
+| Hermes를 두 PC에 연결함 | 뺄 PC에서 `jaix hermes remove`(봇 멈춤·토큰 삭제·기록 정리, Slack 토큰 취소는 안 함) | 새 판부터 |
 | 웍스 기관 앱 정보 | 원내망 `jaix setup` 이 자동으로 받음 | 운영 중 |
 | 한컴 첫 실행 동의(2022) | jaix 가 미리 '동의 안 함'으로 답해 둠 | 운영 중 |
 | Cowork 도구 배포 | Team 좌석: 관리자 콘솔 조직 플러그인 + managed settings | 11/10 Team 좌석부터. 개인 구독 계정은 사용자가 마켓 추가 |
