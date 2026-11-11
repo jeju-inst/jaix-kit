@@ -37,7 +37,7 @@ TTL_HOURS = 72
 CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
-SLACKBOT_SHA = "bb709eefac6c22699ca740b5a8fbe67176fb3890"  # hermes-slackbot#28: setup_pc user_token 단독 파일(#26)·onboard_batch
+SLACKBOT_SHA = "5800619f13ebd637b4c4fb5da55fa8ddbdc14d33"  # hermes-slackbot#30: setup_pc 가 봇 토큰으로 주인 전용 비공개 채널 hermes-<id> 생성·초대(#29 공용 OAuth 앱 포함)
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
     # open: hermes 의 openai-codex 로그인은 device code 방식이라 브라우저를 스스로 열지 않는다(주소와 코드만 찍음,
     # hermes_cli/auth_codex.py) → jaix 가 그 주소를 연다(jaix-win 11/5). anthropic 은 hermes 가 직접 연다
