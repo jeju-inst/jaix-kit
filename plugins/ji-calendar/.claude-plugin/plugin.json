@@ -1,0 +1,10 @@
+{
+  "name": "ji-calendar",
+  "description": "연구원 공개 일정 조회 — 이름으로 직원을 찾아 공개 4대 캘린더(과제·업무·근태·기타)와 공식행사를 읽기 전용으로 본다(원격 Calendar MCP, 로그인 없음).",
+  "author": {
+    "name": "제주연구원 AI센터",
+    "url": "https://github.com/jeju-inst/jaix-kit"
+  },
+  "homepage": "https://github.com/jeju-inst/jaix-kit",
+  "license": "MIT"
+}

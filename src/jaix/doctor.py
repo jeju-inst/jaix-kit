@@ -2,14 +2,15 @@
 
 판정: ok 통과 · warn 주의(동작은 함, 손볼 것 있음) · fail 실패(종료 코드 1) · skip 해당 없음.
 """
+import json
 import os
 import re
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
-from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, runtimes, schedule, selfupdate, uvpython, winenv, works
+from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, remotemcp, runtimes, schedule, selfupdate, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -411,8 +412,8 @@ def check_claude(lock):
     return out
 
 
-def _exe_stem(command):
-    return PureWindowsPath(str(command)).stem.lower()
+def _what(spec):
+    return spec.get("url") if codex.is_remote(spec) else spec.get("command")
 
 
 def check_codex(lock):
@@ -440,8 +441,8 @@ def check_codex(lock):
     stale = [n for n, spec in want.items()
              if codex._current(n) != spec and (codex._current(n) is None or n in owned)]
     # jaix가 쓴 항목을 다른 실행파일(예: hwp-agent 단독 설치본 exe)이 덮어쓴 것과, 항목이 없거나 옛 경로인 것을 가른다
-    taken = {n: codex._current(n)["command"] for n in stale
-             if codex._current(n) and _exe_stem(codex._current(n)["command"]) != _exe_stem(want[n]["command"])}
+    taken = {n: _what(codex._current(n)) for n in stale
+             if codex._current(n) and codex.ident(codex._current(n)) != codex.ident(want[n])}
     fix_taken = "단독 설치본의 MCP 등록을 끈 뒤 jaix update 로 되돌리기"
     for n, cmd in taken.items():
         out.append(Check("fail", "Codex MCP", f"다른 설치본({cmd})이 {n} MCP 항목을 차지함", fix_taken))
@@ -450,8 +451,8 @@ def check_codex(lock):
     released = codex.released_mcp()
     for n, spec in want.items():
         cur = codex._current(n)
-        if n in released and n not in taken and cur and _exe_stem(cur["command"]) != _exe_stem(spec["command"]):
-            out.append(Check("warn", "Codex MCP", f"jaix가 쓴 {n} MCP 항목을 다른 실행파일({cur['command']})이 바꿔 씀",
+        if n in released and n not in taken and cur and codex.ident(cur) != codex.ident(spec):
+            out.append(Check("warn", "Codex MCP", f"jaix가 쓴 {n} MCP 항목을 다른 실행파일({_what(cur)})이 바꿔 씀",
                              f"단독 설치본이면 {fix_taken} · 직접 바꾼 것이면 무시해도 됨"))
     rest = [n for n in stale if n not in taken]
     if rest:
@@ -459,6 +460,85 @@ def check_codex(lock):
                          "jaix update"))
     elif want and not taken and not any(c.status == "warn" and c.area == "Codex MCP" for c in out):
         out.append(Check("ok", "Codex MCP", ", ".join(want)))
+    return out
+
+
+def _installed_root(plugin):
+    """Claude 가 깐 플러그인 폴더, 없으면 Codex 사본."""
+    rec = claude.installed().get(plugin.id) or {}
+    p = rec.get("installPath")
+    if p and Path(p).is_dir():
+        return Path(p), "Claude"
+    root = codex.plugin_root(plugin.name)
+    return (root, "Codex") if root else (None, None)
+
+
+def remote_mcp_state(lock):
+    """잠금의 원격(HTTP) MCP 서버별 등록 상태 {이름: {"url", "plugin", "registered": [채널], "missing": [채널]}}.
+    Claude 는 플러그인이 깔려 있으면 등록된 것(플러그인 .mcp.json 을 그대로 띄움). Codex 는 config.toml, Hermes 는
+    config.yaml 에 같은 이름이 있어야 한다(jaix 가 적는다 — jaix-kit#170)."""
+    servers, in_claude = {}, set()
+    for p in lock.plugins:
+        root, who = _installed_root(p)
+        if not root:
+            continue
+        try:
+            cfg = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for name, spec in remotemcp.servers_in(cfg).items():
+            servers[name] = {**spec, "plugin": p.name}
+            if who == "Claude":
+                in_claude.add(name)
+    for name, spec in remotemcp.recorded().items():  # Hermes 만 고른 PC: 잠금에서 읽어 둔 목록
+        if spec.get("plugin") in {p.name for p in lock.plugins}:
+            servers.setdefault(name, spec)
+    if not servers:
+        return {}
+    by_name = {p.name: p for p in lock.plugins}
+    have_claude = claude.installed()
+    codex_on = bool(codex.find_cli() and codex.marketplace_configured())
+    hermes_on = bool(hermes.installed() and hermesbot.find_hermes())
+    try:
+        hermes_text = hermesbot.config_path().read_text(encoding="utf-8") if hermes_on else ""
+    except OSError:
+        hermes_text = ""
+    out = {}
+    for name, spec in servers.items():
+        reg, miss = [], []
+        plugin = by_name.get(spec.get("plugin"))
+        if name in in_claude:
+            reg.append("Claude")
+        elif claude.find_cli() and plugin and plugin.id not in have_claude:
+            miss.append("Claude")
+        if codex_on:
+            cur = codex._current(name)
+            (reg if cur and cur.get("url") == spec["url"] else miss).append("Codex")
+        if hermes_on:
+            (reg if hermesbot._yaml_has_key(hermes_text, "mcp_servers", name) else miss).append("Hermes")
+        out[name] = {"url": spec["url"], "plugin": spec.get("plugin"), "registered": reg, "missing": miss}
+    return out
+
+
+def check_remote_mcp(lock, probe=None):
+    """원격 MCP: '등록 안 됨'(jaix update 로 고침)과 '접속 실패'(인터넷·서버 쪽)를 따로 알린다."""
+    probe = probe or remotemcp.probe
+    out = []
+    for name, st in sorted(remote_mcp_state(lock).items()):
+        area = f"원격 MCP {name}"
+        if st["missing"]:
+            out.append(Check("fail", f"{area} 등록", f"등록 안 됨: {', '.join(st['missing'])}"
+                             + (f" (등록됨: {', '.join(st['registered'])})" if st["registered"] else ""), "jaix update"))
+        elif not st["registered"]:
+            out.append(Check("fail", f"{area} 등록", "등록 안 됨(Claude·Codex·Hermes 어디에도)", "jaix update"))
+        else:
+            out.append(Check("ok", f"{area} 등록", ", ".join(st["registered"])))
+        tools, why = probe(st["url"])
+        if why:
+            out.append(Check("warn", f"{area} 접속", f"접속 실패: {why}",
+                             "인터넷 연결 확인 — 다른 사이트는 되는데 계속 실패하면 AI센터에(서버 쪽 문제)"))
+        else:
+            out.append(Check("ok", f"{area} 접속", f"접속됨(도구 {len(tools)}개)"))
     return out
 
 
@@ -560,7 +640,7 @@ def check_self():
 
 def run(lock):
     return [*check_runtimes(lock), *check_runtime_copies(), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
-            *check_hermes(lock), *check_autoupdate(), *check_self(), *check_clis(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
+            *check_hermes(lock), *check_remote_mcp(lock), *check_autoupdate(), *check_self(), *check_clis(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
 def render(checks):

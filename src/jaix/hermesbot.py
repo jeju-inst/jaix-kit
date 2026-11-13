@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from jaix import codex, hermes as skills, net, paths, secret, uvpython
+from jaix import codex, hermes as skills, net, paths, remotemcp, secret, uvpython
 from jaix.paths import IS_WIN
 
 INSTALL_PS1 = "https://hermes-agent.nousresearch.com/install.ps1"
@@ -391,7 +391,7 @@ class _Setter:
             self.log(f"    Hermes 설정: 바뀐 것만 넣음({self.ran}건, 그대로인 {self.skipped}건은 건너뜀)")
 
 
-def configure(hermes, model, log, dry_run=False):
+def configure(hermes, model, log, dry_run=False, lock=None):
     """모델·도구·MCP. 값은 `hermes config set`(YAML/JSON 값)과 `hermes tools disable`로 넣는다(Hermes가 형식을 지킨다)."""
     spec = PROVIDERS[model]
     if dry_run:
@@ -404,7 +404,7 @@ def configure(hermes, model, log, dry_run=False):
             ok &= put(f"model.{key}", spec[key], ["config", "set", f"model.{key}", spec[key]])
     for platform in ("cli", "slack"):
         ok &= put(f"tools:{platform}", list(OFF_TOOLSETS), ["tools", "disable", *OFF_TOOLSETS, "--platform", platform])
-    ok &= write_mcp(hermes, log, put)
+    ok &= write_mcp(hermes, log, put, lock)
     put.save()
     return ok
 
@@ -1099,12 +1099,15 @@ def bot_room(hermes, ident, log, call=None):
     return ok
 
 
-def write_mcp(hermes, log, put=None):
-    """jaix가 Codex에 쓴 MCP 항목(codex-mcp.json)만 Hermes 에 넣는다. import-agent 는 항목을 고를 수 없어 쓰지 않는다
-    (jaix-win Q9). 이미 같은 이름이 있으면 jaix가 넣은 것(기록)일 때만 바꾼다."""
-    want = codex.owned_mcp()
+def write_mcp(hermes, log, put=None, lock=None):
+    """jaix가 Codex에 쓴 stdio MCP 항목(codex-mcp.json)과 잠금의 원격 HTTP MCP 항목을 Hermes 에 넣는다.
+    import-agent 는 항목을 고를 수 없어 쓰지 않는다(jaix-win Q9). 이미 같은 이름이 있으면 jaix가 넣은 것(기록)일
+    때만 바꾼다. 원격 항목은 Codex 와 무관하게 잠금에서 읽는다 — Hermes 만 고른 PC 에도 들어가야 한다(jaix-kit#170)."""
+    want = {n: s for n, s in codex.owned_mcp().items() if not codex.is_remote(s)}
+    remote = remotemcp.from_lock(lock) if lock is not None else remotemcp.recorded()
+    want.update({n: {"url": s["url"]} for n, s in remote.items()})
     if not want:
-        log("    MCP: Codex 채널에서 jaix가 쓴 항목이 없어 건너뜀")
+        log("    MCP: 넣을 항목이 없어 건너뜀(Codex 채널에서 jaix가 쓴 항목·잠금의 원격 MCP 없음)")
         return True
     rec = recorded()
     owned = rec.get("mcp") or {}
@@ -1117,8 +1120,11 @@ def write_mcp(hermes, log, put=None):
         if _yaml_has_key(text, "mcp_servers", name) and name not in owned:
             log(f"    MCP {name}: Hermes 에 사용자 항목이 있어 그대로 둠")
             continue
-        value = json.dumps({"command": spec["command"], "args": spec["args"], **({"env": spec["env"]} if spec.get("env") else {})},
-                           ensure_ascii=False)
+        if codex.is_remote(spec):
+            value = json.dumps({"url": spec["url"]}, ensure_ascii=False)
+        else:
+            value = json.dumps({"command": spec["command"], "args": spec["args"],
+                                **({"env": spec["env"]} if spec.get("env") else {})}, ensure_ascii=False)
         if (put or _Setter(hermes, log))(f"mcp_servers.{name}", value, ["config", "set", f"mcp_servers.{name}", value]):
             owned[name] = spec
             log(f"    MCP {name}: 넣음")
@@ -1126,6 +1132,14 @@ def write_mcp(hermes, log, put=None):
             ok = False
     rec["mcp"] = owned
     _save_record(rec)
+    return ok
+
+
+def refresh_mcp(hermes, log, lock):
+    """jaix update: MCP 항목만 다시 맞춘다(바뀐 것만 hermes config set)."""
+    put = _Setter(hermes, log)
+    ok = write_mcp(hermes, log, put, lock)
+    put.save()
     return ok
 
 
@@ -1199,7 +1213,7 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
     if not install_hermes(log, dry_run):
         return _done({"status": "failed", "error": "Hermes 설치 실패"}, dry_run)
     hermes = find_hermes() or "hermes"
-    if not configure(hermes, model, log, dry_run):
+    if not configure(hermes, model, log, dry_run, lock):
         # 코드는 아직 쓰지 않았다(서버에 그대로) — 고친 뒤 같은 코드로 다시 하면 된다
         log("    Hermes 설정이 다 들어가지 않아 슬랙 연결을 멈춥니다(위 기록). 연결 코드는 아직 쓰지 않았습니다.")
         return _done({"status": "failed", "error": "Hermes 설정 실패(모델·도구·MCP)"}, dry_run)
