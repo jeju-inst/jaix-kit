@@ -513,9 +513,16 @@ def remote_mcp_state(lock):
             miss.append("Claude")
         if codex_on:
             cur = codex._current(name)
-            (reg if cur and cur.get("url") == spec["url"] else miss).append("Codex")
-        if hermes_on:
-            (reg if hermesbot._yaml_has_key(hermes_text, "mcp_servers", name) else miss).append("Hermes")
+            if cur and cur.get("url") == spec["url"]:
+                reg.append("Codex")
+            else:
+                miss.append("Codex(다른 항목이 같은 이름을 씀)" if cur else "Codex")
+        if hermes_on:  # 같은 이름이 있어도 다른 주소(옛 것·사용자 정의)면 등록으로 보지 않는다(Codex P2)
+            if hermesbot._yaml_mcp_url(hermes_text, name) == spec["url"]:
+                reg.append("Hermes")
+            else:
+                has = hermesbot._yaml_has_key(hermes_text, "mcp_servers", name)
+                miss.append("Hermes(다른 항목이 같은 이름을 씀)" if has else "Hermes")
         out[name] = {"url": spec["url"], "plugin": spec.get("plugin"), "registered": reg, "missing": miss}
     return out
 
@@ -528,7 +535,9 @@ def check_remote_mcp(lock, probe=None):
         area = f"원격 MCP {name}"
         if st["missing"]:
             out.append(Check("fail", f"{area} 등록", f"등록 안 됨: {', '.join(st['missing'])}"
-                             + (f" (등록됨: {', '.join(st['registered'])})" if st["registered"] else ""), "jaix update"))
+                             + (f" (등록됨: {', '.join(st['registered'])})" if st["registered"] else ""),
+                             "jaix update" if not any("다른 항목" in m for m in st["missing"]) else
+                             "같은 이름의 옛·직접 넣은 항목을 지운 뒤 jaix update (일부러 바꾼 것이면 그대로 둬도 됨)"))
         elif not st["registered"]:
             out.append(Check("fail", f"{area} 등록", "등록 안 됨(Claude·Codex·Hermes 어디에도)", "jaix update"))
         else:

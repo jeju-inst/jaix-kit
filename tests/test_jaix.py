@@ -3808,3 +3808,31 @@ def test_ji_calendar_plugin_files():
     skill = (root / "skills" / "ji-calendar" / "SKILL.md").read_text(encoding="utf-8")
     assert skill.index("search_people") < skill.index("get_schedule(")
     assert "참석 가능" in skill and "gw" in skill
+
+
+def test_hermes_yaml_mcp_url_reads_block_and_flow():
+    text = ("model:\n  provider: x\nmcp_servers:\n  hwp-agent:\n    command: uvx\n    args: [a]\n"
+            f"  cal:\n    url: {REMOTE_URL}\n  other: {{url: 'https://o.example.org/mcp'}}\nplatforms:\n  cal:\n    url: x\n")
+    assert hermesbot._yaml_mcp_url(text, "cal") == REMOTE_URL
+    assert hermesbot._yaml_mcp_url(text, "other") == "https://o.example.org/mcp"
+    assert hermesbot._yaml_mcp_url(text, "hwp-agent") is None
+    assert hermesbot._yaml_mcp_url("model:\n  cal:\n    url: x\n", "cal") is None
+
+
+def test_remote_mcp_state_hermes_needs_same_url(isolated, monkeypatch, the_lock):
+    """Hermes 에 같은 이름이 옛·사용자 주소로 있으면 등록으로 보지 않는다(Codex P2)."""
+    rec = remotemcp._record()
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(json.dumps({"servers": {"cal": {"url": REMOTE_URL, "plugin": the_lock.plugins[0].name}}}),
+                   encoding="utf-8")
+    monkeypatch.setattr(hermes, "installed", lambda: {"s": {}})
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(claude, "find_cli", lambda: None)
+    monkeypatch.setattr(codex, "find_cli", lambda: None)
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("mcp_servers:\n  cal:\n    url: https://old.example.org/mcp\n", encoding="utf-8")
+    st = doctor.remote_mcp_state(the_lock)["cal"]
+    assert st["missing"] == ["Hermes(다른 항목이 같은 이름을 씀)"] and st["registered"] == []
+    cfg.write_text(f"mcp_servers:\n  cal:\n    url: {REMOTE_URL}\n", encoding="utf-8")
+    assert doctor.remote_mcp_state(the_lock)["cal"]["registered"] == ["Hermes"]

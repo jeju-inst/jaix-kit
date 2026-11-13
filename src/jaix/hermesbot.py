@@ -345,6 +345,31 @@ def _yaml_has_key(text, section, name):
     return bool(re.search(rf"""^\s*(?:-\s*)?["']?{re.escape(name)}["']?\s*:""", text, re.M))
 
 
+def _yaml_mcp_url(text, name):
+    """config.yaml 의 mcp_servers.<name> 에 적힌 url(없으면 None). 블록(`url: …` 아래 줄)과 흐름(`{url: …}`) 꼴만 본다."""
+    sec = re.search(r"^mcp_servers\s*:[^\n]*\n((?:[ \t]+[^\n]*\n?|[ \t]*\n)*)", text, re.M)
+    if not sec:
+        return None
+    body = sec.group(1)
+    m = re.search(rf"""^([ \t]+)["']?{re.escape(name)}["']?\s*:(.*)$""", body, re.M)
+    if not m:
+        return None
+    url_re = r"""["']?url["']?\s*:\s*["']?([^"',}\s]+)"""
+    inline = re.search(url_re, m.group(2))
+    if inline:
+        return inline.group(1)
+    indent = len(m.group(1))
+    for line in body[m.end():].splitlines()[1:]:
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        u = re.match(r"\s*" + url_re, line)
+        if u:
+            return u.group(1)
+    return None
+
+
 def _config_digest():
     try:
         return hashlib.sha256(config_path().read_bytes()).hexdigest()
