@@ -16,8 +16,8 @@
         "source": "git-subdir",
         "url": "https://github.com/jeju-inst/calendar-worklog.git",
         "path": "plugin",
-        "ref": "v2026.10.30.1",
-        "sha": "dab8e0e00e9a17b54e1a2db3d522c1a956e6bcc6"
+        "ref": "v2026.11.06.2",
+        "sha": "86812e0d8447821cf0e529dc0965120ea5710394"
       },
       "homepage": "https://github.com/jeju-inst/calendar-worklog",
       "metadata": {
@@ -25,7 +25,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.1"
+      "version": "2026.11.06.2"
     },
     {
       "name": "hwp-agent",
@@ -35,8 +35,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v2026.10.30.2",
-        "sha": "10a53b7151ab1592979f46dcbfe7a35f429e0161"
+        "ref": "v2026.11.06.1",
+        "sha": "8bca5e4113a7d1b7d0f130f57751bb631aa01d33"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
@@ -44,7 +44,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.2"
+      "version": "2026.11.06.1"
     },
     {
       "name": "ji-report-writing",
@@ -54,8 +54,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/ji-writing-standards.git",
-        "ref": "v2026.10.27.1",
-        "sha": "81aa08cf71332cd18f2e13feea80c82a2589bc15"
+        "ref": "v2026.11.13.1",
+        "sha": "46ffe073b1e04b5f0a4f373368610d697c4dab93"
       },
       "homepage": "https://github.com/jeju-inst/ji-writing-standards",
       "metadata": {
@@ -63,7 +63,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.27.1"
+      "version": "2026.11.13.1"
     },
     {
       "name": "ji-project-template",
@@ -111,8 +111,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/jaix-gw.git",
-        "ref": "v2026.10.30.3",
-        "sha": "1d951fdd4d0ac893bf0a9bdda7aca5ceb8c87eb9"
+        "ref": "v2026.11.06.1",
+        "sha": "48467c135da8a3216608fe3a088125799189cff5"
       },
       "homepage": "https://github.com/jeju-inst/jaix-gw",
       "metadata": {
@@ -120,7 +120,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.3"
+      "version": "2026.11.06.1"
     },
     {
       "name": "mail-skill",
@@ -131,8 +131,8 @@
         "source": "git-subdir",
         "url": "https://github.com/z0nam/mail-skill.git",
         "path": "plugins/mail-skill",
-        "ref": "v2026.11.04.1",
-        "sha": "adce7365cb99d609e53f14934233b6239b994add"
+        "ref": "v2026.11.11.1",
+        "sha": "a6f37f0f1c139a4af4510665e48fa03f216a6559"
       },
       "homepage": "https://github.com/z0nam/mail-skill",
       "metadata": {
@@ -140,7 +140,65 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.04.1"
+      "version": "2026.11.11.1"
+    },
+    {
+      "name": "hwp2pdf",
+      "displayName": "HWP → PDF 변환 (hwp2pdf)",
+      "description": "한컴오피스로 HWP/HWPX 파일·폴더를 PDF·DOCX·HWPX로 일괄 변환한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/z0nam/hwp2pdf.git",
+        "ref": "v2026.11.05.2",
+        "sha": "00a59212f9c237ef743625736ffe5150179f7594"
+      },
+      "homepage": "https://github.com/z0nam/hwp2pdf",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.11.05.2"
+    },
+    {
+      "name": "jaix-help",
+      "displayName": "JAIX 도우미",
+      "description": "jaix 도구가 안 될 때 자가시험으로 점검하고, 묻고 고치며, 계정 연결 창을 띄운다.",
+      "category": "productivity",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jeju-inst/jaix-kit.git",
+        "path": "plugins/jaix-help",
+        "ref": "v2026.11.12.1",
+        "sha": "fccd0b9f1731852574dc3c95cceb5f0a0e0d7325"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-kit",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.11.12.1"
+    },
+    {
+      "name": "jaix-works",
+      "displayName": "웍스 (NAVER WORKS)",
+      "description": "본인 웍스 계정 권한으로 드라이브·캘린더·메일을 다룬다(nworks CLI, 기관 User OAuth 앱).",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jeju-inst/jaix-works.git",
+        "ref": "v2026.11.10.1",
+        "sha": "660b848b860b1d6323ea5ca1294cb32c6b660d4a"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-works",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.11.10.1"
     }
   ]
 }

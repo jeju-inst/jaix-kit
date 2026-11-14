@@ -22,7 +22,7 @@
 | `claude-for-nonprofits` 의 **Default access** | **Not available** | 비영리 할인 조직에 Anthropic이 "기본 설치"로 내려보낸다(2026-10-28 갱신본, 미국 모금·지원금용 커넥터 20개·스킬 13개). 도구 정의만으로 상시 예산 3k를 몇 배 넘는다 |
 | ⚠ "Remove from organization" 은 누르지 않는다 | — | Anthropic 카탈로그 출처 전체가 빠진다(플러그인 하나만 빠지지 않음) |
 | jaix 마켓플레이스 추가 | **Sync from GitHub** → 비공개 저장소 `jeju-inst/jaix-kit-org` (아래 주) | Cowork·Desktop 경로 |
-| jaix 플러그인 6종 기본 접근 | **Installed by default** (Required 아님) | "느슨" 결정. 사용자가 끌 수 있다 |
+| jaix 플러그인 기본 접근(잠금 전부, `jaix-help` 포함) | **Installed by default** (Required 아님) | "느슨" 결정. 사용자가 끌 수 있다 |
 | 그 밖의 Anthropic 카탈로그(`engineering` 등) | 기본값(Available to install) 유지 | 깔지 않으면 비용 없음 |
 
 - **주 — 조직 동기화는 공개 마켓플레이스 저장소를 받지 않는다.** Team·Enterprise 조직 동기화는 github.com 마켓플레이스 저장소가 private 또는 internal이어야 한다. `jeju-inst/jaix-kit` 은 공개라 그대로는 등록할 수 없다.
@@ -30,6 +30,7 @@
   - 그래서 **`marketplace.json` 만 담은 비공개 저장소 `jeju-inst/jaix-kit-org` 를 두고**, jaix-kit main에 머지될 때마다 워크플로가 그 파일을 복사해 넣는다. 잠금의 정본은 계속 jaix-kit이다.
   - CLI 경로(③ managed settings·`jaix setup`)는 지금처럼 공개 `jaix-kit` 을 가리킨다. 조직 동기화 규칙이 적용되지 않는다.
   - 복사는 `.github/workflows/org-mirror.yml` 이 한다(main의 `marketplace.json` 이 바뀔 때 + 수동 실행). 인증은 사본 저장소의 **쓰기 deploy key** 이고, 비밀키는 이 저장소 시크릿 `ORG_MIRROR_DEPLOY_KEY` 에 둔다. 시크릿이 없으면 워크플로가 실패로 알린다.
+  - **`jaix-help`(JAIX 도우미)는 이 저장소 안 `plugins/jaix-help` 에 있다.** 잠금에는 다른 도구와 같게 `git-subdir` + 공개 `jaix-kit` URL + sha 로 적는다(상대 경로 소스 `./plugins/…` 를 쓰지 않는 까닭: 사본 저장소에는 `marketplace.json` 만 복사되므로 상대 경로가 가리킬 폴더가 없다). 잠금 갱신 봇은 jaix-kit 태그 중 `plugins/jaix-help` 폴더가 바뀐 것으로만 옮긴다(`scripts/jaixlock.py` `is_self`) — 잠금 변경마다 새 태그가 붙어 매일 갱신 PR 이 되풀이되지 않게.
   - 콘솔에서 "Sync from GitHub" 를 처음 할 때 Anthropic GitHub App을 `jaix-kit-org` 에 설치하라고 나온다. 그 저장소만 골라 허용한다.
 - 출처: https://claude.com/docs/plugins/admin, https://claude.com/docs/plugins/org-sync ("Plugin sources that organization sync accepts")
 
@@ -54,11 +55,11 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | 키 | 값 | 효과 |
 |---|---|---|
 | `extraKnownMarketplaces.jaix` | git URL + `autoUpdate: true` | jaix 자동 등록·자동 업데이트. `jaix setup` 이 사용자 설정에 넣던 것과 같은 값 |
-| `enabledPlugins` (jaix 6종) | `true` | **managed의 `true` 는 강제 켬이다** — 사용자가 꺼도 로드된다(①의 "Installed by default"와 다름). 아래 주의 참조 |
+| `enabledPlugins` (jaix 잠금 전부, 지금 9종) | `true` | **managed의 `true` 는 강제 켬이다** — 사용자가 꺼도 로드된다(①의 "Installed by default"와 다름). 아래 주의 참조 |
 | `enabledPlugins` `claude-for-nonprofits@synced` | `false` | ①과 이중 차단. 계정 동기화 플러그인 하나를 끄는 공식 형식이 `"<name>@synced": false` 다(settings-reference `syncClaudeAiPlugins` 절) |
 | `model` | `sonnet` | 좌석이 대부분 Pro의 1.25배라 한도 방지. 사용자의 `/model` 선택보다 우선하지만 `--model` 은 이긴다 |
 | `permissions.disableBypassPermissionsMode` | `disable` | 비개발자 PC에서 "전부 허용" 모드를 막는다. 잠금이 아니라 사고 방지 |
-| `companyAnnouncements` | 안내 1줄 | 시작 화면에 표시 |
+| `companyAnnouncements` | 안내 1줄 | 시작 화면에 표시. 조건 없이 전원에게 같은 문구가 뜨므로 jaix 설치 권유 같은 문구는 넣지 않는다(2026-11-09) |
 
 - **넣지 않은 것("느슨" 결정)**: `strictKnownMarketplaces`, `allowedMcpServers`/`deniedMcpServers`, `allowManagedPermissionRulesOnly`. 개인이 다른 마켓플레이스·MCP를 추가할 수 있다.
 - **주의 — 강제 켬의 비용**: `korea-rio-mcp` 처럼 일부 연구자만 쓰는 플러그인도 CLI에서는 모두에게 강제로 켜진다. 인수 시험 7절에서 상시 비용이 3k를 넘으면 그 플러그인만 `enabledPlugins` 에서 빼고 ①의 "Available to install"로 내린다.
@@ -76,4 +77,4 @@ Primary Owner·Owner만 보이고 고칠 수 있다. `admin/managed-settings.jso
 | 5 | 조직 커넥터 4종이 CLI `/mcp` 에 `claude.ai …` 로 보임 | `/mcp` | ✅ Gmail·Calendar·Drive·monday. Slack은 개인 설치 `plugin:slack:slack` 과 같은 URL이라 하나로 합쳐짐(일반 PC에선 `claude.ai Slack` 예상) |
 | 6 | Slack 커넥터 첫 연결이 Slack 관리자 승인 없이 되는지 | 일반 연구원 계정으로 연결 | 사전 조치 ✅: 워크스페이스가 **앱 승인 요구** 상태였고 Claude 앱이 "승인 필요"였음 → 11-04 "이 워크스페이스에 대해 승인". 일반 멤버 실측은 불가(Claude 좌석이 Owner 2명뿐) → 11/10 첫 사용자로 최종 확인 |
 | 7 | `model: sonnet` 이 CLI에서 기본으로 잡힘 | 새 세션 `/model` | ✅ 새 세션 Sonnet 5.5. 세션 안 `/model` 로 Opus 전환 가능, 다음 시작엔 다시 Sonnet("Managed settings pins Sonnet 5.5 — applies on restart"). 본인은 `claude --model opus` |
-| 8 | CLI에서 jaix가 managed `@jaix` 와 조직 동기화 사본으로 두 벌 잡히지 않는지 | `claude plugin list` (동기화 반영 뒤) | ⏳ 11-04 시점 CLI 동기화 폴더 미갱신. 비영리 사례로 보아 managed와 같은 이름의 동기화 사본은 무시될 것으로 예상 |
+| 8 | CLI에서 jaix가 managed `@jaix` 와 조직 동기화 사본으로 두 벌 잡히지 않는지 | `claude plugin list` (동기화 반영 뒤) | ✅ 중복 없음 (11-04 저녁〜11-05 새벽 30분 간격 8시간 관찰). CLI 동기화 폴더(`~/.claude/plugins/synced/`)에는 계정 단위 동기화(비영리 등)만 들어오고 조직 플러그인(jaix-kit-org)은 들어오지 않음 → CLI의 jaix는 managed `@jaix` 한 벌뿐. 조직 플러그인은 Desktop·Cowork·채팅 경로 전용으로 봄. 나중에 CLI로도 동기화되면 비영리 사례처럼 managed와 같은 이름의 사본은 무시될 것으로 예상 |

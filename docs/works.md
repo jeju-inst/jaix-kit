@@ -1,6 +1,6 @@
 # 웍스(NAVER WORKS) — nworks 설정 안내와 편입안
 
-> 상태: **승인(2026-10-30, Q1-Q5 권고안 그대로).** jaix 쪽 구현은 `src/jaix/works.py`(`jaix setup`·`update`·`doctor`·`jaix works login`). 플러그인은 `jeju-inst/jaix-works`. 잠금 편입은 그 저장소에 첫 태그가 생긴 뒤 별도 PR로 한다.
+> 상태: **배포됨(2026-11-10, jaix v2026.11.10.1 · jaix-works v2026.11.10.1).** 승인 2026-10-30(Q1-Q5 권고안 그대로). jaix 쪽 구현은 `src/jaix/works.py`(`jaix setup`·`update`·`doctor`·`jaix works login`), 플러그인은 `jeju-inst/jaix-works`. 관리자 체크리스트(§4)는 11/10에 마쳤고, 실측은 jaix-fresh(로그인·공유드라이브·내 드라이브·메일 목록) 통과.
 > 배경: `docs/design.md` 도구별 판정 6번(기성 `nworks` + 기관 User-OAuth 앱 1개), 2026-10-30 사용자 결정(11/10 1차 배포에 포함).
 
 ## 먼저 정할 것 (사용자 결정)
@@ -85,7 +85,7 @@
 | `jaix setup` | Node.js LTS가 없으면 winget(`OpenJS.NodeJS.LTS`)으로 설치. `<데이터 폴더>\works`에 `runtime.json`의 nworks 버전을 깔고 **npm 무결성 해시를 대조**한다(다르면 설치 중단). `nworks` 실행 파일을 사용자 PATH에 올린다 |
 | 기관 앱 정보 | `client_source`(IP 게이트)에서 Client ID/Secret을 받아 사용자 데이터 폴더에 둔다. 원외 망이면 건너뛰고 doctor가 "원내망에서 jaix setup 다시 실행"을 안내한다 |
 | `jaix works login` | 받아 둔 값을 **환경변수**(`NWORKS_CLIENT_ID`·`NWORKS_CLIENT_SECRET`)로 넘겨 `nworks login --user --scope "<runtime.json scope>"`을 실행한다. 명령줄 인자로 넘기지 않는다(프로세스 목록에 남음). **스코프를 반드시 명시한다** — nworks 기본값은 전체 스코프이고, 앱에 없는 스코프를 하나라도 요청하면 웍스가 `invalid_scope`로 로그인 전체를 거절한다 |
-| `jaix doctor` | `nworks --version`이 `runtime.json`과 같은지, `nworks whoami --json`이 로그인 상태인지 확인하고 고치는 방법 한 줄을 낸다 |
+| `jaix doctor` | `nworks --version`이 `runtime.json`과 같은지(또는 받아들인 기존 nworks인지), 사용자 토큰 파일이 있는지 보고 고치는 방법 한 줄을 낸다. `nworks whoami`의 `tokenValid`는 접근 토큰 만료만 뜻해 로그인 판단에 쓰지 않는다(스킬도 실제 명령이 인증 오류일 때만 `jaix works login`, jaix-works#2) |
 | `jaix update` | 잠금이 새 `runtime.json`을 가리키면 nworks를 그 버전으로 다시 깐다 |
 | Codex·Hermes | 같은 CLI와 같은 SKILL.md를 쓴다. MCP 등록은 없다 |
 
@@ -97,17 +97,17 @@
 
 웍스 최고관리자 계정으로 한다. 값은 Q1-Q2 권고안 기준이다.
 
-- [ ] **1. 콘솔 열기**: `https://dev.worksmobile.com` → API → Client App.
-- [ ] **2. 앱 고르기 (Q1)**: 기존 공용 User OAuth 앱을 연다. 새로 만들기로 했다면 이름을 `JAIX 웍스 연동`으로 한다.
-- [ ] **3. Redirect URL**: `http://localhost:9876/callback`이 목록에 있는지 확인한다. 없으면 입력하고 **추가 버튼까지 누른다**(입력만 하고 추가를 누르지 않아 로그인이 실패한 이력이 있음, 2026-08-24).
-- [ ] **4. OAuth Scopes (Q2)**: `calendar` `calendar.read` `file` `file.read` `mail.read` 다섯 개를 켠다. **`mail`(메일 쓰기)은 켜지 않는다** — 발송과 함께 전달(forwarding) 규칙 변경 권한이 따라온다. 기존 앱에 있던 스코프는 그대로 둔다.
-- [ ] **5. 서비스 계정 권한 위임**: 이 앱에서 **꺼져 있는지** 확인한다. 관리자 앱과 연구원 앱을 섞지 않는다.
-- [ ] **6. 앱 접근(앱 관리 권한)**: "제한 — 관리자 본인만"으로 둔다. 이 설정은 앱을 *쓸* 사람이 아니라 앱 등록을 *보고·고치고·지울* 사람을 정한다. 열어 두면 콘솔에 들어온 누구나 Secret을 읽거나 스코프를 넓힐 수 있다.
-- [ ] **7. Client Secret 재발급**: 새 값을 받는다. 이전 값은 폐기된다.
-- [ ] **8. 값 기록**: Client ID와 새 Secret을 studio 로컬 배포 설정에만 기록한다(구현 PR이 파일 위치를 정한다. 저장소·메신저·메일에 붙이지 않는다). `https://jaix.namun.net/works/client.json`은 기관 IP에만 내준다.
-- [ ] **9. 기존 사용자 재로그인 안내**: Secret이 바뀌었으므로 기존 사용자 1명에게 재로그인을 안내한다.
-- [ ] **10. 관리자 PC에서 시험**: `nworks login --user --scope "calendar calendar.read file file.read mail.read"` → `nworks calendar list --json` → `nworks drive sharedrive-list --json`이 본인 권한 범위로 나오는지 본다.
-- [ ] **11. 구성원 동의 정책 확인**: 일반 구성원이 이 앱에 OAuth 동의를 할 수 있는지(관리자 사전 승인이 필요한 설정이 있는지) 확인한다. 기존 사용자 1명은 동의가 됐으므로 막혀 있지는 않을 것으로 보지만, 전원 배포 전에 설정 화면에서 확인한다.
+- [x] **1. 콘솔 열기**: `https://dev.worksmobile.com` → API → Client App.
+- [x] **2. 앱 고르기 (Q1)**: 기존 공용 User OAuth 앱을 연다. 새로 만들기로 했다면 이름을 `JAIX 웍스 연동`으로 한다.
+- [x] **3. Redirect URL**: `http://localhost:9876/callback`이 목록에 있는지 확인한다. 없으면 입력하고 **추가 버튼까지 누른다**(입력만 하고 추가를 누르지 않아 로그인이 실패한 이력이 있음, 2026-08-24).
+- [x] **4. OAuth Scopes (Q2)**: `calendar` `calendar.read` `file` `file.read` `mail.read` 다섯 개를 켠다. **`mail`(메일 쓰기)은 켜지 않는다** — 발송과 함께 전달(forwarding) 규칙 변경 권한이 따라온다. 기존 앱에 있던 스코프는 그대로 둔다.
+- [x] **5. 서비스 계정 권한 위임**: 이 앱에서 **꺼져 있는지** 확인한다. 관리자 앱과 연구원 앱을 섞지 않는다.
+- [x] **6. 앱 접근(앱 관리 권한)**: "제한 — 관리자 본인만"으로 둔다. 이 설정은 앱을 *쓸* 사람이 아니라 앱 등록을 *보고·고치고·지울* 사람을 정한다. 열어 두면 콘솔에 들어온 누구나 Secret을 읽거나 스코프를 넓힐 수 있다.
+- [x] **7. Client Secret 재발급**: 새 값을 받는다. 이전 값은 폐기된다. — **11/10 실측: Developer Console 수정 화면에 재발급 버튼이 없어 기존 값을 그대로 썼다.** Secret 만으로는 사용자 동의 없이 아무것도 못 하고, 어차피 원내 PC 전원에 배포되는 값이라 위험이 작다고 판단했다. 꼭 바꾸려면 앱을 새로 만들어야 하고 기존 사용자는 전원 재로그인한다.
+- [x] **8. 값 기록**: Client ID와 Secret을 studio 의 `~/.local/share/jaix-secrets/works-client.json`(0600, 정적 배포 루트 밖)에만 둔다. 저장소·메신저·메일에 붙이지 않는다. `https://jaix.namun.net/works/client.json`은 기관 IP에만, 두 키만, 캐시 금지로 내준다(ji-gw-ai#144, 절차 `docs/share-deploy.md`).
+- [x] **9. 기존 사용자 재로그인 안내**: Secret이 바뀌었으므로 기존 사용자 1명에게 재로그인을 안내한다.
+- [x] **10. 관리자 PC에서 시험**: `nworks login --user --scope "calendar calendar.read file file.read mail.read"` → `nworks calendar list --json` → `nworks drive sharedrive-list --json`이 본인 권한 범위로 나오는지 본다.
+- [x] **11. 구성원 동의 정책 확인**: 일반 구성원이 이 앱에 OAuth 동의를 할 수 있는지(관리자 사전 승인이 필요한 설정이 있는지) 확인한다. 기존 사용자 1명은 동의가 됐으므로 막혀 있지는 않을 것으로 보지만, 전원 배포 전에 설정 화면에서 확인한다.
 
 이후 운영 원칙:
 

@@ -12,6 +12,10 @@
     "ji-project-template@jaix": true,
     "korea-rio-mcp@jaix": true,
     "gw@jaix": true,
+    "mail-skill@jaix": true,
+    "hwp2pdf@jaix": true,
+    "jaix-help@jaix": true,
+    "jaix-works@jaix": true,
     "claude-for-nonprofits@synced": false
   },
   "model": "sonnet",
@@ -19,6 +23,6 @@
     "disableBypassPermissionsMode": "disable"
   },
   "companyAnnouncements": [
-    "제주연구원 AI 도구(jaix)가 자동으로 설치·업데이트됩니다. 사용법·문의는 AI센터 안내 페이지를 보세요."
+    "제주연구원 Claude 계정입니다. 문의: AI데이터연구지원센터"
   ]
 }

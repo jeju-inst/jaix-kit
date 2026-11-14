@@ -74,7 +74,8 @@ def decode(data):
     return data.decode("utf-8", errors="replace")
 
 
-def run(cli, args, timeout=600):
+def run(cli, args, timeout=600, cwd=None):
     """(종료 코드, 출력 stdout+stderr). 실행 자체가 안 되면 OSError·TimeoutExpired 를 그대로 올린다."""
-    r = subprocess.run(command(cli, args), capture_output=True, creationflags=paths.NO_WINDOW, timeout=timeout)
+    r = subprocess.run(command(cli, args), capture_output=True, creationflags=paths.NO_WINDOW, timeout=timeout,
+                       cwd=cwd)
     return r.returncode, decode(r.stdout) + decode(r.stderr)

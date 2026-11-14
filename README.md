@@ -64,10 +64,13 @@ _(화면 예시는 실기 시험 뒤 추가)_
 
 | 명령 | 하는 일 |
 |---|---|
-| `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, himalaya·age 는 mail 플러그인이 잠금에 있을 때 필수·없으면 선택)을 사용자 범위로 설치(winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
+| `jaix setup [--channels claude,codex,hermes] [--runtimes …\|all\|none]` | 런타임(uv·Git·JRE 21·hwp2pdf-cli, himalaya·age 는 mail 플러그인이 잠금에 있을 때 필수·없으면 선택)을 사용자 범위로 설치(이미 있으면 그대로. Git·uv·age·himalaya 는 GitHub 고정 판을 sha256 확인해 직접 — himalaya 는 mailskill 이 1.x 문법이라 v1.2.0, 2.x 가 있으면 다시 깖, 그 밖은 winget → 포터블 `%LOCALAPPDATA%\Programs\jaix`) · Claude 사용자 설정에 마켓플레이스+`autoUpdate`+플러그인 **병합**(쓰기 전 백업) · Codex 마켓플레이스 등록·설치 |
 | `jaix doctor [--json]` | 런타임 버전·사용자 PATH·마켓플레이스 등록·플러그인 버전이 잠금과 맞는지. 어긋나면 고치는 방법 한 줄. 실패가 있으면 종료 코드 1 |
+| `jaix selftest [--json] [--agent]` | 도구를 실제로 한 번씩 돌려 본다: 시험용 HWP 를 한글·띄어쓰기 경로에서 HWPX 로 변환·추출, (한컴 PC면) PDF 변환, 플러그인 MCP 서버 주고받기, 그룹웨어 접속(원내망일 때, 로그인 없이). 사용자가 직접 할 첫 설정(gw 로그인·회사메일 앱 비밀번호·Hermes 구독 로그인 등)은 `[설정 필요]` 로 따로 센다(자격 증명은 있음/없음만 봄). `--agent` 는 `claude -p` 로 두 번 요청해 본다(본인 사용량을 씀). 실패가 있으면 종료 코드 1. 시작 메뉴 'JAIX 자가시험' |
 | `jaix update` | 런타임 갱신 + Claude·Codex 플러그인과 Hermes 스킬 폴더를 잠금에 맞춤 |
-| `jaix works login` | 웍스(NAVER WORKS) 브라우저 로그인, 처음 한 번. 잠금에 jaix-works 가 있으면 `jaix setup` 이 Node.js·nworks(버전·무결성 고정)를 깔고 기관 앱 정보를 원내 위치에서 받아 둔다(`docs/works.md`) |
+| `jaix connect [gw\|mail\|works\|hermes]` | 본인 비밀이 필요한 첫 설정을 연다. 항목 없이 부르면 항목별 상태(됨/연결 필요/지금은 못 함)를 보이고, 명령창이면 안 된 것을 하나씩 물어 연결한다(시작 메뉴 'JAIX 계정 연결'). gw 는 원내망일 때 `gw login` 입력 창, mail 은 앱 비밀번호 발급 안내를 브라우저로 연 뒤 `mailskill setup`(숨김 입력), works 는 `jaix works login`, hermes 는 `jaix hermes login`(설치 때 고른 구독). 에이전트가 부르면(표준 입력이 콘솔이 아님) mail·hermes 는 **새 창**을 열어 끝날 때까지 기다리고 결과를 한 줄로 알린다. 비밀번호는 인자로 넘기지도 읽지도 않는다. `jaix selftest` 의 `[설정 필요]` 줄이 이것을 가리킨다 |
+| `jaix helper` | JAIX 도우미(시작 메뉴 'JAIX 도우미'): 명령창에서 `claude` 를 도우미 스킬과 함께 열고 "jaix 점검해줘"로 시작한다. 스킬은 깔린 `jaix-help` 플러그인 사본, 없으면 설치본에 묶은 사본(`--append-system-prompt-file`). Code 탭에서는 플러그인 `jaix-help`(`/jaix-help`)로 같은 일을 한다 |
+| `jaix works login` | 웍스(NAVER WORKS) 브라우저 로그인, 처음 한 번. 잠금에 jaix-works 가 있으면 `jaix setup` 이 Node.js·nworks(버전·무결성 고정)를 깔고 기관 앱 정보를 원내 위치에서 받아 둔다(`docs/works.md`). PATH 에 이미 쓸 만한 nworks(같은 major, 요구 버전 이상)가 있으면 npm 으로 한 벌 더 깔지 않고 그것을 쓴다. npm 이 실패하면 `npm error` 줄을 기록에 남긴다 |
 | `jaix setup --channels hermes --hermes-code-file <f> [--hermes-model chatgpt\|claude]` | (Windows) Hermes 무인 설치 + 슬랙 연결. 아래 "Hermes" |
 | `jaix hermes handoff <아이디> --user U…` | 관리자(studio): 사람별 슬랙 토큰을 1회용 연결 코드로 내보냄 |
 | `jaix update --quiet` | 같은 일을 화면 없이. `jaix setup` 이 등록한 **로그온 자동 갱신**이 부르고, 결과는 `update.log`·`update-status.json` 에 남아 `jaix doctor` 가 보여 준다. Windows 에선 창 없는 `jaixw.exe` 로 돌아 콘솔 창이 뜨지 않는다 |
@@ -82,7 +85,7 @@ _(화면 예시는 실기 시험 뒤 추가)_
   - 소음 정리(jaix-win 2차 관찰): 첫 대화의 영어 "500K" 안내를 끄고(`compression.codex_gpt55_autoraise_notice false`), 슬래시 명령을 제한한다(`slack.allow_admin_from`에 아무도 아닌 ID + `slack.user_allowed_commands`). `/login`·`/topup`(쓰지 않는 Nous 계정·결제)과 `/yolo`(위험 명령 승인 건너뛰기)를 막고, 도움말에도 보이지 않는다. Hermes 기본 스킬은 끄고(`skills.disabled`) jaix 스킬만 남긴다. 사용자가 이미 정한 `allow_admin_from`·`skills.disabled`는 덮지 않는다. `jaix update`가 다시 적용한다(Hermes 업데이트로 새 기본 스킬이 들어오는 경우).
   - Hermes 단계가 실패하면 setup이 실패로 끝나고(설치기 종료 코드 10) doctor가 "Hermes 슬랙" [실패]로 보인다.
   - 모델 로그인(브라우저 승인)은 설치기 마지막 화면의 "Hermes AI 로그인 창 열기"로 한다.
-- **로그온 자동 갱신**: Claude는 마켓플레이스 `autoUpdate` 로 저절로 갱신되지만 Codex·Hermes는 그런 장치가 없다. 그래서 `jaix setup` 이 로그온마다 `jaix update --quiet` 를 도는 사용자 범위 예약 작업을 둔다 — Windows 작업 스케줄러 `jaix-update`(이 사용자 로그온 트리거, 일반 권한, 2분 지연), macOS LaunchAgent `kr.re.ji.jaix.update`. 작업은 반드시 **사용자가 로그온할 때만 실행**(대화형 세션)이다 — 세션 0(무인)에서는 한컴 COM이 뜨지 않는다(hwp-render 실측). doctor가 이 실행 모드도 점검한다. 실패하면 다음 로그온에 다시 하고 doctor가 [주의]로 보인다. 설치본을 제거하면(`jaix cleanup`) 함께 지운다. 끄려면 `jaix setup --no-autoupdate`.
+- **로그온 자동 갱신** — **설치본(jaix-setup.exe)은 두지 않는다**(2026-11 #46: 서명 없는 jaix 의 자동 시작이 Defender 오탐을 불렀다). doctor 는 [안내]로 "가끔 시작 메뉴 'JAIX 업데이트'"를 보인다. 'JAIX 업데이트' 는 새 판이 있으면 설치기를 받아 `[Y/n]`(Enter = 예)으로 묻고, 지난 판 설치기가 잠겨 있어도(완료 창이 열린 채) 건너뛰고 받는다. 아래는 설치본이 아닌 개발 설치(`uv tool`)의 동작이다: Claude는 마켓플레이스 `autoUpdate` 로 저절로 갱신되지만 Codex·Hermes는 그런 장치가 없다. 그래서 `jaix setup` 이 로그온마다 `jaix update --quiet` 를 도는 사용자 범위 예약 작업을 둔다 — Windows 작업 스케줄러 `jaix-update`(이 사용자 로그온 트리거, 일반 권한, 2분 지연), macOS LaunchAgent `kr.re.ji.jaix.update`. 작업은 반드시 **사용자가 로그온할 때만 실행**(대화형 세션)이다 — 세션 0(무인)에서는 한컴 COM이 뜨지 않는다(hwp-render 실측). doctor가 이 실행 모드도 점검한다. 실패하면 다음 로그온에 다시 하고 doctor가 [주의]로 보인다. 설치본을 제거하면(`jaix cleanup`) 함께 지운다. 끄려면 `jaix setup --no-autoupdate`.
 - **Claude 데스크톱·Cowork 는 관리자 배포 대상이다**(#19 실측): 데스크톱 앱(Cowork)은 `settings.json` 의 `extraKnownMarketplaces` 를 읽지 않고 계정 단위 조직 플러그인에서 도구를 받는다. jaix 는 Code 탭·Claude Code 쪽만 등록·설치하고, Code 탭 실행파일은 `%LOCALAPPDATA%\Claude-Data\claude_*\claude-code\<버전>\…\claude.exe`(가장 높은 버전)에서 찾는다. doctor 는 잠금 대비 빠진 플러그인이 있으면 [실패]로 보인다.
 - **HWP 변환기 jar 미리 받기**: hwp-agent 가 `hwp-agent setup` 으로 받는 `hwp2hwpx.jar` 를 같은 자리(`%LOCALAPPDATA%\hwp-agent`, 맥 `~/.local/share/hwp-agent`)에 미리 받는다. 주소·sha256 은 잠금이 고정한 hwp-agent 커밋의 `fetch_jar.py` 에서 읽는다.
 - **HWP 미리보기 엔진(rhwp) 미리 받기**: 한글이 열려 있으면 hwp-agent 의 첫 렌더 엔진(hwp2pdf-cli)이 건너뛰므로, 서버 없는 PC의 미리보기는 rhwp([edwardkim/rhwp](https://github.com/edwardkim/rhwp), MIT)가 맡는다. `hwp-agent setup` 이 받는 자리(`%LOCALAPPDATA%\hwp-agent\rhwp`)에 바이너리와 LICENSE 를 미리 받는다. 버전·sha256 은 잠금이 고정한 hwp-agent 커밋의 `render/fetch_rhwp.py` 에서 읽고, 그 파일이 없는 옛 커밋이면 건너뛴다. 실패는 doctor 주의(미리보기 폴백이라 실패 아님).
@@ -101,3 +104,16 @@ claude plugin install calendar-worklog-ji@jaix
 도구 편입 표준은 [`docs/tool-standard.md`](docs/tool-standard.md)다. 형식·버전·잠금·MCP·Windows·토큰 예산 같은 규칙에 ID(`TS-…`)가 붙어 있고, 잠금 CI가 같은 ID로 검사한다. 편입 PR 본문 끝에 이 문서의 체크리스트를 붙인다.
 
 설계 근거: `docs/design.md`. 상위 표준이던 `ji-deploy-standards`(v1)는 `docs/tool-standard.md`에 흡수했다.
+
+## 라이선스
+[MIT](LICENSE). 이 저장소(jaix CLI·설치본·잠금 목록)에 한한다. 잠금 목록이 가리키는 각 도구는 그 저장소의 라이선스를 따른다.
+
+## Code signing policy
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). *(신청 중 — 승인되면 그 판부터 서명된 `jaix-setup.exe` 를 낸다.)*
+
+- **What is signed**: `jaix-setup.exe` and the `jaix.exe` / `jaixw.exe` it installs, built from this repository by `.github/workflows/jaix-setup.yml` (PyInstaller bootloader built from source).
+- **Team roles**
+  - Committers and reviewers: [jeju-inst/jaix-kit maintainers](https://github.com/jeju-inst/jaix-kit/graphs/contributors) — every change goes through a pull request with an automated review and CI.
+  - Approvers (signing requests): [@z0nam](https://github.com/z0nam)
+- **Privacy policy**: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It downloads its own updates and the tools it installs from GitHub releases. The tools it installs (Claude, Codex, Hermes and their plug-ins) talk to the AI services the user signs in to, under those services' own policies.
+- **Uninstall**: Windows *Settings → Apps → JAIX 원내 AI 도구* (or `unins000.exe` in `%LOCALAPPDATA%\Programs\jaix`).
