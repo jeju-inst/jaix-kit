@@ -181,6 +181,25 @@
       }
     },
     {
+      "name": "ji-calendar",
+      "displayName": "연구원 일정 조회",
+      "description": "직원 이름으로 공개 일정을 찾고, 여러 사람이 함께 비는 시간을 찾는다(읽기 전용 원격 MCP).",
+      "category": "productivity",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jeju-inst/jaix-kit.git",
+        "path": "plugins/ji-calendar",
+        "ref": "main",
+        "sha": "5d911bd6c3c40c70d88dd2c937f571287cb240ef"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-kit",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
+    },
+    {
       "name": "jaix-works",
       "displayName": "웍스 (NAVER WORKS)",
       "description": "본인 웍스 계정 권한으로 드라이브·캘린더·메일을 다룬다(nworks CLI, 기관 User OAuth 앱).",
