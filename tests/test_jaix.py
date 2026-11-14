@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from jaix import paths, proc
-from jaix import claude, cli, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, runtimes, schedule, uvpython, winenv, works
+from jaix import claude, cli, clis, codex, doctor, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, lock, overlap, plugbin, remotemcp, runtimes, schedule, selftest, uvpython, winenv, works
 
 REAL_HWPJAR = {}
 REAL_CLIS = {}
@@ -3648,3 +3648,191 @@ def test_hermes_remove_keeps_mode_and_retries_leftover_backup(isolated, monkeypa
     monkeypatch.setattr(hermesbot, "_scrub_env", real)
     assert hermesbot.cmd_remove(argparse.Namespace(yes=True, dry_run=False), print) == 0
     assert b"SLACK_BOT_TOKEN" not in backup.read_bytes()
+
+
+# --- 원격(HTTP) MCP: Calendar 등 (jaix-kit#170) -------------------------------------------------------------
+REMOTE_URL = "https://cal.example.org/mcp"
+
+
+def test_remote_servers_in_keeps_only_https_http_entries():
+    cfg = {"mcpServers": {"a": {"type": "http", "url": REMOTE_URL}, "b": {"url": REMOTE_URL},
+                          "c": {"command": "uvx", "args": []}, "d": {"type": "sse", "url": REMOTE_URL},
+                          "e": {"type": "http", "url": "http://plain.example.org/mcp"}}}
+    assert remotemcp.servers_in(cfg) == {"a": {"url": REMOTE_URL}, "b": {"url": REMOTE_URL}}
+
+
+def test_remote_from_lock_reads_raw_mcp_json_and_records(isolated, the_lock):
+    import urllib.error
+    seen = []
+
+    def fetch(url):
+        seen.append(url)
+        if "/plugins/ji-calendar/" in url:
+            return {"mcpServers": {"ji-calendar": {"type": "http", "url": REMOTE_URL}}}
+        raise urllib.error.HTTPError(url, 404, "nf", None, None)
+    entry = {"name": "ji-calendar", "source": {"source": "git-subdir", "url": "https://github.com/jeju-inst/jaix-kit.git",
+                                               "path": "plugins/ji-calendar", "ref": "main", "sha": "a" * 40}}
+    lk = lock.Lock({"plugins": [*the_lock.data["plugins"], entry]}, "t")
+    got = remotemcp.from_lock(lk, fetch=fetch)
+    assert got == {"ji-calendar": {"url": REMOTE_URL, "plugin": "ji-calendar"}}
+    assert any(u.endswith(f"/{'a' * 40}/plugins/ji-calendar/.mcp.json") for u in seen)
+    assert remotemcp.recorded() == got                       # doctor·오프라인이 쓸 기록
+    assert remotemcp.from_lock(lk, offline=True) == got
+
+
+def test_remote_from_lock_offline_failure_keeps_record(isolated, the_lock):
+    import urllib.error
+    rec = remotemcp._record()
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(json.dumps({"servers": {"x": {"url": REMOTE_URL, "plugin": "p"}}}), encoding="utf-8")
+
+    def down(url):
+        raise urllib.error.URLError("offline")
+    assert remotemcp.from_lock(the_lock, fetch=down) == {"x": {"url": REMOTE_URL, "plugin": "p"}}
+
+
+def test_remote_probe_ok_and_failures():
+    import urllib.error
+    calls = []
+
+    def ok(url, body, session, timeout):
+        calls.append(body.get("method"))
+        if body.get("method") == "tools/list":
+            return {"result": {"tools": [{"name": "search_people"}, {"name": "get_schedule"}]}}, None
+        return {"result": {}}, "sid-1"
+    assert remotemcp.probe(REMOTE_URL, post=ok) == (["search_people", "get_schedule"], None)
+    assert calls == ["initialize", "notifications/initialized", "tools/list"]   # 도구는 부르지 않는다
+
+    def http405(url, body, session, timeout):
+        raise urllib.error.HTTPError(url, 405, "Method Not Allowed", None, None)
+    assert remotemcp.probe(REMOTE_URL, post=http405) == (None, "HTTP 405")
+
+    def refused(url, body, session, timeout):
+        raise urllib.error.URLError("refused")
+    tools, why = remotemcp.probe(REMOTE_URL, post=refused)
+    assert tools is None and why.startswith("접속 못 함")
+
+
+def test_codex_writes_remote_mcp_with_url(isolated, monkeypatch, the_lock):
+    home, root, calls = _codex_home_with_plugin(isolated, monkeypatch, the_lock)
+    (root / ".mcp.json").write_text(json.dumps({"mcpServers": {
+        "hwp-agent": {"command": "uvx", "args": ["--from", "${CLAUDE_PLUGIN_ROOT}", "hwp-agent", "mcp"]},
+        "cal": {"type": "http", "url": REMOTE_URL}}}), encoding="utf-8")
+
+    def fake_run(cli, args, log):
+        calls.append(args)
+        cfg = home / "config.toml"
+        if args[:2] == ["mcp", "add"] and "--url" in args:
+            body = f'\n[mcp_servers."{args[2]}"]\nurl = {json.dumps(args[args.index("--url") + 1])}\n'
+        elif args[:2] == ["mcp", "add"]:
+            rest = args[args.index("--") + 1:]
+            body = f'\n[mcp_servers."{args[2]}"]\ncommand = {json.dumps(rest[0])}\nargs = {json.dumps(rest[1:])}\n'
+        else:
+            body = ""
+        cfg.write_text(cfg.read_text(encoding="utf-8") + body, encoding="utf-8")
+        return True
+    monkeypatch.setattr(codex, "_run", fake_run)
+    assert codex.mcp_servers(the_lock)["cal"] == {"url": REMOTE_URL}
+    assert codex.write_mcp(the_lock, print, cli="codex")
+    assert ["mcp", "add", "cal", "--url", REMOTE_URL] in calls
+    assert codex._current("cal") == {"url": REMOTE_URL} and codex.owned_mcp()["cal"] == {"url": REMOTE_URL}
+    n = len(calls)
+    codex.write_mcp(the_lock, print, cli="codex")
+    assert len(calls) == n                                   # 이미 맞으면 다시 쓰지 않음
+    # doctor: url 항목도 '다른 설치본' 판정에서 깨지지 않고 통과
+    monkeypatch.setattr(codex, "find_cli", lambda: "codex")
+    monkeypatch.setattr(codex, "marketplace_configured", lambda: True)
+    rows = doctor.check_codex(the_lock)
+    assert not [c for c in rows if c.area == "Codex MCP" and c.status != "ok"], rows
+    assert any(c.status == "ok" and c.area == "Codex MCP" for c in doctor.check_codex(the_lock))
+
+
+def test_hermes_gets_remote_mcp_without_codex(isolated, monkeypatch, the_lock):
+    """Hermes 만 고른 PC: Codex 기록이 없어도 잠금의 원격 MCP 는 들어간다. 사용자 항목은 그대로."""
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    monkeypatch.setattr(hermesbot.remotemcp, "from_lock",
+                        lambda lk, offline=False, fetch=None: {"cal": {"url": REMOTE_URL, "plugin": "ji-calendar"},
+                                                               "mine": {"url": REMOTE_URL, "plugin": "ji-calendar"}})
+    assert codex.owned_mcp() == {}
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("mcp_servers:\n  mine:\n    url: https://other.example.org/mcp\n", encoding="utf-8")
+    assert hermesbot.write_mcp("hermes", print, lock=the_lock)
+    assert [c[3] for c in calls] == ["mcp_servers.cal"]
+    assert json.loads(calls[0][4]) == {"url": REMOTE_URL}
+    assert hermesbot.recorded()["mcp"]["cal"] == {"url": REMOTE_URL}
+
+
+def test_doctor_remote_mcp_tells_unregistered_from_unreachable(isolated, monkeypatch, the_lock):
+    state = {"cal": {"url": REMOTE_URL, "plugin": "ji-calendar", "registered": ["Claude"], "missing": ["Hermes"]}}
+    monkeypatch.setattr(doctor, "remote_mcp_state", lambda lk: state)
+    rows = doctor.check_remote_mcp(the_lock, probe=lambda url: (["a", "b", "c"], None))
+    assert [(c.status, c.area) for c in rows] == [("fail", "원격 MCP cal 등록"), ("ok", "원격 MCP cal 접속")]
+    assert "Hermes" in rows[0].message and rows[0].fix == "jaix update"
+    state["cal"].update(registered=["Claude", "Hermes"], missing=[])
+    rows = doctor.check_remote_mcp(the_lock, probe=lambda url: (None, "HTTP 405"))
+    assert [(c.status, c.area) for c in rows] == [("ok", "원격 MCP cal 등록"), ("warn", "원격 MCP cal 접속")]
+    assert "접속 실패: HTTP 405" in rows[1].message
+    # selftest 도 같은 구분
+    res = selftest.check_remote_mcp(the_lock, probe=lambda url: (None, "HTTP 405"))
+    assert [r.status for r in res] == ["fail"] and "접속 실패" in res[0].message
+    state["cal"].update(registered=[], missing=["Codex"])
+    res = selftest.check_remote_mcp(the_lock, probe=lambda url: pytest.fail("등록 안 됐으면 접속 시험 안 함"))
+    assert [r.status for r in res] == ["fail"] and "등록 안 됨: Codex" in res[0].message
+
+
+def test_remote_mcp_state_reads_installed_plugin_and_channels(isolated, monkeypatch, the_lock):
+    plugin = the_lock.plugins[0]
+    root = isolated / "claude-plugin"
+    root.mkdir()
+    (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"cal": {"type": "http", "url": REMOTE_URL}}}),
+                                    encoding="utf-8")
+    monkeypatch.setattr(claude, "installed", lambda: {plugin.id: {"installPath": str(root)}})
+    monkeypatch.setattr(claude, "find_cli", lambda: "claude")
+    monkeypatch.setattr(codex, "find_cli", lambda: "codex")
+    monkeypatch.setattr(codex, "marketplace_configured", lambda: True)
+    st = doctor.remote_mcp_state(the_lock)["cal"]
+    assert st["registered"] == ["Claude"] and st["missing"] == ["Codex"]
+    home = isolated / "codex_home"
+    home.mkdir(exist_ok=True)
+    (home / "config.toml").write_text(f'[mcp_servers.cal]\nurl = "{REMOTE_URL}"\n', encoding="utf-8")
+    assert doctor.remote_mcp_state(the_lock)["cal"]["registered"] == ["Claude", "Codex"]
+
+
+def test_ji_calendar_plugin_files():
+    root = Path(__file__).resolve().parents[1] / "plugins" / "ji-calendar"
+    cfg = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+    assert remotemcp.servers_in(cfg) == {"ji-calendar": {"url": "https://calendar.namun.net/mcp"}}
+    assert "version" not in json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    skill = (root / "skills" / "ji-calendar" / "SKILL.md").read_text(encoding="utf-8")
+    assert skill.index("search_people") < skill.index("get_schedule(")
+    assert "참석 가능" in skill and "gw" in skill
+
+
+def test_hermes_yaml_mcp_url_reads_block_and_flow():
+    text = ("model:\n  provider: x\nmcp_servers:\n  hwp-agent:\n    command: uvx\n    args: [a]\n"
+            f"  cal:\n    url: {REMOTE_URL}\n  other: {{url: 'https://o.example.org/mcp'}}\nplatforms:\n  cal:\n    url: x\n")
+    assert hermesbot._yaml_mcp_url(text, "cal") == REMOTE_URL
+    assert hermesbot._yaml_mcp_url(text, "other") == "https://o.example.org/mcp"
+    assert hermesbot._yaml_mcp_url(text, "hwp-agent") is None
+    assert hermesbot._yaml_mcp_url("model:\n  cal:\n    url: x\n", "cal") is None
+
+
+def test_remote_mcp_state_hermes_needs_same_url(isolated, monkeypatch, the_lock):
+    """Hermes 에 같은 이름이 옛·사용자 주소로 있으면 등록으로 보지 않는다(Codex P2)."""
+    rec = remotemcp._record()
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(json.dumps({"servers": {"cal": {"url": REMOTE_URL, "plugin": the_lock.plugins[0].name}}}),
+                   encoding="utf-8")
+    monkeypatch.setattr(hermes, "installed", lambda: {"s": {}})
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    monkeypatch.setattr(claude, "find_cli", lambda: None)
+    monkeypatch.setattr(codex, "find_cli", lambda: None)
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("mcp_servers:\n  cal:\n    url: https://old.example.org/mcp\n", encoding="utf-8")
+    st = doctor.remote_mcp_state(the_lock)["cal"]
+    assert st["missing"] == ["Hermes(다른 항목이 같은 이름을 씀)"] and st["registered"] == []
+    cfg.write_text(f"mcp_servers:\n  cal:\n    url: {REMOTE_URL}\n", encoding="utf-8")
+    assert doctor.remote_mcp_state(the_lock)["cal"]["registered"] == ["Hermes"]

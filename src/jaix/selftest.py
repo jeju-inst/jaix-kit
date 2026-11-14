@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermesbot, net, paths, proc, runtimes, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermesbot, net, paths, proc, remotemcp, runtimes, winenv, works
 from jaix.paths import IS_MAC, IS_WIN
 
 MARK = {"ok": "[통과]", "setup": "[설정 필요]", "skip": "[건너뜀]", "fail": "[실패]", "info": "[안내]"}
@@ -450,6 +450,28 @@ def check_mcp(lock, work, handshake=None):
     return out
 
 
+def check_remote_mcp(lock, probe=None):
+    """원격(HTTP) MCP: 등록 여부와 접속을 따로 본다. 접속은 initialize·tools/list 만 — 도구는 부르지 않는다."""
+    probe = probe or remotemcp.probe
+    out = []
+    for name, st in sorted(doctor.remote_mcp_state(lock).items()):
+        area = f"원격 MCP {name}"
+        if not st["registered"] or st["missing"]:
+            where = ", ".join(st["missing"]) or "Claude·Codex·Hermes 어디에도"
+            out.append(_fail(area, f"등록 안 됨: {where}", "jaix update"))
+            if not st["registered"]:
+                continue
+        tools, why = probe(st["url"])
+        if why:
+            out.append(_fail(area, f"접속 실패: {why}",
+                             "인터넷 연결 확인 — 다른 사이트는 되는데 계속 실패하면 이 결과를 AI센터에(서버 쪽 문제)"))
+        elif not tools:
+            out.append(_fail(area, "접속은 되나 도구 0개", "이 결과를 AI센터에 보내 주세요"))
+        else:
+            out.append(_ok(area, f"접속됨 · 도구 {len(tools)}개 ({', '.join(st['registered'])})"))
+    return out
+
+
 # --- 4. 그룹웨어 ---------------------------------------------------------------------------------------
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **kw):
@@ -697,6 +719,7 @@ def run_all(lock, agent=False, keep=False, log=print, download=None):
         results += _guard("HWP → PDF (한컴)", lambda: check_pdf(src))
         log("MCP 서버 시험 …")
         results += _guard("MCP 서버", lambda: check_mcp(lock, work))
+        results += _guard("원격 MCP", lambda: check_remote_mcp(lock))
         log("그룹웨어·메일·웍스·Hermes 확인 …")
         results += _guard("그룹웨어", check_gw)
         results += _guard("회사메일", lambda: check_mail(lock))

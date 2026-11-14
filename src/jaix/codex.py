@@ -12,7 +12,7 @@ import subprocess
 import tomllib
 from pathlib import PureWindowsPath
 
-from jaix import paths, proc, uvpython
+from jaix import paths, proc, remotemcp, uvpython
 from jaix.paths import IS_WIN
 from jaix.lock import GIT_URL, MARKETPLACE, same_commit
 
@@ -158,7 +158,8 @@ def _subst(value, root):
 
 
 def mcp_servers(lock):
-    """잠금 플러그인 중 Codex에 깔린 것의 stdio MCP 서버를 절대경로로 바꾼 것 {서버 이름: {command, args, env}}."""
+    """잠금 플러그인 중 Codex에 깔린 것의 MCP 서버 {서버 이름: spec}. stdio 는 절대경로로 바꾼 {command, args, env},
+    원격 HTTP 는 {url}(jaix-kit#170: Codex 가 플러그인의 url 항목을 띄우는지에 기대지 않고 config.toml 에 같이 적는다)."""
     out, have = {}, enabled_plugins()
     for p in lock.plugins:
         root = plugin_root(p.name)
@@ -172,7 +173,21 @@ def mcp_servers(lock):
             if "command" in spec and "cwd" not in spec:  # codex mcp add 가 cwd를 받지 않는다
                 out[name] = _subst({"command": spec["command"], "args": _pin_python(spec),
                                     "env": dict(spec.get("env") or {})}, root)
+        out.update(remotemcp.servers_in({"mcpServers": servers}))
     return out
+
+
+def is_remote(spec):
+    return bool(spec) and "url" in spec and "command" not in spec
+
+
+def ident(spec):
+    """항목이 무엇을 띄우는지 한 낱말: stdio 는 실행파일 이름, 원격은 url(doctor 가 '다른 설치본' 판정에 씀)."""
+    if not spec:
+        return None
+    if is_remote(spec):
+        return spec["url"]
+    return PureWindowsPath(str(spec.get("command"))).stem.lower()
 
 
 def _pin_python(spec):
@@ -216,6 +231,8 @@ def _current(name):
         return None
     if cur is None:
         return None
+    if "url" in cur and "command" not in cur:
+        return {"url": cur.get("url")}
     return {"command": cur.get("command"), "args": list(cur.get("args") or []), "env": dict(cur.get("env") or {})}
 
 
@@ -242,12 +259,17 @@ def write_mcp(lock, log, cli=None, dry_run=False):
         if dry_run:
             log(f"    MCP {name}: 절대경로로 쓸 예정")
             continue
-        args = ["mcp", "add", name, *[f"--env={k}={v}" for k, v in spec["env"].items()], "--", spec["command"],
-                *spec["args"]]
+        if is_remote(spec):
+            args = ["mcp", "add", name, "--url", spec["url"]]
+        else:
+            args = ["mcp", "add", name, *[f"--env={k}={v}" for k, v in spec["env"].items()], "--", spec["command"],
+                    *spec["args"]]
+        if cur is not None and is_remote(cur) != is_remote(spec):  # 종류가 바뀌면(stdio↔url) add 가 섞어 쓰지 않게 먼저 지운다
+            _run(cli, ["mcp", "remove", name], log)
         if _run(cli, args, log):
             owned[name] = spec
             released.discard(name)
-            log(f"    MCP {name}: 플러그인 위치의 절대경로로 씀")
+            log(f"    MCP {name}: " + ("원격 주소로 씀" if is_remote(spec) else "플러그인 위치의 절대경로로 씀"))
         else:
             ok = False
     for name in [n for n in owned if n not in want]:  # 잠금에서 빠진 플러그인의 서버는 jaix가 지운다

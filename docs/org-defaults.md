@@ -30,7 +30,8 @@
   - 그래서 **`marketplace.json` 만 담은 비공개 저장소 `jeju-inst/jaix-kit-org` 를 두고**, jaix-kit main에 머지될 때마다 워크플로가 그 파일을 복사해 넣는다. 잠금의 정본은 계속 jaix-kit이다.
   - CLI 경로(③ managed settings·`jaix setup`)는 지금처럼 공개 `jaix-kit` 을 가리킨다. 조직 동기화 규칙이 적용되지 않는다.
   - 복사는 `.github/workflows/org-mirror.yml` 이 한다(main의 `marketplace.json` 이 바뀔 때 + 수동 실행). 인증은 사본 저장소의 **쓰기 deploy key** 이고, 비밀키는 이 저장소 시크릿 `ORG_MIRROR_DEPLOY_KEY` 에 둔다. 시크릿이 없으면 워크플로가 실패로 알린다.
-  - **`jaix-help`(JAIX 도우미)는 이 저장소 안 `plugins/jaix-help` 에 있다.** 잠금에는 다른 도구와 같게 `git-subdir` + 공개 `jaix-kit` URL + sha 로 적는다(상대 경로 소스 `./plugins/…` 를 쓰지 않는 까닭: 사본 저장소에는 `marketplace.json` 만 복사되므로 상대 경로가 가리킬 폴더가 없다). 잠금 갱신 봇은 jaix-kit 태그 중 `plugins/jaix-help` 폴더가 바뀐 것으로만 옮긴다(`scripts/jaixlock.py` `is_self`) — 잠금 변경마다 새 태그가 붙어 매일 갱신 PR 이 되풀이되지 않게.
+  - **`jaix-help`(JAIX 도우미)와 `ji-calendar`(공개 일정 조회)는 이 저장소 안 `plugins/<이름>` 에 있다.** 잠금에는 다른 도구와 같게 `git-subdir` + 공개 `jaix-kit` URL + sha 로 적는다(상대 경로 소스 `./plugins/…` 를 쓰지 않는 까닭: 사본 저장소에는 `marketplace.json` 만 복사되므로 상대 경로가 가리킬 폴더가 없다). 잠금 갱신 봇은 jaix-kit 태그 중 그 플러그인 폴더가 바뀐 것으로만 옮긴다(`scripts/jaixlock.py` `is_self`) — 잠금 변경마다 새 태그가 붙어 매일 갱신 PR 이 되풀이되지 않게.
+  - **원격 MCP(`ji-calendar`)**: 플러그인 `.mcp.json` 의 `{"type": "http", "url": …}` 항목. Claude Code 는 플러그인에서 바로 띄우고, Codex(`config.toml` `[mcp_servers.<이름>] url`)·Hermes(`config.yaml` `mcp_servers.<이름>.url`)에는 jaix 가 적는다(`src/jaix/remotemcp.py`, jaix-kit#170). Hermes 는 Codex 를 고르지 않은 PC 에도 잠금 커밋의 `.mcp.json` 을 직접 읽어 넣는다. `jaix doctor`·`selftest` 의 '원격 MCP <이름>' 줄이 **등록 안 됨**(→ `jaix update`)과 **접속 실패**(인터넷·서버 쪽)를 따로 보인다.
   - 콘솔에서 "Sync from GitHub" 를 처음 할 때 Anthropic GitHub App을 `jaix-kit-org` 에 설치하라고 나온다. 그 저장소만 골라 허용한다.
 - 출처: https://claude.com/docs/plugins/admin, https://claude.com/docs/plugins/org-sync ("Plugin sources that organization sync accepts")
 

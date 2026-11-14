@@ -472,6 +472,10 @@ def _update(args, log):
     log("\n[3/3] Hermes 스킬")
     changed = hermes.sync(lock, log, dry_run=args.dry_run)
     log(f"  {len(changed)}개 맞춤" if changed else "  맞출 것 없음")
+    # 잠금에 원격 MCP 가 새로 들어왔거나 주소가 바뀌었으면 Hermes 에도 맞춘다(setup 만 넣던 것, jaix-kit#170)
+    if hermes.installed() and hermesbot.find_hermes() and not args.dry_run:
+        if not hermesbot.refresh_mcp(hermesbot.find_hermes(), log, lock):
+            problems.append("Hermes MCP 항목 넣기 실패")
     # Hermes 업데이트가 새 기본 스킬·명령을 들여왔을 수 있어 jaix가 깐 Hermes 면 소음 정리를 다시 건다
     if hermesbot.recorded().get("quiet") and hermesbot.find_hermes() and not args.dry_run:
         if not hermesbot.quiet(hermesbot.find_hermes(), log):
