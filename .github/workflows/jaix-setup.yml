@@ -145,7 +145,18 @@ jobs:
           $p = Start-Process installer\Output\jaix-setup.exe -Wait -PassThru -ArgumentList `
             '/VERYSILENT','/CURRENTUSER','/SUPPRESSMSGBOXES','/NORESTART','/LOG=install.log','/CHANNELS=claude,codex','/GWSOURCE=none'
           Get-Content install.log -Tail 60
-          if ($p.ExitCode -ne 0) { throw "설치 종료 코드 $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) {
+            # install.log 꼬리에는 jaix 안내문만 보이고 실패한 단계의 원인 줄이 없다(11/17 v2026.11.17.1: '런타임(hwp2pdf-cli, age)'
+            # 실패 이유를 못 봄). jaix setup 자신의 기록을 찍고 아티팩트에도 담는다
+            $setupLog = Join-Path $env:LOCALAPPDATA 'jaix\setup.log'
+            if (Test-Path $setupLog) {
+              Write-Host "::group::jaix setup.log"
+              Get-Content $setupLog
+              Write-Host "::endgroup::"
+              Copy-Item $setupLog setup.log
+            } else { Write-Host "setup.log 없음: $setupLog" }
+            throw "설치 종료 코드 $($p.ExitCode)"
+          }
           foreach ($f in 'jaix\jaix.exe','jaix\jaixw.exe','jaix\_internal') {
             if (-not (Test-Path "$app\$f")) { throw "$f 가 $app 에 없음" }
           }
@@ -320,7 +331,9 @@ jobs:
         if: always()
         with:
           name: jaix-install-logs
-          path: install.log
+          path: |
+            install.log
+            setup.log
 
       # 태그 빌드만 올린다. PR·브랜치 빌드는 0.0.0+dev 라 위 아티팩트에서 멈춘다.
       - name: Publish release for the bundle tag
