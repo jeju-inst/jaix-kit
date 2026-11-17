@@ -37,7 +37,7 @@ TTL_HOURS = 72
 CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
-SLACKBOT_SHA = "5800619f13ebd637b4c4fb5da55fa8ddbdc14d33"  # hermes-slackbot#30: setup_pc 가 봇 토큰으로 주인 전용 비공개 채널 hermes-<id> 생성·초대(#29 공용 OAuth 앱 포함)
+SLACKBOT_SHA = "4e6d470dd6c31f4529f8e687830e7b7dea61ecac"  # hermes-slackbot#31: slack-tools 채널 설명·주제 편집(+#22 문서)
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
     # open: hermes 의 openai-codex 로그인은 device code 방식이라 브라우저를 스스로 열지 않는다(주소와 코드만 찍음,
     # hermes_cli/auth_codex.py) → jaix 가 그 주소를 연다(jaix-win 11/5). anthropic 은 hermes 가 직접 연다
@@ -913,6 +913,10 @@ def refresh_kit(hermes, ident, log):
         with tempfile.TemporaryDirectory() as tmp:
             kit = _slackbot_dir(tmp)
             ok, _ = _run([python, str(kit / "scripts" / "install.py"), ident], log, timeout=600)
+            # install.py <id> 는 slack-tools 를 건드리지 않는다. 주인 토큰을 받은 PC 는 slack-tools 도 새 판으로
+            # (설정·토큰은 그대로, 플러그인 파일만 교체 — hermes-slackbot#31 채널 설명·주제 도구)
+            if ok and env_value("SLACK_USER_TOKEN"):
+                ok, _ = _run([python, str(kit / "scripts" / "install.py"), "--tools-only"], log, timeout=600)
     except (OSError, ValueError, tarfile.TarError, StopIteration) as e:
         log(f"    슬랙 플러그인 갱신: 받지 못해 건너뜀({type(e).__name__}) — 다음 jaix update 때 다시")
         return False
