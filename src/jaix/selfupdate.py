@@ -349,12 +349,34 @@ def open_windows_note():
     return f"\n열려 있는 JAIX 창 {n}개(Hermes 로그인·점검 창 등)는 닫고 업데이트합니다." if n else ""
 
 
-def installer_args(state):
+def headless(session_of=None):
+    """화면이 없는 세션(Windows session 0: ssh·서비스·'로그온 여부와 관계없이' 예약 작업)에서 도는지.
+    거기서 띄운 설치기는 마지막 완료 상자(SuppressibleMsgBox)를 누를 사람이 없어 끝나지 않고 남는다
+    (namun-ji 11/13: ssh 로 부른 --self 의 11.12.1 설치기가 '자기 업데이트 결과: 완료' 뒤 이틀 넘게 떠 있었음)."""
+    if not IS_WIN and session_of is None:
+        return False
+    if session_of is None:
+        def session_of(pid):
+            sid = ctypes.c_ulong()
+            if not ctypes.windll.kernel32.ProcessIdToSessionId(pid, ctypes.byref(sid)):
+                return None
+            return sid.value
+    try:
+        return session_of(os.getpid()) == 0
+    except (AttributeError, OSError):
+        return False
+
+
+def installer_args(state, no_desktop=None):
     channels, model = setup_choice()
     args = ["/SILENT", "/CURRENTUSER", "/FORCECLOSEAPPLICATIONS", "/JAIXAUTOUPDATE=1", f"/CHANNELS={','.join(channels)}",
             f"/LOG={updates_dir() / ('install-' + str(state.get('latest')) + '.log')}"]
     if "hermes" in channels:
         args.append(f"/HERMESMODEL={model}")
+    if headless() if no_desktop is None else no_desktop:
+        # 끝의 결과 상자만 건너뛴다(결과는 history.log·설치 로그에 남는다). /SUPPRESSMSGBOXES 는 쓰지 않는다 —
+        # 파일 사용 중 상자의 기본 답까지 바뀌어 안전을 보장할 수 없다(#110)
+        args.append("/JAIXNOBOX=1")
     return args
 
 
