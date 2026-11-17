@@ -12,6 +12,7 @@
 ; 본체 자기 업데이트(src/jaix/selfupdate.py): 사용자가 [예]를 누르면 jaix 가
 ;   jaix-setup.exe /SILENT /CURRENTUSER /FORCECLOSEAPPLICATIONS /JAIXAUTOUPDATE=1 /CHANNELS=<이전 선택> [/HERMESMODEL=…] /LOG=<updates\install-<판>.log>
 ;   로 띄운다. 이전 선택은 jaix 가 넘기고, 로그인 페이지는 건너뛰며, 끝나면 결과를 %LOCALAPPDATA%\jaix\updates\history.log 에 남긴다.
+;   화면 없는 세션(session 0: ssh 등)에서 부르면 [/JAIXNOBOX=1] 을 더해 끝의 결과 상자를 건너뛴다(누를 사람이 없어 설치기가 남음).
 
 #define AppName "JAIX 원내 AI 도구"
 ; AppVer 는 릴리스 빌드가 jaix-kit 묶음 태그 값으로 바꿔 찍는다
@@ -457,7 +458,11 @@ begin
   SaveStringToFile(ExpandConstant('{localappdata}\jaix\updates\history.log'),
     GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + ' {#AppVer} ' + Line + #13#10, True);
   Log('자기 업데이트 결과: ' + Line);
-  if SetupFailed then
+  { 화면 없는 세션(session 0: ssh 등)에서 부른 --self 는 jaix 가 /JAIXNOBOX=1 을 붙인다. 누를 사람 없는 상자에서
+    설치기가 끝나지 않고 남지 않게 결과 상자만 건너뛴다(결과는 위 history.log·설치 로그) }
+  if ExpandConstant('{param:JAIXNOBOX|0}') = '1' then
+    Log('결과 상자 건너뜀(JAIXNOBOX)')
+  else if SetupFailed then
     SuppressibleMsgBox('JAIX {#AppVer} 로 바꿨지만 도구 등록 중 문제가 있었습니다.' + #13#10 +
       '명령창에서 jaix doctor 를 실행해 결과를 AI센터에 보내 주세요.', mbError, MB_OK, IDOK)
   else

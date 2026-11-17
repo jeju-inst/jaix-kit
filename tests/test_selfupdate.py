@@ -20,6 +20,7 @@ def su(tmp_path, monkeypatch):
     monkeypatch.setattr(selfupdate, "__version__", "2026.11.04.7")
     monkeypatch.setattr(paths, "exe_dir", lambda: tmp_path / "app" / "jaix")
     monkeypatch.setattr(hermesbot, "recorded", lambda: {})
+    monkeypatch.setattr(selfupdate, "headless", lambda: False)  # CI 러너가 session 0 이어도 화면 있는 PC 로 본다
     return tmp_path
 
 
@@ -246,6 +247,38 @@ def test_launch_closes_other_windows_first_and_forces_close(su):
                              close=lambda log: order.append(("close",)))
     assert order[0] == ("close",) and order[1][0] == "popen"
     assert "/FORCECLOSEAPPLICATIONS" in order[1][1] and "/SUPPRESSMSGBOXES" not in order[1][1]
+
+
+def test_headless_session_skips_only_result_box(su, monkeypatch):
+    """namun-ji 11/13: ssh(session 0)로 부른 --self 의 설치기가 '자기 업데이트 결과: 완료' 뒤 결과 상자에서 이틀 넘게 남음."""
+    st = selfupdate.logon_prepare(lambda m="": None, fetch=release, download=fake_download())
+    assert "/JAIXNOBOX=1" not in selfupdate.installer_args(st)  # 화면 있는 세션: 상자를 그대로 보여 준다
+    args = selfupdate.installer_args(st, no_desktop=True)
+    assert "/JAIXNOBOX=1" in args and "/SUPPRESSMSGBOXES" not in args  # 파일 사용 중 상자의 기본 답은 바꾸지 않는다(#110)
+    monkeypatch.setattr(selfupdate, "headless", lambda: True)
+    launched = []
+    assert selfupdate.launch(st, lambda m="": None, popen=lambda cmd, **k: launched.append(cmd), close=lambda log: [])
+    assert "/JAIXNOBOX=1" in launched[0]
+
+
+def test_headless_reads_session_of_this_process(monkeypatch):
+    monkeypatch.setattr(selfupdate, "IS_WIN", True)
+    assert selfupdate.headless(session_of=lambda pid: 0)
+    assert not selfupdate.headless(session_of=lambda pid: 1)
+    assert not selfupdate.headless(session_of=lambda pid: None)  # 못 읽으면 화면 있는 쪽으로(상자를 보여 줌)
+
+    def boom(pid):
+        raise OSError("x")
+    assert not selfupdate.headless(session_of=boom)
+    monkeypatch.setattr(selfupdate, "IS_WIN", False)
+    assert not selfupdate.headless()
+
+
+def test_installer_skips_result_box_only_with_jaixnobox():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    tail = iss.split("Log('자기 업데이트 결과: ' + Line);", 1)[1].split("\nend;", 1)[0]
+    assert "ExpandConstant('{param:JAIXNOBOX|0}') = '1'" in tail
+    assert tail.index("JAIXNOBOX") < tail.index("SuppressibleMsgBox")  # 상자보다 먼저 거른다
 
 
 def test_close_others_reports_each(su):
