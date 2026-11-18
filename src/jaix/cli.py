@@ -399,10 +399,10 @@ def cmd_update(args, log):
         problems = _update(args, log)
         if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
             schedule.write_status(problems)
-            _slack_scope(log, offer=bool(sys.stdin and sys.stdin.isatty()) and not selfupdate.headless())
+            _slack_scope(log, offer=paths.at_console() and not selfupdate.headless())
         if selfupdate.applies() and not args.offline and not args.dry_run:
             state = selfupdate.check()
-            if state.get("newer") and sys.stdin and sys.stdin.isatty():  # 시작 메뉴 'JAIX 업데이트' 창 — 그 자리에서 묻는다
+            if state.get("newer") and paths.at_console():  # 시작 메뉴 'JAIX 업데이트' 창 — 그 자리에서 묻는다
                 log("")
                 selfupdate.cmd_self(argparse.Namespace(yes=False), log)
             elif state.get("newer"):

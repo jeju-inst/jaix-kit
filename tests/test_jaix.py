@@ -3706,12 +3706,79 @@ def test_offer_slack_access_nothing_missing(isolated):
     assert _offer([], [], state="unknown") == ([], [])
 
 
+class _Tty:
+    """isatty() 만 흉내 내는 표준 스트림. Windows NUL 도 isatty() 가 True 다(#180)."""
+    def __init__(self, tty, fileno=0):
+        self.tty, self.fd = tty, fileno
+
+    def isatty(self):
+        return self.tty
+
+    def fileno(self):
+        if self.fd is None:
+            raise OSError("no fileno")
+        return self.fd
+
+
+def test_at_console_windows_nul_is_not_console(monkeypatch):
+    """stdin 이 NUL 이면 isatty() 는 True 지만 GetConsoleMode 가 실패한다 — 묻지 않는다(#180)."""
+    nul = _Tty(True)
+    assert nul.isatty()  # 옛 판정(sys.stdin.isatty())이라면 여기서 물었다
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: False)
+    assert cli.paths.at_console(nul, _Tty(True)) is False
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: True)  # 시작 메뉴 'JAIX 업데이트' 창
+    assert cli.paths.at_console(nul, _Tty(True)) is True
+
+
+@pytest.mark.parametrize("error", [OSError("handle"), AttributeError("windll"), ImportError("msvcrt")])
+def test_at_console_windows_check_failure_does_not_ask(monkeypatch, error):
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: (_ for _ in ()).throw(error))
+    assert cli.paths.at_console(_Tty(True), _Tty(True)) is False
+    assert cli.paths.at_console(_Tty(True, fileno=None), _Tty(True)) is False
+
+
+@pytest.mark.parametrize("stdin,stdout,want", [(True, True, True), (False, True, False), (True, False, False)])
+def test_at_console_posix_needs_both_ttys(monkeypatch, stdin, stdout, want):
+    monkeypatch.setattr(cli.paths, "IS_WIN", False)
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: pytest.fail("Windows 판정을 부름"))
+    assert cli.paths.at_console(_Tty(stdin), _Tty(stdout)) is want
+
+
+@pytest.mark.skipif(not cli.paths.IS_WIN, reason="Windows 콘솔 API")
+def test_win_console_mode_rejects_nul():
+    with open(os.devnull, "rb") as nul:
+        assert nul.isatty()  # 문자 장치라 True — 옛 판정이 속던 지점
+        assert cli.paths._win_console_mode(nul.fileno()) is False
+
+
+def test_update_with_nul_stdin_on_windows_asks_nothing(isolated, monkeypatch):
+    """`jaix update < NUL`: 슬랙 권한도, 본체 새 판도 묻지 않는다(그 판의 한 번 기회를 쓰지 않음)."""
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    monkeypatch.setattr(cli.paths, "IS_WIN", True)
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: False)
+    monkeypatch.setattr(cli.sys, "stdin", _Tty(True))
+    monkeypatch.setattr(cli.sys, "stdout", _Tty(True))
+    monkeypatch.setattr(cli.selfupdate, "headless", lambda: False)
+    monkeypatch.setattr(cli.selfupdate, "applies", lambda: True)
+    monkeypatch.setattr(cli.selfupdate, "check", lambda: {"newer": True, "latest": "2099.1.1.1"})
+    monkeypatch.setattr(cli.selfupdate, "cmd_self", lambda *a, **k: pytest.fail("NUL stdin 에서 본체 업데이트를 물음"))
+    monkeypatch.setattr(hermesbot, "user_scope_gap", lambda: ("ok", ["groups:write.topic"]))
+    monkeypatch.setattr(hermesbot, "offer_slack_access", lambda *a, **k: pytest.fail("NUL stdin 에서 슬랙 권한을 물음"))
+    lines = []
+    assert cli.cmd_update(cli.build_parser().parse_args(["update"]), lines.append) == 0
+    assert any("jaix update --self" in str(ln) for ln in lines)  # 묻는 대신 안내만
+
+
 @pytest.mark.parametrize("tty,headless,offered", [(True, False, True), (False, False, False), (True, True, False)])
 def test_update_offers_slack_access_only_in_interactive_desktop(isolated, monkeypatch, tty, headless, offered):
     monkeypatch.setattr(cli, "_update", lambda args, log: [])
     monkeypatch.setattr(cli.selfupdate, "applies", lambda: False)
     monkeypatch.setattr(cli.selfupdate, "headless", lambda: headless)
-    monkeypatch.setattr(cli.sys, "stdin", type("S", (), {"isatty": lambda self: tty})())
+    monkeypatch.setattr(cli.paths, "IS_WIN", False)
+    monkeypatch.setattr(cli.sys, "stdin", _Tty(tty))
+    monkeypatch.setattr(cli.sys, "stdout", _Tty(True))
     monkeypatch.setattr(hermesbot, "user_scope_gap", lambda: ("ok", ["groups:write.topic"]))
     offers = []
     monkeypatch.setattr(hermesbot, "offer_slack_access", lambda *a, **k: offers.append(a[:2]))

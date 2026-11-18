@@ -15,7 +15,6 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 import tempfile
 import time
 from argparse import Namespace
@@ -273,10 +272,8 @@ def result_line(item, code):
 
 # --- 새 창에서 연결(에이전트가 부를 때) -----------------------------------------------------------------
 def interactive():
-    try:
-        return bool(sys.stdin) and sys.stdin.isatty()
-    except (AttributeError, ValueError):
-        return False
+    """사람이 이 콘솔 앞에 있는지 — 아니면(에이전트가 NUL·파이프로 부름) 입력은 새 창에서 받는다(#180)."""
+    return paths.at_console()
 
 
 def child_command(item, result_file):

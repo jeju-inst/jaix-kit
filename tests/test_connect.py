@@ -213,6 +213,44 @@ def test_console_items_open_new_window_when_not_a_terminal(monkeypatch):
     assert lines[-1].startswith("[완료] 회사메일")
 
 
+class _Tty:
+    def __init__(self, tty=True):
+        self.tty = tty
+
+    def isatty(self):
+        return self.tty
+
+    def fileno(self):
+        return 0
+
+
+def _windows_stdin(monkeypatch, console):
+    """Windows 에서 stdin 이 NUL(console=False — isatty 는 True)이거나 진짜 콘솔(True)인 상태(#180)."""
+    monkeypatch.setattr(paths, "IS_WIN", True)
+    monkeypatch.setattr(paths, "_win_console_mode", lambda fd: console)
+    monkeypatch.setattr(paths.sys, "stdin", _Tty())
+    monkeypatch.setattr(paths.sys, "stdout", _Tty())
+
+
+@pytest.mark.parametrize("console,where", [(False, "window"), (True, "here")])
+def test_console_items_with_nul_stdin_open_new_window(monkeypatch, console, where):
+    """에이전트가 stdin 을 NUL 로 두고 부르면(isatty 는 True) 이 창에서 입력을 기다리지 않고 새 창을 연다.
+    시작 메뉴 'JAIX 계정 연결'(jaix.exe 가 자기 콘솔을 가짐)은 지금처럼 이 창에서 받는다."""
+    _windows_stdin(monkeypatch, console)
+    got = []
+    connect.connect_one("mail", lambda *a: None, window=lambda item, log: got.append("window") or 0,
+                        runner=lambda item, log: got.append("here") or 0, pause=lambda: None)
+    assert got == [where]
+
+
+def test_connect_all_with_nul_stdin_does_not_ask(monkeypatch, the_lock):
+    _windows_stdin(monkeypatch, False)
+    lines, log = _log()
+    code = connect.connect_all(the_lock, log, sts=STS, ask=lambda q: pytest.fail(f"NUL stdin 에서 물음: {q}"),
+                               runner=lambda *a: pytest.fail("연결을 시도함"))
+    assert code == 1 and any("jaix connect <항목>" in ln for ln in lines)
+
+
 def test_gw_and_works_run_inline_even_for_agents(monkeypatch):
     monkeypatch.setattr(connect, "interactive", lambda: False)
     for item in ("gw", "works"):
