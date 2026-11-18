@@ -1133,9 +1133,9 @@ def bot_room(hermes, ident, log, call=None):
     return ok
 
 
-def _yaml_mcp_stdio(text, name):
-    """config.yaml 의 mcp_servers.<name> 을 {"command": …, "args": […]} 로(블록 매핑만). command·args 말고 다른 키(env 등)가
-    있거나, 흐름 매핑·블록 스칼라·따옴표 섞인 흐름 목록처럼 모르는 모양이면 None — 부르는 쪽은 다르다고 보고 다시 넣는다."""
+def _yaml_mcp_entry(text, name):
+    """config.yaml 의 mcp_servers.<name> 을 {"command": …, "args": […]} 또는 {"url": …} 로(블록 매핑만, 스칼라는 통째로 읽음).
+    command·args·url 말고 다른 키(env 등)가 있거나, 흐름 매핑·블록 스칼라·따옴표 섞인 흐름 목록처럼 모르는 모양이면 None — 부르는 쪽은 다르다고 보고 다시 넣는다."""
     sec = re.search(r"^mcp_servers\s*:[^\n]*\n((?:[ \t]+[^\n]*\n?|[ \t]*\n)*)", text, re.M)
     if not sec:
         return None
@@ -1167,7 +1167,7 @@ def _yaml_mcp_stdio(text, name):
         while i < len(lines) and (depth(lines[i]) > child or (depth(lines[i]) == child and lines[i].lstrip().startswith("- "))):
             more.append(lines[i])
             i += 1
-        if key == "command":
+        if key in ("command", "url"):
             if not value or value[0] in "|>[{&*!" or more:
                 return None
             out[key] = _unquote(value)
@@ -1186,17 +1186,18 @@ def _yaml_mcp_stdio(text, name):
                 return None
         else:
             return None
-    return out if "command" in out else None
+    return out or None
 
 
 def _mcp_same(text, name, spec):
     """config.yaml 에 이미 spec 과 같은 값이 있는지. 못 읽거나 애매하면 False(다시 넣는 쪽이 안전하다)."""
     try:
         if codex.is_remote(spec):
-            return _yaml_mcp_url(text, name) == spec["url"]
+            # _yaml_mcp_url 은 쉼표에서 끊으므로 비교에는 스칼라 전체를 읽는 쪽을 쓴다(흐름 매핑 등은 None → 다시 넣음)
+            return _yaml_mcp_entry(text, name) == {"url": spec["url"]}
         if spec.get("env"):
             return False
-        return _yaml_mcp_stdio(text, name) == {"command": spec["command"], "args": list(spec["args"])}
+        return _yaml_mcp_entry(text, name) == {"command": spec["command"], "args": list(spec["args"])}
     except Exception:  # noqa: BLE001 — 비교는 최적화일 뿐, 실패하면 지금처럼 set
         return False
 

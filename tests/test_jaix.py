@@ -3953,15 +3953,22 @@ def test_hermes_mcp_same_value_not_rewritten(isolated, monkeypatch):
     assert set(hermesbot.recorded()["mcp"]) == {"hwp-agent", "korea-rio", "cal", "new-one", "with-env"}
 
 
-def test_hermes_yaml_mcp_stdio_reads_only_known_shapes():
+def test_hermes_yaml_mcp_entry_reads_only_known_shapes():
     text = ("mcp_servers:\n  a:\n    command: uvx\n    args: [x, y]\n  b:\n    command: \"uvx\"\n    args:\n    - 'x'\n"
             "  c: {command: uvx}\n  d:\n    command: uvx\n    env:\n      K: v\n  e:\n    command: uvx\n    args: ['x, y']\n"
             "  f:\n    args:\n    - x\n")
-    assert hermesbot._yaml_mcp_stdio(text, "a") == {"command": "uvx", "args": ["x", "y"]}
-    assert hermesbot._yaml_mcp_stdio(text, "b") == {"command": "uvx", "args": ["x"]}
-    for name in ("c", "d", "e", "f", "zz"):   # 흐름 매핑·다른 키·따옴표 섞인 흐름 목록·command 없음·없는 항목
-        assert hermesbot._yaml_mcp_stdio(text, name) is None, name
+    assert hermesbot._yaml_mcp_entry(text, "a") == {"command": "uvx", "args": ["x", "y"]}
+    assert hermesbot._yaml_mcp_entry(text, "b") == {"command": "uvx", "args": ["x"]}
+    for name in ("c", "d", "e", "zz"):   # 흐름 매핑·다른 키·따옴표 섞인 흐름 목록·없는 항목
+        assert hermesbot._yaml_mcp_entry(text, name) is None, name
+    assert not hermesbot._mcp_same(text, "f", {"command": "uvx", "args": ["x"]})   # command 없음 → 다름
     assert not hermesbot._mcp_same(text, "a", {"command": "uvx", "args": ["x", "y"], "env": {"K": "v"}})
+    # 원격: url 스칼라 전체를 비교한다(쉼표 뒤가 다르면 다른 값). 흐름 매핑은 못 읽음 → 다시 넣음
+    url = "https://c.example.org/mcp"
+    remote = f"mcp_servers:\n  r:\n    url: '{url},old'\n  s:\n    url: \"{url}\"\n  t: {{url: {url}}}\n"
+    assert not hermesbot._mcp_same(remote, "r", {"url": url})
+    assert hermesbot._mcp_same(remote, "s", {"url": url})
+    assert not hermesbot._mcp_same(remote, "t", {"url": url})
     assert hermesbot._mcp_same(text, "a", {"command": "uvx", "args": ["x", "y"], "env": {}})
 
 
