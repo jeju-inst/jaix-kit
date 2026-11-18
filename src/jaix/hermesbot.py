@@ -105,13 +105,18 @@ def code_key(code):
     return hashlib.sha256(code.encode("ascii")).hexdigest()
 
 
-def slack_call(method, token, timeout=20, **params):
+def slack_call_headers(method, token, timeout=20, **params):
+    """(본문 JSON, 응답 헤더). 헤더는 auth.test 의 x-oauth-scopes(토큰이 받은 범위)를 볼 때 쓴다."""
     import urllib.parse
     req = urllib.request.Request(f"https://slack.com/api/{method}", data=urllib.parse.urlencode(params).encode("ascii"),
                                  headers={"Authorization": f"Bearer {token}",
                                           "Content-Type": "application/x-www-form-urlencoded"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+        return json.loads(r.read().decode("utf-8")), r.headers
+
+
+def slack_call(method, token, timeout=20, **params):
+    return slack_call_headers(method, token, timeout, **params)[0]
 
 
 def bot_name_matches(auth, ident):
@@ -1380,6 +1385,77 @@ def cmd_slack_access(args, log, opener=None, sleep=None, clock=None):
     log(f"완료: Hermes-{ident} 가 이제 본인 DM·비공개 채널·검색·파일을 볼 수 있습니다. 보내기·올리기는 매번 확인을 받습니다.")
     log("끄려면 Slack 앱 관리 화면에서 'JAIX Slack 연결' 권한을 취소하세요.")
     return 0
+
+
+# 공용 OAuth 앱(JAIX Slack 연결)이 구성원 사용자 토큰에 요청하는 범위. 출처: z0nam/hermes-slackbot
+# scripts/make_manifest.py KIT_USER_SCOPES(hermes-slackbot#31 에서 15→17: channels/groups:write.topic). 그쪽이 늘면 같이 올린다
+KIT_USER_SCOPES = (
+    "identify", "search:read",
+    "channels:history", "groups:history", "im:history", "mpim:history",
+    "channels:read", "groups:read", "im:read", "mpim:read", "users:read",
+    "files:read", "files:write", "chat:write", "im:write",
+    "channels:write.topic", "groups:write.topic",
+)
+SLACK_TOKEN_DEAD = ("invalid_auth", "token_revoked", "token_expired", "account_inactive", "not_authed")
+
+
+def user_scope_gap(call=None, timeout=10):
+    """.env 의 SLACK_USER_TOKEN 이 받은 범위를 KIT_USER_SCOPES 와 견준다. (상태, 빠진 범위 목록):
+    none(토큰 없음) · unknown(오프라인·응답 이상 — 조용히 넘김) · invalid(Slack 이 토큰을 안 받음) · ok(빠진 것은 목록).
+    토큰 값은 어디에도 찍지 않는다."""
+    token = env_value("SLACK_USER_TOKEN")
+    if not token:
+        return "none", []
+    try:
+        body, headers = (call or slack_call_headers)("auth.test", token, timeout=timeout)
+    except (urllib.error.URLError, OSError, ValueError):
+        return "unknown", []
+    finally:
+        token = None
+    if not body.get("ok"):
+        return ("invalid" if body.get("error") in SLACK_TOKEN_DEAD else "unknown"), []
+    raw = headers.get("x-oauth-scopes") if headers is not None else None
+    if raw is None:
+        return "unknown", []
+    have = {s.strip() for s in raw.split(",") if s.strip()}
+    return "ok", [s for s in KIT_USER_SCOPES if s not in have]
+
+
+SCOPE_FIX = "jaix hermes slack-access 를 다시 하세요(시작 메뉴 'JAIX 슬랙 권한 갱신')"
+
+
+def scope_notice(state, missing):
+    """jaix update·doctor 가 남길 한 줄(할 것이 없으면 None)."""
+    if state == "invalid":
+        return f"Slack 이 내 Slack 권한(사용자 토큰)을 받지 않습니다 — {SCOPE_FIX}"
+    if state == "ok" and missing:
+        return f"새 슬랙 도구에 필요한 권한 {len(missing)}개가 없습니다({', '.join(missing)}) — {SCOPE_FIX}"
+    return None
+
+
+def offer_slack_access(state, missing, log, version, ask=None, run=None):
+    """사람이 화면에서 직접 돌린 jaix update 에서 권한이 모자라면 그 자리에서 slack-access 를 잇는다.
+    같은 판·같은 부족분에는 한 번만 묻는다(거절·시간초과·실패 뒤 매번 다시 띄우지 않게 기록에 남긴다)."""
+    if not scope_notice(state, missing):
+        return None
+    rec = recorded()
+    slack = rec.get("slack") or {}
+    mark = {"version": version, "missing": missing if state == "ok" else ["invalid"]}
+    last = slack.get("scope_offer") or {}
+    if {k: last.get(k) for k in mark} == mark:
+        return None
+    rec["slack"] = dict(slack, scope_offer=dict(mark, at=datetime.datetime.now().isoformat(timespec="seconds")))
+    _save_record(rec)  # 묻기 전에 남긴다 — Ctrl+C·창 닫기도 '한 번 물었음'
+    ask = ask or (lambda q: input(q))
+    try:
+        answer = ask("지금 브라우저에서 Slack 권한을 다시 허용할까요? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = "n"
+    if answer not in ("", "y", "yes", "예", "ㅛ"):
+        log(f"건너뜀 — 나중에 {SCOPE_FIX}")
+        return None
+    import argparse
+    return (run or cmd_slack_access)(argparse.Namespace(dry_run=False), log)
 
 
 SLACK_SECRET_KEYS = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_USER_TOKEN")  # setup_pc.py 가 .env 에 넣는 토큰

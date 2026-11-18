@@ -399,6 +399,7 @@ def cmd_update(args, log):
         problems = _update(args, log)
         if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
             schedule.write_status(problems)
+            _slack_scope(log, offer=bool(sys.stdin and sys.stdin.isatty()) and not selfupdate.headless())
         if selfupdate.applies() and not args.offline and not args.dry_run:
             state = selfupdate.check()
             if state.get("newer") and sys.stdin and sys.stdin.isatty():  # 시작 메뉴 'JAIX 업데이트' 창 — 그 자리에서 묻는다
@@ -425,8 +426,25 @@ def cmd_update(args, log):
     schedule.write_status(problems)
     for p in problems:
         log(f"문제: {p}")
+    if not args.dry_run:
+        _slack_scope(log, offer=False)
     selfupdate.logon_offer(pending, log)
     return 1 if problems else 0
+
+
+def _slack_scope(log, offer):
+    """내 Slack 권한(사용자 토큰)이 새 슬랙 도구 범위에 모자라면 한 줄 안내. 화면에서 사람이 직접 돌린 update 면
+    (offer) 그 자리에서 slack-access 를 잇는다 — 자동 갱신·화면 없는 세션·비대화형은 안내만. 실패해도 update 는 막지 않는다."""
+    try:
+        state, missing = hermesbot.user_scope_gap()
+        line = hermesbot.scope_notice(state, missing)
+        if not line:
+            return
+        log(f"\n※ {line}")
+        if offer:
+            hermesbot.offer_slack_access(state, missing, log, __version__)
+    except Exception as e:  # 안내일 뿐이다
+        log(f"  (슬랙 권한 확인 건너뜀: {type(e).__name__})")
 
 
 def _update(args, log):

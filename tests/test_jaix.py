@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ REAL_CLIS = {}
 REAL_RHWP_ENSURE = hwprhwp.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_UV_ENSURE = uvpython.ensure  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_GW_FOREIGN = gw.foreign  # isolated 픽스처가 막기 전의 진짜 함수
+REAL_SLACK_CALL_HEADERS = hermesbot.slack_call_headers  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_REFRESH_KIT = hermesbot.refresh_kit  # isolated 픽스처가 막기 전의 진짜 함수
 REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의 진짜 함수
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
@@ -50,6 +52,8 @@ def isolated(tmp_path, monkeypatch):
     _guard_real_hermes(tmp_path, monkeypatch)
     # 진짜 슬랙 API 도 부르지 않는다(봇 토큰으로 채널을 만드는 bot_room 등). 필요한 시험이 흉내를 단다
     monkeypatch.setattr(hermesbot, "slack_call", lambda *a, **k: pytest.fail(f"시험이 진짜 슬랙 API 를 부름: {a[:1]}"))
+    monkeypatch.setattr(hermesbot, "slack_call_headers",
+                        lambda *a, **k: pytest.fail(f"시험이 진짜 슬랙 API 를 부름: {a[:1]}"))
     # hermes-slackbot 을 진짜로 받지 않는다. 연결된 PC 의 플러그인 갱신은 REAL_REFRESH_KIT 시험에서만
     monkeypatch.setattr(hermesbot, "_slackbot_dir", lambda workdir: pytest.fail("시험이 hermes-slackbot 을 진짜로 받음"))
     monkeypatch.setattr(hermesbot, "refresh_kit", lambda hermes, ident, log: True)
@@ -3576,6 +3580,169 @@ def test_slack_access_브라우저를_못_열면_주소를_보인다(isolated, m
 def test_slack_access_cli_dry_run(isolated, monkeypatch):
     posts, setups = _oauth_fake(monkeypatch)
     assert cli.main(["hermes", "slack-access", "--dry-run"]) == 0 and posts == [] and setups == []
+
+
+# --- 내 Slack 권한(사용자 토큰)이 새 슬랙 도구 범위에 모자라면 알리고, 화면에서 직접 돌린 update 면 다시 허용을 잇는다 ---
+OLD_USER_SCOPES = [s for s in hermesbot.KIT_USER_SCOPES if not s.endswith(":write.topic")]   # hermes-slackbot#31 전 15개
+
+
+def _auth_test(scopes=None, error=None, raises=None, seen=None):
+    def call(method, token, timeout=20, **params):
+        if seen is not None:
+            seen.append((method, token))
+        if raises:
+            raise raises
+        if error:
+            return {"ok": False, "error": error}, {}
+        return {"ok": True}, ({} if scopes is None else {"x-oauth-scopes": ",".join(scopes)})
+    return call
+
+
+def test_kit_user_scopes_matches_hermes_slackbot_31():
+    assert len(hermesbot.KIT_USER_SCOPES) == 17 == len(set(hermesbot.KIT_USER_SCOPES))
+    assert {"channels:write.topic", "groups:write.topic"} <= set(hermesbot.KIT_USER_SCOPES)
+
+
+@pytest.mark.parametrize("call,want", [
+    (_auth_test(scopes=hermesbot.KIT_USER_SCOPES), ("ok", [])),
+    (_auth_test(scopes=OLD_USER_SCOPES), ("ok", ["channels:write.topic", "groups:write.topic"])),
+    (_auth_test(scopes=[*hermesbot.KIT_USER_SCOPES, "extra:read"]), ("ok", [])),
+    (_auth_test(error="invalid_auth"), ("invalid", [])),
+    (_auth_test(error="token_revoked"), ("invalid", [])),
+    (_auth_test(error="ratelimited"), ("unknown", [])),
+    (_auth_test(scopes=None), ("unknown", [])),                     # 헤더가 없으면 판단하지 않는다
+    (_auth_test(raises=OSError("offline")), ("unknown", [])),
+    (_auth_test(raises=urllib.error.URLError("x")), ("unknown", [])),
+])
+def test_user_scope_gap(isolated, call, want):
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-b\nSLACK_USER_TOKEN=xoxp-SECRET\n")
+    assert hermesbot.user_scope_gap(call=call) == want
+
+
+def test_user_scope_gap_uses_user_token_and_skips_without_one(isolated):
+    seen = []
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-b\n")
+    assert hermesbot.user_scope_gap(call=_auth_test(seen=seen)) == ("none", []) and seen == []
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-b\nSLACK_USER_TOKEN=xoxp-SECRET\n")
+    hermesbot.user_scope_gap(call=_auth_test(scopes=OLD_USER_SCOPES, seen=seen))
+    assert seen == [("auth.test", "xoxp-SECRET")]
+
+
+def test_slack_call_headers_returns_scope_header(monkeypatch):
+    class Resp:
+        headers = {"x-oauth-scopes": "identify,chat:write"}
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"ok": true}'
+    sent = []
+    monkeypatch.setattr(hermesbot.urllib.request, "urlopen", lambda req, timeout: sent.append(req) or Resp())
+    body, headers = REAL_SLACK_CALL_HEADERS("auth.test", "xoxp-t")
+    assert body == {"ok": True} and headers["x-oauth-scopes"] == "identify,chat:write"
+    assert sent[0].full_url.endswith("/auth.test") and sent[0].get_header("Authorization") == "Bearer xoxp-t"
+
+
+def test_scope_notice_never_shows_token():
+    line = hermesbot.scope_notice("ok", ["channels:write.topic", "groups:write.topic"])
+    assert "2개" in line and "jaix hermes slack-access" in line and "xox" not in line
+    assert "jaix hermes slack-access" in hermesbot.scope_notice("invalid", [])
+    assert hermesbot.scope_notice("ok", []) is None and hermesbot.scope_notice("unknown", []) is None
+    assert hermesbot.scope_notice("none", []) is None
+
+
+@pytest.mark.parametrize("gap,status", [(("ok", ["groups:write.topic"]), ["ok", "warn"]), (("invalid", []), ["ok", "warn"]),
+                                        (("ok", []), ["ok"]), (("unknown", []), ["ok"]), (("none", []), ["ok"])])
+def test_doctor_warns_when_user_token_lacks_new_scopes(isolated, monkeypatch, gap, status):
+    _connected_before(isolated, monkeypatch)
+    monkeypatch.setattr(hermesbot, "user_scope_gap", lambda: gap)
+    checks = doctor.check_hermes_bot()
+    assert [c.status for c in checks] == status
+    if "warn" in status:
+        assert "jaix hermes slack-access" in checks[-1].fix
+
+
+def _offer(lines, answers, version="2026.11.18.1", missing=("groups:write.topic",), state="ok"):
+    asked, ran = [], []
+    it = iter(answers)
+
+    def ask(q):
+        asked.append(q)
+        a = next(it)
+        if isinstance(a, BaseException):
+            raise a
+        return a
+    hermesbot.offer_slack_access(state, list(missing), lines.append, version, ask=ask,
+                                 run=lambda args, log: ran.append(args.dry_run) or 0)
+    return asked, ran
+
+
+def test_offer_slack_access_runs_on_yes(isolated):
+    lines = []
+    asked, ran = _offer(lines, [""])
+    assert len(asked) == 1 and ran == [False]
+
+
+@pytest.mark.parametrize("answer", ["n", EOFError(), KeyboardInterrupt()])
+def test_offer_slack_access_asks_once_per_release_and_gap(isolated, answer):
+    lines = []
+    asked, ran = _offer(lines, [answer])
+    assert len(asked) == 1 and ran == [] and any("jaix hermes slack-access" in ln for ln in lines)
+    assert _offer([], []) == ([], [])                                              # 같은 판·같은 부족분: 다시 묻지 않음
+    assert len(_offer([], ["n"], version="2026.11.19.1")[0]) == 1                  # 새 판이면 한 번 더
+    assert len(_offer([], ["n"], version="2026.11.19.1", missing=("x:read",))[0]) == 1  # 부족분이 달라져도
+
+
+def test_offer_slack_access_remembers_even_if_flow_fails(isolated):
+    """허용 화면에서 시간초과·거절(cmd_slack_access 가 1)이어도 같은 판에서는 다시 띄우지 않는다."""
+    asked = []
+    hermesbot.offer_slack_access("ok", ["groups:write.topic"], print, "v1", ask=lambda q: asked.append(q) or "y",
+                                 run=lambda args, log: 1)
+    hermesbot.offer_slack_access("ok", ["groups:write.topic"], print, "v1", ask=lambda q: asked.append(q) or "y",
+                                 run=lambda args, log: 1)
+    assert len(asked) == 1
+
+
+def test_offer_slack_access_nothing_missing(isolated):
+    assert _offer([], [], missing=()) == ([], [])
+    assert _offer([], [], state="unknown") == ([], [])
+
+
+@pytest.mark.parametrize("tty,headless,offered", [(True, False, True), (False, False, False), (True, True, False)])
+def test_update_offers_slack_access_only_in_interactive_desktop(isolated, monkeypatch, tty, headless, offered):
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    monkeypatch.setattr(cli.selfupdate, "applies", lambda: False)
+    monkeypatch.setattr(cli.selfupdate, "headless", lambda: headless)
+    monkeypatch.setattr(cli.sys, "stdin", type("S", (), {"isatty": lambda self: tty})())
+    monkeypatch.setattr(hermesbot, "user_scope_gap", lambda: ("ok", ["groups:write.topic"]))
+    offers = []
+    monkeypatch.setattr(hermesbot, "offer_slack_access", lambda *a, **k: offers.append(a[:2]))
+    lines = []
+    assert cli.cmd_update(cli.build_parser().parse_args(["update"]), lines.append) == 0
+    assert any("jaix hermes slack-access" in str(ln) for ln in lines)
+    assert offers == ([("ok", ["groups:write.topic"])] if offered else [])
+
+
+def test_logon_update_only_notes_scope_gap(isolated, monkeypatch):
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    monkeypatch.setattr(cli.selfupdate, "logon_prepare", lambda log: None)
+    monkeypatch.setattr(cli.selfupdate, "logon_offer", lambda pending, log: None)
+    monkeypatch.setattr(hermesbot, "user_scope_gap", lambda: ("ok", ["groups:write.topic"]))
+    monkeypatch.setattr(hermesbot, "offer_slack_access", lambda *a, **k: pytest.fail("자동 갱신이 허용 화면을 띄움"))
+    assert cli.main(["update", "--quiet"]) == 0
+    assert "jaix hermes slack-access" in schedule.log_file().read_text(encoding="utf-8")
+
+
+def test_update_scope_check_failure_does_not_break_update(isolated, monkeypatch):
+    monkeypatch.setattr(cli, "_update", lambda args, log: [])
+    monkeypatch.setattr(cli.selfupdate, "applies", lambda: False)
+    monkeypatch.setattr(hermesbot, "user_scope_gap", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    assert cli.main(["update"]) == 0
+
+
+def test_installer_has_slack_access_shortcut_that_stays_open():
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    icons = iss.split("[Icons]", 1)[1].split("\n[", 1)[0]
+    line = next(ln for ln in icons.splitlines() if "JAIX 슬랙 권한 갱신" in ln)
+    assert 'Filename: "{cmd}"' in line and '/K ""{app}\\jaix\\jaix.exe"" hermes slack-access' in line
 
 
 # --- jaix hermes remove: 한 봇을 두 PC 에 연결했을 때 이 PC 쪽만 뺀다 ---------------------------------------
