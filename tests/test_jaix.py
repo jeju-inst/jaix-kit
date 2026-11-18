@@ -3343,6 +3343,17 @@ def test_refresh_kit_runs_install_once_per_release_and_restarts(isolated, monkey
     assert REAL_REFRESH_KIT("/x/hermes", "namun", print) and calls == []   # 같은 판이면 안 돎(재시작도 없음)
 
 
+def test_refresh_kit_also_refreshes_slack_tools_when_owner_token(isolated, monkeypatch, tmp_path):
+    """주인 토큰(slack-tools)을 받은 PC 는 install.py --tools-only 도 돌려 slack-tools 를 새 판으로 맞춘다(hermes-slackbot#31)."""
+    calls, kit = _kit_ready(monkeypatch, tmp_path)
+    env = paths.hermes_home() / ".env"
+    env.write_text(env.read_text(encoding="utf-8") + "SLACK_USER_TOKEN=xoxp-x\n", encoding="utf-8")
+    assert REAL_REFRESH_KIT("/x/hermes", "namun", print)
+    assert calls == [["python", str(kit / "scripts" / "install.py"), "namun"],
+                     ["python", str(kit / "scripts" / "install.py"), "--tools-only"],
+                     ["hermes", "gateway", "restart"]]
+
+
 @pytest.mark.parametrize("before,restored", [(None, False), ("Hermes-namun", False), ("hermes-namun", False),
                                              ("내 봇", True)])
 def test_refresh_kit_keeps_user_base_name(isolated, monkeypatch, tmp_path, before, restored):
