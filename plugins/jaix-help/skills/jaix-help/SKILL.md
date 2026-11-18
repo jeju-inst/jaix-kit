@@ -33,8 +33,14 @@ description: JAIX 도우미. jaix 도구(HWP·그룹웨어·메일·웍스·Herm
 | `fail` 이고 `fix` 가 `jaix setup`·`jaix update` | 물어본 뒤 실행한다(몇 분 걸림) |
 | Claude 에서 jaix 도구가 안 보임, `fix` 가 앱 다시 열기 | Claude 앱을 완전히 종료했다 다시 열게 한다. Windows: 화면 오른쪽 아래 알림 영역(^)의 Claude 아이콘 오른쪽 클릭 → Exit. 맥: ⌘Q |
 | `fail` 그 밖 | 5로 |
+| `jaix doctor`·`jaix update` 가 "새 슬랙 도구에 필요한 권한 n개가 없습니다" 또는 "Slack 이 내 Slack 권한(사용자 토큰)을 받지 않습니다"라고 함, 또는 내 봇이 내 DM·비공개 채널·검색·파일을 쓰게 하고 싶어 함 | 아래 "내 Slack 권한" |
+| 한 봇을 두 PC 에 연결해서 이 PC 쪽을 빼고 싶어 함 | 아래 "이 PC 에서 봇 빼기" |
 
 4. 고친 뒤 `jaix selftest --json` 을 다시 돌려 확인한다.
 5. 그래도 `fail` 이 남으면 AI센터 소모임 Slack 채널에 올릴 짧은 보고를 써서 **사용자에게 먼저 보여 준다**: jaix 버전(`version`), 남은 실패 항목의 `area`·`message`·`fix`, 해 본 것. 보낼지는 사용자가 정한다. 그다음은 AI센터가 원격 화면 공유나 방문으로 돕는다고 알린다.
+
+## Hermes 슬랙 봇
+- **내 Slack 권한**: `jaix hermes slack-access`(시작 메뉴 **JAIX 슬랙 권한 갱신**과 같음). 원내망에서 한다. 브라우저에 Slack 허용 화면이 뜨면 **본인 계정인지 확인하고 사용자가 직접 '허용'** 을 누른다(10분 안에). 관리자나 AI가 대신 누를 수 없다(권한의 주인이 바뀐다). 받은 뒤에도 봇이 보내기·올리기를 할 때는 매번 확인을 받는다. 끄려면 Slack 앱 관리에서 'JAIX Slack 연결' 권한을 취소한다.
+- **이 PC 에서 봇 빼기**: `jaix hermes remove`. 이 PC 의 봇을 멈추고, 로그온 자동 시작과 이 PC 의 슬랙 토큰·연결 기록을 지운다. Slack 앱, 다른 PC 의 봇, Hermes 프로그램·대화 기록·AI 구독 로그인은 그대로 둔다. 먼저 `--dry-run` 으로 할 일을 보여 주고, 사용자가 좋다고 하면 `--yes` 로 실행한다. 다시 쓰려면 AI센터에서 새 연결 코드를 받아 jaix-setup 을 다시 한다.
 
 슬랙(Hermes)에서 부를 때: `jaix connect` 의 입력 창은 사용자 PC 화면에 뜬다. 사용자가 PC 앞에 있는지 먼저 묻는다.
