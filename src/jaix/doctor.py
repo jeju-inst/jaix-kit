@@ -577,6 +577,11 @@ def check_hermes_bot():
         if slash and slash != want:
             out.append(Check("warn", area, f"슬래시 명령 /{slash} 가 연결 기록(Hermes-{slack.get('id')})과 다름 — "
                                            f"/{want} 가 '앱이 반응하지 않음'으로 실패함", f"jaix hermes rename {slack.get('id')}"))
+    state, missing = hermesbot.user_scope_gap()  # 내 Slack 권한(slack-access)을 받은 PC 만. 오프라인이면 조용히 넘김
+    if hermesbot.scope_notice(state, missing):
+        what = ("Slack 이 내 Slack 권한(사용자 토큰)을 받지 않음" if state == "invalid"
+                else f"내 Slack 권한에 새 도구 범위 {len(missing)}개 없음({', '.join(missing)}) — 다시 허용해야 새 도구가 동작함")
+        out.append(Check("warn", area, what, "jaix hermes slack-access 를 다시 하세요(시작 메뉴 'JAIX 슬랙 권한 갱신')"))
     if hermesbot.approval_mode() == "off":
         out.append(Check("warn", area, "위험 명령 승인이 꺼져 있음(approvals.mode: off) — 에이전트가 묻지 않고 실행함",
                          "AI센터가 켠 것이 아니면 jaix hermes approvals smart"))

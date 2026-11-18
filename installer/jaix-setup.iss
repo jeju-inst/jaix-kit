@@ -79,6 +79,10 @@ Name: "{autoprograms}\JAIX 도우미"; Filename: "{app}\jaix\jaix.exe"; Paramete
 ; Hermes AI 구독 로그인을 설치 뒤에도 다시 할 수 있게. 사용자가 탐색기에서 여는 것이라 설치기의 자식이 아니다
 Name: "{autoprograms}\JAIX Hermes 로그인"; Filename: "{app}\jaix\jaix.exe"; Parameters: "hermes login --model {code:HermesModelArg}"; \
   Comment: "Hermes 가 쓸 AI 구독에 로그인(브라우저에서 승인)"; Check: HermesChosen
+; 내 Slack 권한(사용자 토큰) 다시 허용: 슬랙 도구가 늘어 범위가 바뀌면 본인이 다시 허용해야 한다(관리자 대신 불가 —
+; 토큰 주인이 바뀜). cmd /K 로 띄워 끝난 뒤 결과를 읽을 수 있게 창을 남긴다. 슬랙 연결 안 된 PC 는 안내문만 나온다
+Name: "{autoprograms}\JAIX 슬랙 권한 갱신"; Filename: "{cmd}"; Parameters: "/K ""{app}\jaix\jaix.exe"" hermes slack-access"; \
+  Comment: "내 봇이 쓰는 내 Slack 권한을 브라우저에서 다시 허용(새 슬랙 도구가 생겼을 때)"; Check: HermesChosen
 
 [Registry]
 ; jaix.exe 자체를 사용자 PATH에. 런타임 폴더(bin·git·jre)는 jaix setup이 넣고, 예전 설치본이 넣은 {app} 항목도 뺀다
