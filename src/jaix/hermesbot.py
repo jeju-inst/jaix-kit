@@ -1133,6 +1133,75 @@ def bot_room(hermes, ident, log, call=None):
     return ok
 
 
+def _yaml_mcp_entry(text, name):
+    """config.yaml 의 mcp_servers.<name> 을 {"command": …, "args": […]} 또는 {"url": …} 로(블록 매핑만, 스칼라는 통째로 읽음).
+    command·args·url 말고 다른 키(env 등)가 있거나, 흐름 매핑·블록 스칼라·따옴표 섞인 흐름 목록처럼 모르는 모양이면 None — 부르는 쪽은 다르다고 보고 다시 넣는다."""
+    sec = re.search(r"^mcp_servers\s*:[^\n]*\n((?:[ \t]+[^\n]*\n?|[ \t]*\n)*)", text, re.M)
+    if not sec:
+        return None
+    body = sec.group(1)
+    m = re.search(rf"""^([ \t]+)["']?{re.escape(name)}["']?\s*:[ \t]*(#[^\n]*)?$""", body, re.M)
+    if not m:
+        return None
+    indent = len(m.group(1))
+    lines = []
+    for line in body[m.end():].splitlines()[1:]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        lines.append(line)
+    if not lines:
+        return None
+    depth = lambda l: len(l) - len(l.lstrip())
+    child = depth(lines[0])
+    out, i = {}, 0
+    while i < len(lines):
+        line = lines[i]
+        km = re.match(r"""\s*["']?([A-Za-z_]+)["']?\s*:(?:\s+(.*))?$""", line)
+        if depth(line) != child or not km or km.group(1) in out:
+            return None
+        key, value = km.group(1), (km.group(2) or "").strip()
+        i += 1
+        more = []
+        while i < len(lines) and (depth(lines[i]) > child or (depth(lines[i]) == child and lines[i].lstrip().startswith("- "))):
+            more.append(lines[i])
+            i += 1
+        if key in ("command", "url"):
+            if not value or value[0] in "|>[{&*!" or more:
+                return None
+            out[key] = _unquote(value)
+        elif key == "args":
+            if value.startswith("[") and value.endswith("]") and not more:
+                inner = value[1:-1].strip()
+                if any(q in inner for q in "'\"[]{}"):
+                    return None
+                out[key] = [p.strip() for p in inner.split(",")] if inner else []
+            elif not value and all(l.lstrip().startswith("- ") for l in more):
+                items = [l.lstrip()[2:].strip() for l in more]
+                if any(not v or v[0] in "|>[{&*!" for v in items):
+                    return None
+                out[key] = [_unquote(v) for v in items]
+            else:
+                return None
+        else:
+            return None
+    return out or None
+
+
+def _mcp_same(text, name, spec):
+    """config.yaml 에 이미 spec 과 같은 값이 있는지. 못 읽거나 애매하면 False(다시 넣는 쪽이 안전하다)."""
+    try:
+        if codex.is_remote(spec):
+            # _yaml_mcp_url 은 쉼표에서 끊으므로 비교에는 스칼라 전체를 읽는 쪽을 쓴다(흐름 매핑 등은 None → 다시 넣음)
+            return _yaml_mcp_entry(text, name) == {"url": spec["url"]}
+        if spec.get("env"):
+            return False
+        return _yaml_mcp_entry(text, name) == {"command": spec["command"], "args": list(spec["args"])}
+    except Exception:  # noqa: BLE001 — 비교는 최적화일 뿐, 실패하면 지금처럼 set
+        return False
+
+
 def write_mcp(hermes, log, put=None, lock=None):
     """jaix가 Codex에 쓴 stdio MCP 항목(codex-mcp.json)과 잠금의 원격 HTTP MCP 항목을 Hermes 에 넣는다.
     import-agent 는 항목을 고를 수 없어 쓰지 않는다(jaix-win Q9). 이미 같은 이름이 있으면 jaix가 넣은 것(기록)일
@@ -1159,7 +1228,13 @@ def write_mcp(hermes, log, put=None, lock=None):
         else:
             value = json.dumps({"command": spec["command"], "args": spec["args"],
                                 **({"env": spec["env"]} if spec.get("env") else {})}, ensure_ascii=False)
-        if (put or _Setter(hermes, log))(f"mcp_servers.{name}", value, ["config", "set", f"mcp_servers.{name}", value]):
+        key = f"mcp_servers.{name}"
+        put_one = put or _Setter(hermes, log)
+        if _mcp_same(text, name, spec):  # 이미 같은 값 — 다시 쓰지 않고 '넣음'으로도 찍지 않는다(jaix-kit#174)
+            owned[name] = spec
+            put_one.applied[key] = value
+            log(f"    MCP {name}: 그대로(이미 같은 값)")
+        elif put_one(key, value, ["config", "set", key, value]):
             owned[name] = spec
             log(f"    MCP {name}: 넣음")
         else:

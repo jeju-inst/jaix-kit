@@ -3992,6 +3992,53 @@ def test_codex_writes_remote_mcp_with_url(isolated, monkeypatch, the_lock):
     assert any(c.status == "ok" and c.area == "Codex MCP" for c in doctor.check_codex(the_lock))
 
 
+def test_hermes_mcp_same_value_not_rewritten(isolated, monkeypatch):
+    """jaix-kit#174: config.yaml 에 이미 같은 값이 있으면 _Setter 기억이 없어도(지문 바뀜) 다시 set 하지 않고 '그대로'로 찍는다."""
+    calls, lines = [], []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    monkeypatch.setattr(hermesbot.remotemcp, "recorded", lambda: {"cal": {"url": REMOTE_URL}})
+    rec = codex._mcp_record()
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(json.dumps({"hwp-agent": {"command": "C:\\u\\hwp-agent.exe", "args": ["mcp"], "env": {}},
+                               "korea-rio": {"command": "uvx", "args": ["--python", "3.12", "y"], "env": {}},
+                               "new-one": {"command": "uvx", "args": ["n"], "env": {}},
+                               "with-env": {"command": "uvx", "args": ["e"], "env": {"A": "b"}}}), encoding="utf-8")
+    hermesbot._save_record({"mcp": {"hwp-agent": {}, "korea-rio": {}, "cal": {}, "with-env": {}}})
+    cfg = hermesbot.config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("model:\n  provider: x\nmcp_servers:\n"
+                   "  hwp-agent:\n    command: C:\\u\\hwp-agent.exe\n    args:\n    - mcp\n"
+                   "  korea-rio:\n    command: uvx\n    args:\n    - --python\n    - '3.12'\n    - old\n"
+                   f"  cal:\n    url: {REMOTE_URL}\n"
+                   "  with-env:\n    command: uvx\n    args: [e]\n    env:\n      A: b\n", encoding="utf-8")
+    put = hermesbot._Setter("hermes", lines.append)
+    assert hermesbot.write_mcp("hermes", lines.append, put)
+    assert [c[3] for c in calls] == ["mcp_servers.korea-rio", "mcp_servers.new-one", "mcp_servers.with-env"]
+    assert "    MCP hwp-agent: 그대로(이미 같은 값)" in lines and "    MCP cal: 그대로(이미 같은 값)" in lines
+    assert "    MCP hwp-agent: 넣음" not in lines and "    MCP korea-rio: 넣음" in lines and "    MCP new-one: 넣음" in lines
+    assert {"mcp_servers.hwp-agent", "mcp_servers.cal"} <= set(put.applied)   # 기억은 채운다
+    assert set(hermesbot.recorded()["mcp"]) == {"hwp-agent", "korea-rio", "cal", "new-one", "with-env"}
+
+
+def test_hermes_yaml_mcp_entry_reads_only_known_shapes():
+    text = ("mcp_servers:\n  a:\n    command: uvx\n    args: [x, y]\n  b:\n    command: \"uvx\"\n    args:\n    - 'x'\n"
+            "  c: {command: uvx}\n  d:\n    command: uvx\n    env:\n      K: v\n  e:\n    command: uvx\n    args: ['x, y']\n"
+            "  f:\n    args:\n    - x\n")
+    assert hermesbot._yaml_mcp_entry(text, "a") == {"command": "uvx", "args": ["x", "y"]}
+    assert hermesbot._yaml_mcp_entry(text, "b") == {"command": "uvx", "args": ["x"]}
+    for name in ("c", "d", "e", "zz"):   # 흐름 매핑·다른 키·따옴표 섞인 흐름 목록·없는 항목
+        assert hermesbot._yaml_mcp_entry(text, name) is None, name
+    assert not hermesbot._mcp_same(text, "f", {"command": "uvx", "args": ["x"]})   # command 없음 → 다름
+    assert not hermesbot._mcp_same(text, "a", {"command": "uvx", "args": ["x", "y"], "env": {"K": "v"}})
+    # 원격: url 스칼라 전체를 비교한다(쉼표 뒤가 다르면 다른 값). 흐름 매핑은 못 읽음 → 다시 넣음
+    url = "https://c.example.org/mcp"
+    remote = f"mcp_servers:\n  r:\n    url: '{url},old'\n  s:\n    url: \"{url}\"\n  t: {{url: {url}}}\n"
+    assert not hermesbot._mcp_same(remote, "r", {"url": url})
+    assert hermesbot._mcp_same(remote, "s", {"url": url})
+    assert not hermesbot._mcp_same(remote, "t", {"url": url})
+    assert hermesbot._mcp_same(text, "a", {"command": "uvx", "args": ["x", "y"], "env": {}})
+
+
 def test_hermes_gets_remote_mcp_without_codex(isolated, monkeypatch, the_lock):
     """Hermes 만 고른 PC: Codex 기록이 없어도 잠금의 원격 MCP 는 들어간다. 사용자 항목은 그대로."""
     calls = []
