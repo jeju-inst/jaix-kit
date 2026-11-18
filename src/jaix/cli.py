@@ -391,29 +391,6 @@ def cmd_helper(args, log):
     return helper.run(log)
 
 
-def _win_console_mode(fd):
-    """fd 가 진짜 콘솔 입력인지 — GetConsoleMode 는 콘솔 핸들에서만 성공한다(NUL·파이프·파일은 실패)."""
-    import ctypes
-    import msvcrt
-    mode = ctypes.c_ulong()
-    return bool(ctypes.windll.kernel32.GetConsoleMode(ctypes.c_void_p(msvcrt.get_osfhandle(fd)), ctypes.byref(mode)))
-
-
-def at_console(stdin=None, stdout=None):
-    """사람이 앞에 있는 콘솔에서 돌고 있어 [Y/n] 를 물어도 되는지. isatty() 만으로는 안 된다 —
-    Windows 에서는 NUL 도 문자 장치라 True 다(#180: `jaix update < NUL` 이 슬랙 권한을 묻고 그 판의 한 번 기회를 씀).
-    Windows 는 stdin 의 GetConsoleMode 가 성공해야, 다른 OS 는 stdin 이 tty 여야 한다. 묻는 글이 보이도록 stdout 도 tty 여야 한다.
-    판정이 실패하면 묻지 않는다."""
-    stdin = sys.stdin if stdin is None else stdin
-    stdout = sys.stdout if stdout is None else stdout
-    try:
-        if not (stdin and stdout and stdin.isatty() and stdout.isatty()):
-            return False
-        return _win_console_mode(stdin.fileno()) if paths.IS_WIN else True
-    except Exception:  # ctypes·msvcrt 없음, fileno 없음(바꿔 끼운 스트림) 등
-        return False
-
-
 def cmd_update(args, log):
     if getattr(args, "self_update", False):  # jaix update --self: 본체(설치본) 업데이트만
         return selfupdate.cmd_self(args, log)
@@ -422,10 +399,10 @@ def cmd_update(args, log):
         problems = _update(args, log)
         if not args.dry_run:  # 손으로 고친 결과도 남겨야 doctor 가 지난 로그온 실패를 계속 보이지 않는다
             schedule.write_status(problems)
-            _slack_scope(log, offer=at_console() and not selfupdate.headless())
+            _slack_scope(log, offer=paths.at_console() and not selfupdate.headless())
         if selfupdate.applies() and not args.offline and not args.dry_run:
             state = selfupdate.check()
-            if state.get("newer") and at_console():  # 시작 메뉴 'JAIX 업데이트' 창 — 그 자리에서 묻는다
+            if state.get("newer") and paths.at_console():  # 시작 메뉴 'JAIX 업데이트' 창 — 그 자리에서 묻는다
                 log("")
                 selfupdate.cmd_self(argparse.Namespace(yes=False), log)
             elif state.get("newer"):

@@ -3725,39 +3725,39 @@ def test_at_console_windows_nul_is_not_console(monkeypatch):
     nul = _Tty(True)
     assert nul.isatty()  # 옛 판정(sys.stdin.isatty())이라면 여기서 물었다
     monkeypatch.setattr(cli.paths, "IS_WIN", True)
-    monkeypatch.setattr(cli, "_win_console_mode", lambda fd: False)
-    assert cli.at_console(nul, _Tty(True)) is False
-    monkeypatch.setattr(cli, "_win_console_mode", lambda fd: True)  # 시작 메뉴 'JAIX 업데이트' 창
-    assert cli.at_console(nul, _Tty(True)) is True
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: False)
+    assert cli.paths.at_console(nul, _Tty(True)) is False
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: True)  # 시작 메뉴 'JAIX 업데이트' 창
+    assert cli.paths.at_console(nul, _Tty(True)) is True
 
 
 @pytest.mark.parametrize("error", [OSError("handle"), AttributeError("windll"), ImportError("msvcrt")])
 def test_at_console_windows_check_failure_does_not_ask(monkeypatch, error):
     monkeypatch.setattr(cli.paths, "IS_WIN", True)
-    monkeypatch.setattr(cli, "_win_console_mode", lambda fd: (_ for _ in ()).throw(error))
-    assert cli.at_console(_Tty(True), _Tty(True)) is False
-    assert cli.at_console(_Tty(True, fileno=None), _Tty(True)) is False
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: (_ for _ in ()).throw(error))
+    assert cli.paths.at_console(_Tty(True), _Tty(True)) is False
+    assert cli.paths.at_console(_Tty(True, fileno=None), _Tty(True)) is False
 
 
 @pytest.mark.parametrize("stdin,stdout,want", [(True, True, True), (False, True, False), (True, False, False)])
 def test_at_console_posix_needs_both_ttys(monkeypatch, stdin, stdout, want):
     monkeypatch.setattr(cli.paths, "IS_WIN", False)
-    monkeypatch.setattr(cli, "_win_console_mode", lambda fd: pytest.fail("Windows 판정을 부름"))
-    assert cli.at_console(_Tty(stdin), _Tty(stdout)) is want
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: pytest.fail("Windows 판정을 부름"))
+    assert cli.paths.at_console(_Tty(stdin), _Tty(stdout)) is want
 
 
 @pytest.mark.skipif(not cli.paths.IS_WIN, reason="Windows 콘솔 API")
 def test_win_console_mode_rejects_nul():
     with open(os.devnull, "rb") as nul:
         assert nul.isatty()  # 문자 장치라 True — 옛 판정이 속던 지점
-        assert cli._win_console_mode(nul.fileno()) is False
+        assert cli.paths._win_console_mode(nul.fileno()) is False
 
 
 def test_update_with_nul_stdin_on_windows_asks_nothing(isolated, monkeypatch):
     """`jaix update < NUL`: 슬랙 권한도, 본체 새 판도 묻지 않는다(그 판의 한 번 기회를 쓰지 않음)."""
     monkeypatch.setattr(cli, "_update", lambda args, log: [])
     monkeypatch.setattr(cli.paths, "IS_WIN", True)
-    monkeypatch.setattr(cli, "_win_console_mode", lambda fd: False)
+    monkeypatch.setattr(cli.paths, "_win_console_mode", lambda fd: False)
     monkeypatch.setattr(cli.sys, "stdin", _Tty(True))
     monkeypatch.setattr(cli.sys, "stdout", _Tty(True))
     monkeypatch.setattr(cli.selfupdate, "headless", lambda: False)
