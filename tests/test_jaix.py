@@ -948,6 +948,37 @@ def test_npm_shim_runs_node_directly(tmp_path, monkeypatch):
         str(tmp_path / "node.exe"), str(script), "mcp", "add", "x", "--", "mcp>=1.2,<2"]
 
 
+def test_hermes_cmd_launcher_runs_python_directly(tmp_path, monkeypatch):
+    """#188: Hermes 가 hermes.exe 대신 쓴 hermes.cmd(hermes_cli/_launchers.py) — MCP JSON 값이 cmd 를 거치지 않는다."""
+    monkeypatch.setattr(proc, "IS_WIN", True)
+    py = tmp_path / "py store" / "python.exe"
+    py.parent.mkdir()
+    py.write_text("", encoding="utf-8")
+    code = "import base64; exec(base64.b64decode('cHJpbnQoMSk='))"
+    cli = tmp_path / "hermes.CMD"
+    cli.write_text(f'@echo off\r\n"{py}" -I -c "{code}" %*\r\n', encoding="utf-8")
+    value = '{"command": "C:\\uvx.exe", "args": ["--with", "mcp>=1.2,<2", "hwp-agent", "mcp"]}'
+    assert proc.command(str(cli), ["config", "set", "mcp_servers.hwp-agent", value]) == [
+        str(py), "-I", "-c", code, "config", "set", "mcp_servers.hwp-agent", value]
+    py.unlink()  # 래퍼가 가리키는 python 이 없으면 직접 부르지 않는다(인용한 cmd 명령줄로)
+    assert isinstance(proc.command(str(cli), ["config", "set", "k", "v"]), str)
+
+
+def test_hermesbot_run_goes_through_proc_command(tmp_path, monkeypatch):
+    """#188: hermesbot._run 도 proc.command 를 거치고, cmd 오류 문구(cp949)를 읽을 수 있게 bytes 로 받는다."""
+    seen = {}
+    monkeypatch.setattr(hermesbot.proc, "command", lambda cli, args: ["direct", cli, *args])
+
+    def fake_run(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return subprocess.CompletedProcess(cmd, 1, b"", "실패".encode("utf-8"))
+    monkeypatch.setattr(hermesbot.subprocess, "run", fake_run)
+    lines = []
+    ok, out = hermesbot._run(["hermes.CMD", "config", "set", "k", "v"], lines.append)
+    assert seen["cmd"] == ["direct", "hermes.CMD", "config", "set", "k", "v"] and "text" not in seen["kw"]
+    assert not ok and out == "실패" and "→ 코드 1" in lines[0]
+
+
 def test_quote_roundtrips_msvcrt_rules():
     assert proc._quote("plain") == "plain"
     assert proc._quote("mcp<2") == '"mcp<2"'
