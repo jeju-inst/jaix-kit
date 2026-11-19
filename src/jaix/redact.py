@@ -16,9 +16,11 @@ _GITHUB = re.compile(r"\b(gh[pousr]|github_pat)_[A-Za-z0-9_]{16,}")
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*")
 # `token: x`·`"api_key": "x"`·`password=x` — 이름은 두고 값만. `Authorization: Bearer x` 는 Bearer 뒤를
 _NAMED = re.compile(r"""(?ix)
-    (\b[\w.-]*(?:token|secret|password|passwd|api[_-]?key|cookie|credential)[\w.-]*["']?\s*[:=]\s*)
-    (?:(["'])((?:\\.|(?!\2).)*)\2      # 따옴표 값: 닫는 따옴표까지 통째로(공백 포함, Codex #189 P1)
-     |([^\s"',}]+))                  # 따옴표 없는 값: 공백 전까지""")
+    (\b[\w.-]*(?:token|secret|password|passwd|api[_-]?key|cookie|credential)[\w.-]*(?:\\?["'])?\s*[:=]\s*)
+    (?:(\\?["'])((?:(?!\2)(?:\\.|.))*)\2  # 따옴표 값(JSON 안의 \" 포함): 닫는 따옴표까지 통째로(Codex #189 P1)
+     |((?:[^\s"',}\\]|\\(?!["']))+))      # 따옴표 없는 값: 공백(또는 JSON 의 \" ) 전까지""")
+# 비밀이 아닌 것으로 두는 값: 가림 표시 자체와 완전한 자리표시(%VAR%·<값>)만(Codex #189 P1)
+_PLACEHOLDER = re.compile(r"\*\*\*|%[A-Za-z_][A-Za-z0-9_]*%|<[^<>\s]+>")
 _BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
 # 경로 구분자(/)는 넣지 않는다 — 긴 경로가 통째로 가려지지 않게
 _LONG = re.compile(r"(?<![A-Za-z0-9_\-+=])[A-Za-z0-9_\-+=]{32,}(?![A-Za-z0-9_\-+=])")
@@ -39,7 +41,7 @@ def _long(m):
 
 def _named(m):
     quote, value = m.group(2) or "", m.group(3) if m.group(2) else m.group(4)
-    if not value or value == MASK or value.startswith(("%", "*", "<")):  # 빈 값·이미 가림·자리표시(%VAR%·<값>)
+    if not value or _PLACEHOLDER.fullmatch(value):
         return m.group(0)
     return f"{m.group(1)}{quote}{MASK}{quote}"
 
@@ -50,6 +52,18 @@ def _home_dirs():
     except (RuntimeError, KeyError):
         return []
     return [home, home.replace("\\", "/"), home.replace("\\", "\\\\")] if len(home) > 3 else []
+
+
+def redact_json(obj):
+    """JSON 으로 내보낼 값의 문자열을 하나하나 가린다. 직렬화하면 따옴표가 \\" 로 바뀌어 이름 붙은 비밀을 놓칠 수
+    있으므로(Codex #189 P1) 직렬화 전에 가린다."""
+    if isinstance(obj, str):
+        return redact(obj)
+    if isinstance(obj, dict):
+        return {k: redact_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [redact_json(v) for v in obj]
+    return obj
 
 
 def redact(text):

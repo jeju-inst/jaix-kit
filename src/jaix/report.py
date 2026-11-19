@@ -11,7 +11,7 @@ import re
 import sys
 
 from jaix import __version__, connect, doctor, hermesbot, paths, schedule
-from jaix.redact import redact
+from jaix.redact import redact, redact_json
 
 LOG_TAIL = 400  # 기록 파일은 끝의 이만큼만 본다(최근 실행)
 CONTEXT = 3  # 실패 줄 앞뒤로 함께 싣는 줄 수
@@ -75,8 +75,8 @@ def build(lock, now=None, hermes_version=None, checks=None, statuses=None):
     try:
         checks = doctor.run(lock) if checks is None else checks
         failed = any(c.status == "fail" for c in checks)
-        doc = json.dumps({"version": __version__, "lock": lock.source, "ok": not failed,
-                          "checks": doctor.as_dicts(checks)}, ensure_ascii=False, indent=2)
+        doc = json.dumps(redact_json({"version": __version__, "lock": lock.source, "ok": not failed,
+                                      "checks": doctor.as_dicts(checks)}), ensure_ascii=False, indent=2)
     except Exception as e:  # noqa: BLE001
         doc = f"doctor 를 돌리지 못함: {type(e).__name__}: {e}"
     out += _section("jaix doctor --json", doc)
@@ -100,7 +100,7 @@ def build(lock, now=None, hermes_version=None, checks=None, statuses=None):
 
     last = schedule.last_status()
     if last:
-        out += _section("마지막 갱신 상태(update-status.json)", json.dumps(last, ensure_ascii=False))
+        out += _section("마지막 갱신 상태(update-status.json)", json.dumps(redact_json(last), ensure_ascii=False))
 
     for name, path in (("setup.log", paths.data_dir() / "setup.log"), ("update.log", schedule.log_file())):
         text = _read(path)

@@ -34,6 +34,12 @@ def isolated(tmp_path, monkeypatch):
     ('password="my secret value" next', ["my", "secret", "value"], ['password="***" next']),  # 따옴표 값은 통째로(Codex #189)
     ("pw: password='correct horse battery staple'", ["horse", "battery", "staple"], ["password='***'"]),
     ('password="ab"', ['"ab"'], ['password="***"']),  # 짧아도
+    ('password="*Secret123!"', ["Secret123"], ['password="***"']),  # 자리표시처럼 시작해도 진짜 값(Codex #189)
+    ("password=%Secret123!", ["Secret123"], ["password=***"]),
+    ("password=<Secret1", ["Secret1"], ["password=***"]),
+    (r"password=ab\cd ef", [r"ab\cd"], ["password=*** ef"]),
+    ('{"error": "{\\"password\\": \\"hunter22\\"}"}', ["hunter22"], ['\\"***\\"']),  # JSON 안의 \"
+
     ('api_key="a\\"b c" z', ['b c'], ['api_key="***" z']),  # 이스케이프된 따옴표를 넘어서
 
     ("Authorization: Bearer abc.def-ghi12345", ["abc.def-ghi12345"], ["Bearer ***"]),
@@ -62,6 +68,7 @@ def test_redact_hides_secrets_and_identities(raw, gone, kept):
     "CONNECTED READY STATUS DEFAULT",
     "token expired — 다시 로그인",  # 토큰이라는 말만 있고 값이 없다
     "C:\\Program Files\\jaix\\jaix.exe",
+    "password=%SLACK_PASSWORD% · token=<값> · password=***",  # 완전한 자리표시·가림 표시
 ])
 def test_redact_keeps_what_diagnosis_needs(text):
     assert redact(text) == text
@@ -120,6 +127,16 @@ def test_report_collects_everything_and_redacts(isolated, monkeypatch, capsys):
         assert part in text, part
     assert "secretXYZ" not in text and "홍길동" not in text and "xoxb-***" in text
     assert text.rstrip() in out and "저장:" in out and "요약하지 말고" in out
+
+
+def test_report_redacts_inside_json_sections(isolated):
+    """doctor JSON·update-status 는 직렬화 전에 가린다 — 직렬화하면 따옴표가 \\" 가 되어 놓칠 수 있다(Codex #189)."""
+    isolated.joinpath("jaix_data").mkdir(parents=True, exist_ok=True)
+    schedule.status_file().write_text(json.dumps({"ok": False, "error": '{"password": "hunter22"}'}), encoding="utf-8")
+    checks = [doctor.Check("fail", "x", 'auth failed: {"api_key": "sekret99"}', detail=['token="a b c"'])]
+    text = redact(report.build(type("L", (), {"source": "s", "plugins": []})(), checks=checks, statuses=[],
+                               hermes_version="없음"))
+    assert "hunter22" not in text and "sekret99" not in text and '"a b c' not in text
 
 
 def test_report_survives_broken_parts(isolated, monkeypatch):
