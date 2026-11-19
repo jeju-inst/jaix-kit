@@ -468,7 +468,7 @@ begin
     Log('결과 상자 건너뜀(JAIXNOBOX)')
   else if SetupFailed then
     SuppressibleMsgBox('JAIX {#AppVer} 로 바꿨지만 도구 등록 중 문제가 있었습니다.' + #13#10 +
-      '명령창에서 jaix doctor 를 실행해 결과를 AI센터에 보내 주세요.', mbError, MB_OK, IDOK)
+      '명령창에서 jaix report 를 실행해 출력을 그대로 AI센터에 보내 주세요.', mbError, MB_OK, IDOK)
   else
     SuppressibleMsgBox('JAIX {#AppVer} 로 업데이트했습니다.', mbInformation, MB_OK, IDOK);
 end;
@@ -532,7 +532,7 @@ begin
   else
     GuidePage.RichEditViewer.Lines.Text :=
       '도구 등록 중 문제가 있었습니다 (코드 ' + IntToStr(ResultCode) + ').' + #13#10 +
-      '명령창에서 jaix doctor 를 실행해 결과를 AI센터에 보내 주세요.' + #13#10 +
+      '명령창에서 jaix report 를 실행해 출력을 그대로 AI센터에 보내 주세요.' + #13#10 +
       '기록: ' + LogFile + #13#10 + #13#10 + Guide;
   if ResultCode <> 0 then
   begin

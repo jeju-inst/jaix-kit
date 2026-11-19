@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from jaix import codex, hermes as skills, net, paths, remotemcp, secret, uvpython
+from jaix import codex, hermes as skills, net, paths, redact, remotemcp, secret, uvpython
 from jaix.paths import IS_WIN
 
 INSTALL_PS1 = "https://hermes-agent.nousresearch.com/install.ps1"
@@ -280,6 +280,63 @@ def _child_env():
     return env
 
 
+# --- 실패 원인 기록(jaix-kit#188) ------------------------------------------------------------------
+# setup·update 한 번 동안 실패한 단계(설정 키·명령·종료 코드·출력 끝 줄)를 모아 hermes.json 의 error_detail 에 남긴다.
+# doctor 가 실패 줄 아래에 보이고 `jaix report` 가 싣는다. 명령의 값(설정 값·비밀 파일)은 싣지 않고, 출력은 가린다.
+FAILURE_LIMIT = 6
+TAIL_LINES = 8
+_failures = []
+
+
+def _cmd_label(cmd):
+    """기록용 명령 이름: 실행 파일 이름과 앞 인자 몇 개. `config set <키> <값>` 은 값을 빼고, 경로는 파일 이름만."""
+    args = [str(a) for a in cmd[1:]]
+    keep = args[:3] if args[:2] == ["config", "set"] else args[:2]
+    keep = [Path(a).name if ("/" in a or "\\" in a) else a for a in keep]
+    return redact.redact(" ".join([Path(str(cmd[0])).name, *keep]))
+
+
+def _note_failure(**entry):
+    for k in ("tail", "note"):
+        if entry.get(k):
+            entry[k] = redact.redact(entry[k])
+    _failures.append({k: v for k, v in entry.items() if v not in (None, "")})
+    del _failures[:-FAILURE_LIMIT * 2]
+
+
+def reset_failures():
+    _failures.clear()
+
+
+def failure_detail():
+    """지금까지 모은 실패 중 마지막 FAILURE_LIMIT 개(일어난 순서). 없으면 []."""
+    return [dict(f) for f in _failures[-FAILURE_LIMIT:]]
+
+
+def failure_summary(detail=None):
+    """한 줄 요약: `mcp_servers.korea-rio(코드 1)` 처럼. update 문제 줄·doctor 에 붙인다."""
+    parts = []
+    for f in (failure_detail() if detail is None else detail):
+        what = f.get("key") or f.get("step") or f.get("cmd") or "?"
+        code = f.get("code")
+        parts.append(f"{what}({'코드 ' + str(code) if isinstance(code, int) else code})" if code not in (None, "") else what)
+    return ", ".join(dict.fromkeys(parts))
+
+
+def detail_lines(detail, tail=None):
+    """doctor·report 용 여러 줄(들여쓰기 없음). tail 이면 출력 끝 줄을 그만큼만."""
+    out = []
+    for f in detail or []:
+        head = " · ".join(x for x in (f.get("step"), f.get("key") and f"키 {f['key']}", f.get("cmd") and f"명령 {f['cmd']}",
+                                       f.get("code") not in (None, "") and f"코드 {f['code']}") if x)
+        out.append(head or "실패")
+        if f.get("note"):
+            out.append(f"  {f['note']}")
+        lines = (f.get("tail") or "").splitlines()
+        out += [f"  | {ln}" for ln in (lines[-tail:] if tail else lines)]
+    return out
+
+
 def _run(cmd, log, timeout=600):
     """출력은 기록에 남기되 끝 몇 줄만. 표준 입력은 주지 않는다(대화형 질문은 기본값으로 지나감)."""
     try:
@@ -287,11 +344,15 @@ def _run(cmd, log, timeout=600):
                            stdin=subprocess.DEVNULL, env=_child_env(), creationflags=paths.NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"    {Path(cmd[0]).name}: {type(e).__name__}")
+        # str(TimeoutExpired) 는 명령 줄 전체(값 포함)를 담는다 — 싣지 않는다
+        why = f"{timeout}초 안에 끝나지 않음" if isinstance(e, subprocess.TimeoutExpired) else (e.strerror or "")
+        _note_failure(cmd=_cmd_label(cmd), code=type(e).__name__, note=why)
         return False, ""
     out = (r.stdout or "") + (r.stderr or "")
     if r.returncode != 0:
-        tail = "\n".join(out.strip().splitlines()[-8:])
+        tail = "\n".join(out.strip().splitlines()[-TAIL_LINES:])
         log(f"    {Path(cmd[0]).name} {' '.join(cmd[1:3])} → 코드 {r.returncode}\n{tail}")
+        _note_failure(cmd=_cmd_label(cmd), code=r.returncode, tail=tail)
     return r.returncode == 0, out
 
 
@@ -308,6 +369,8 @@ def install_hermes(log, dry_run=False):
         ok, _ = _run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
                       "-NonInteractive", "-SkipBrowser", "-SkipComputerUse"], log, timeout=INSTALL_TIMEOUT)
     if not (ok and find_hermes()):
+        if ok:
+            _note_failure(step="Hermes 설치", note="설치 스크립트는 끝났으나 hermes 실행 파일을 찾지 못함")
         log("    Hermes 설치 실패 — 위 기록을 AI센터에 보내 주세요")
         return False
     return True
@@ -406,11 +469,16 @@ class _Setter:
                 self.log(f"    config.yaml 백업: {saved.name}")
             self.backed_up = True
         self.ran += 1
+        before = len(_failures)
         ok = _run([self.hermes, *args], self.log)[0]
         if ok:
             self.applied[key] = value
         else:
             self.applied.pop(key, None)
+            if len(_failures) > before:  # _run 이 명령·코드·출력을 남겼다 — 어느 설정 키였는지 붙인다
+                _failures[-1].setdefault("key", key)
+            else:
+                _note_failure(key=key, cmd=_cmd_label([self.hermes, *args]))
         return ok
 
     def save(self):
@@ -883,7 +951,9 @@ def quiet(hermes, log):
     ident = (rec.get("slack") or {}).get("id")
     if ident:  # 이미 연결된 PC(jaix update·재설치). 처음 연결은 setup() 이 connect_slack 뒤에 부른다
         refresh_kit(hermes, ident, log)  # 실패해도 막지 않는다(다음 update 때 다시)
-        ok &= bot_room(hermes, ident, log)
+        if not bot_room(hermes, ident, log):
+            _note_failure(step="전용 채널(bot_room)", note="위 기록의 '전용 채널' 줄 참고")
+            ok = False
     return ok
 
 
@@ -1310,6 +1380,7 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
     # 이미 연결된 PC 에서 다시 설치(새 판 덮어 설치·같은 코드 재입력)해도 연결 기록을 잃지 않게 기억해 둔다(jaix-win 2차 12)
     linked = linked_id(rec)
     rec.update({"model": model, "status": "installing"})
+    reset_failures()
     if not dry_run:
         _save_record(rec)
     # 코드 파일은 무엇보다 먼저 읽고 지운다(아래 단계가 실패해도 디스크에 남지 않게)
@@ -1358,14 +1429,21 @@ def _done(result, dry_run, linked=None, log=None):
     돌려주되(설치기 종료 코드 10), 기록은 connected 로 두고 last_error 만 남긴다 — 봇은 그대로 돌기 때문이다."""
     if not dry_run:
         rec = recorded()
+        detail = failure_detail() if result["status"] == "failed" else []
+        for k in ("error_detail", "last_error_detail"):
+            rec.pop(k, None)
         if linked and result["status"] == "failed":
             rec["status"], rec["error"], rec["last_error"] = "connected", None, result.get("error")
+            if detail:
+                rec["last_error_detail"] = detail
             result["kept"] = linked
             if log:
                 log(f"    기존 연결 Hermes-{linked} 는 그대로 둡니다")
         else:
             rec["status"], rec["error"] = result["status"], result.get("error")
             rec.pop("last_error", None)
+            if detail:
+                rec["error_detail"] = detail
         _save_record(rec)
     return result
 
