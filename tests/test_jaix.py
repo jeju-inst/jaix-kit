@@ -4128,3 +4128,62 @@ def test_remote_mcp_state_hermes_needs_same_url(isolated, monkeypatch, the_lock)
     assert st["missing"] == ["Hermes(다른 항목이 같은 이름을 씀)"] and st["registered"] == []
     cfg.write_text(f"mcp_servers:\n  cal:\n    url: {REMOTE_URL}\n", encoding="utf-8")
     assert doctor.remote_mcp_state(the_lock)["cal"]["registered"] == ["Hermes"]
+
+
+# --- jaix hermes remind (hermes-slackbot#32 remind.py: 내 봇이 정한 시각에 내 DM) ---------------------------------
+def _remind_ready(monkeypatch, runs, ok=True, home_channel="D0HOME"):
+    hermesbot._save_record({"status": "connected", "slack": {"id": "demo", "connected": "t"}})
+    _hermes_env("SLACK_BOT_TOKEN=xoxb-mine\nSLACK_APP_TOKEN=xapp-mine\nSLACK_ALLOWED_USERS=U0OWNER\n"
+                + (f"SLACK_HOME_CHANNEL={home_channel}\n" if home_channel else ""))
+    monkeypatch.setattr(hermesbot.uvpython, "find", lambda v: "/x/python")
+    monkeypatch.setattr(hermesbot, "_slackbot_dir", lambda tmp: Path("/kit"))
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (
+        runs.append(cmd), (ok, "Created job abc123\nReminder set; the bot will DM you then.\n"))[1])
+
+
+def _remind(when, text, lines):
+    return hermesbot.cmd_remind(argparse.Namespace(when=when, text=text), lines.append)
+
+
+def test_hermes_remind_runs_kit_remind_script(isolated, monkeypatch):
+    runs, lines = [], []
+    _remind_ready(monkeypatch, runs)
+    assert _remind("2026-11-20T09:00", " 자료 보내기 ", lines) == 0
+    assert runs == [["/x/python", str(Path("/kit") / "scripts" / "remind.py"), "2026-11-20T09:00", "자료 보내기"]]
+    assert "Created job abc123" in lines and not any("Reminder set" in m for m in lines)
+    assert any("hermes cron remove" in m for m in lines)
+
+
+def test_hermes_remind_rejects_bad_input_before_download(isolated, monkeypatch):
+    runs = []
+    _remind_ready(monkeypatch, runs)
+    for when, text in [("every day 9am", "x"), ("2026-11-20T09:00", "  "),
+                       ("in 30m", "x" * (hermesbot.REMIND_MAX + 1))]:
+        assert _remind(when, text, []) == 1
+    assert runs == []
+
+
+def test_hermes_remind_needs_linked_bot_with_home_channel(isolated, monkeypatch):
+    runs, lines = [], []
+    _remind_ready(monkeypatch, runs, home_channel=None)
+    assert _remind("in 30m", "x", lines) == 1 and runs == []
+    assert any("jaix-setup" in m for m in lines)
+
+
+def test_hermes_remind_reports_failure(isolated, monkeypatch):
+    runs, lines = [], []
+    _remind_ready(monkeypatch, runs, ok=False)
+    assert _remind("in 30m", "x", lines) == 1
+    assert any("걸지 못했" in m for m in lines)
+
+
+def test_hermes_remind_parser():
+    from jaix import cli
+    a = cli.build_parser().parse_args(["hermes", "remind", "in 30m", "회의 자료"])
+    assert a.func is hermesbot.cmd_remind and (a.when, a.text) == ("in 30m", "회의 자료")
+
+
+def test_hermes_remind_skill_in_jaix_help_plugin():
+    text = (LOCK_FILE.parents[1] / "plugins" / "jaix-help" / "skills" / "hermes-remind" / "SKILL.md").read_text(encoding="utf-8")
+    assert text.startswith("---\nname: hermes-remind\n")
+    assert 'jaix hermes remind "<시각>" "<내용>"' in text and "slack_schedule_message" in text

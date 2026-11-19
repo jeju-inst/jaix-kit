@@ -37,7 +37,7 @@ TTL_HOURS = 72
 CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
-SLACKBOT_SHA = "4e6d470dd6c31f4529f8e687830e7b7dea61ecac"  # hermes-slackbot#31: slack-tools 채널 설명·주제 편집(+#22 문서)
+SLACKBOT_SHA = "2affced312a511ed7f33c439b679be450c5e9917"  # hermes-slackbot#32: remind.py(봇이 정한 시각에 주인 DM). #31 slack-tools 주제 편집 포함
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
     # open: hermes 의 openai-codex 로그인은 device code 방식이라 브라우저를 스스로 열지 않는다(주소와 코드만 찍음,
     # hermes_cli/auth_codex.py) → jaix 가 그 주소를 연다(jaix-win 11/5). anthropic 은 hermes 가 직접 연다
@@ -1576,6 +1576,42 @@ def _confirm(prompt, ask=None):
         return (ask or input)(prompt).strip().lower() in ("y", "yes", "예", "네", "ㅇ")
     except (EOFError, KeyboardInterrupt):
         return False
+
+
+REMIND_MAX = 3000  # hermes-slackbot remind.py 의 MAX_TEXT 와 같게
+
+
+def cmd_remind(args, log):
+    """내 Hermes 봇이 정한 시각에 내 슬랙 DM 으로 알림을 보낸다(hermes-slackbot remind.py → hermes cron, LLM·토큰 안 씀).
+    그 시각에 PC 가 켜져 있고 봇(gateway)이 돌고 있어야 한다. 반복 알림은 받지 않는다."""
+    when, text = args.when.strip(), args.text.strip()
+    if not text:
+        log("알림 내용이 비었습니다.")
+        return 1
+    if len(text) > REMIND_MAX:
+        log(f"알림 내용이 너무 깁니다({len(text)}자, 최대 {REMIND_MAX}자).")
+        return 1
+    if not (when.lower().startswith("in ") or re.match(r"^\d{4}-\d{2}-\d{2}", when)):
+        log('시각은 한 번만 울리는 때로 주세요: 2026-11-20T09:00 또는 "in 30m"(반복 알림은 안 됩니다).')
+        return 1
+    if not (linked_id() and env_value("SLACK_HOME_CHANNEL")):
+        log("이 PC 의 Hermes 가 jaix 로 슬랙에 연결돼 있지 않습니다. 먼저 jaix-setup 에서 '슬랙으로도 쓰기'로 연결하세요.")
+        return 1
+    python = uvpython.find(uvpython.DEFAULT)
+    if not python:
+        log(f"uv 관리 Python {uvpython.DEFAULT} 이 없습니다. `jaix update` 뒤 다시 해 주세요.")
+        return 1
+    with tempfile.TemporaryDirectory() as tmp:
+        kit = _slackbot_dir(tmp)
+        ok, out = _run([python, str(kit / "scripts" / "remind.py"), when, text], log, timeout=120)
+    if not ok:
+        log("알림을 걸지 못했습니다(위 메시지 참고).")
+        return 1
+    for line in out.strip().splitlines()[:-1]:  # 마지막 줄은 영어 안내 — 아래 한국어로 바꿔 씀
+        log(line)
+    log(f"알림을 걸었습니다: {when} 에 내 Hermes 봇이 DM 으로 보냅니다(그때 PC 가 켜져 있어야 함).")
+    log("목록: hermes cron list · 취소: hermes cron remove <id>")
+    return 0
 
 
 def cmd_remove(args, log, ask=None):
