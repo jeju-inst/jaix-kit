@@ -17,7 +17,8 @@ _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*")
 # `token: x`·`"api_key": "x"`·`password=x` — 이름은 두고 값만. `Authorization: Bearer x` 는 Bearer 뒤를
 _NAMED = re.compile(r"""(?ix)
     (\b[\w.-]*(?:token|secret|password|passwd|api[_-]?key|cookie|credential)[\w.-]*["']?\s*[:=]\s*)
-    (["']?)([^\s"',}]{4,})""")
+    (?:(["'])((?:\\.|(?!\2).)*)\2      # 따옴표 값: 닫는 따옴표까지 통째로(공백 포함, Codex #189 P1)
+     |([^\s"',}]+))                  # 따옴표 없는 값: 공백 전까지""")
 _BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
 # 경로 구분자(/)는 넣지 않는다 — 긴 경로가 통째로 가려지지 않게
 _LONG = re.compile(r"(?<![A-Za-z0-9_\-+=])[A-Za-z0-9_\-+=]{32,}(?![A-Za-z0-9_\-+=])")
@@ -34,6 +35,13 @@ def _long(m):
     if not (re.search(r"[A-Za-z]", s) and re.search(r"\d", s)):  # 글자만·숫자만(경로 조각·긴 이름)은 무작위가 아니다
         return s
     return MASK
+
+
+def _named(m):
+    quote, value = m.group(2) or "", m.group(3) if m.group(2) else m.group(4)
+    if not value or value == MASK or value.startswith(("%", "*", "<")):  # 빈 값·이미 가림·자리표시(%VAR%·<값>)
+        return m.group(0)
+    return f"{m.group(1)}{quote}{MASK}{quote}"
 
 
 def _home_dirs():
@@ -57,8 +65,7 @@ def redact(text):
     s = _SK.sub(f"sk-{MASK}", s)
     s = _GITHUB.sub(lambda m: f"{m.group(1)}_{MASK}", s)
     s = _JWT.sub(MASK, s)
-    s = _NAMED.sub(lambda m: m.group(0) if m.group(3).startswith(("%", "*", "<")) or m.group(3) == MASK
-                   else f"{m.group(1)}{m.group(2)}{MASK}", s)
+    s = _NAMED.sub(_named, s)
     s = _BEARER.sub(lambda m: f"{m.group(1)} {MASK}", s)
     s = _LONG.sub(_long, s)
     s = _SLACK_ID.sub(lambda m: f"{m.group(0)[0]}{MASK}", s)

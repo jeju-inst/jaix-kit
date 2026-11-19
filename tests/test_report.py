@@ -31,6 +31,11 @@ def isolated(tmp_path, monkeypatch):
     ("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig", ["eyJhbGci"], []),
     ('{"api_key": "plainvalue1"}', ["plainvalue1"], ['"api_key": "***"']),
     ("password=hunter22", ["hunter22"], ["password=***"]),
+    ('password="my secret value" next', ["my", "secret", "value"], ['password="***" next']),  # 따옴표 값은 통째로(Codex #189)
+    ("pw: password='correct horse battery staple'", ["horse", "battery", "staple"], ["password='***'"]),
+    ('password="ab"', ['"ab"'], ['password="***"']),  # 짧아도
+    ('api_key="a\\"b c" z', ['b c'], ['api_key="***" z']),  # 이스케이프된 따옴표를 넘어서
+
     ("Authorization: Bearer abc.def-ghi12345", ["abc.def-ghi12345"], ["Bearer ***"]),
     ("rand Zq9xT2vL8mN4pR7sK1wY6uH3jB5cF0dG", ["Zq9xT2v"], ["rand ***"]),
     (r"C:\Users\홍길동\AppData\Local\jaix", ["홍길동"], [r"%USERPROFILE%\AppData\Local\jaix"]),
