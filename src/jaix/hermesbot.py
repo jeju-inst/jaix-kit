@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from jaix import codex, hermes as skills, net, paths, redact, remotemcp, secret, uvpython
+from jaix import codex, hermes as skills, net, paths, proc, redact, remotemcp, secret, uvpython
 from jaix.paths import IS_WIN
 
 INSTALL_PS1 = "https://hermes-agent.nousresearch.com/install.ps1"
@@ -340,7 +340,8 @@ def detail_lines(detail, tail=None):
 def _run(cmd, log, timeout=600):
     """출력은 기록에 남기되 끝 몇 줄만. 표준 입력은 주지 않는다(대화형 질문은 기본값으로 지나감)."""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+        # hermes.cmd 래퍼면 cmd.exe 를 거치지 않게 바꾼다 — MCP JSON 값의 `<`·`>`·`"` 가 깨진다(jaix-kit#188)
+        r = subprocess.run(proc.command(cmd[0], cmd[1:]), capture_output=True, timeout=timeout,
                            stdin=subprocess.DEVNULL, env=_child_env(), creationflags=paths.NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"    {Path(cmd[0]).name}: {type(e).__name__}")
@@ -348,7 +349,7 @@ def _run(cmd, log, timeout=600):
         why = f"{timeout}초 안에 끝나지 않음" if isinstance(e, subprocess.TimeoutExpired) else (e.strerror or "")
         _note_failure(cmd=_cmd_label(cmd), code=type(e).__name__, note=why)
         return False, ""
-    out = (r.stdout or "") + (r.stderr or "")
+    out = proc.decode(r.stdout) + proc.decode(r.stderr)
     if r.returncode != 0:
         tail = "\n".join(out.strip().splitlines()[-TAIL_LINES:])
         log(f"    {Path(cmd[0]).name} {' '.join(cmd[1:3])} → 코드 {r.returncode}\n{tail}")

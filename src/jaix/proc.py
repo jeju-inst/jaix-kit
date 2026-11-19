@@ -2,6 +2,8 @@
 cmd.exe를 거치는데, list2cmdline은 공백 없는 인자를 따옴표로 감싸지 않아 `mcp>=1.2,<2` 의 `>`·`<` 가
 리다이렉션으로 해석된다(jaix-kit#36: "액세스가 거부되었습니다"·"지정된 파일을 찾을 수 없습니다").
 - 래퍼가 npm cmd-shim이면 cmd를 거치지 않고 래퍼가 부르는 `node <패키지>.js` 를 직접 부른다.
+- Hermes 도 hermes.exe 대신 hermes.cmd(`"<python>" -I -c "<코드>" %*`)를 둘 때가 있다(hermes_cli/_launchers.py, pip 없는
+  파이썬). 그 래퍼면 python 을 직접 부른다 — MCP JSON 값의 `"` 는 cmd 인용으로는 지킬 수 없다(jaix-kit#188).
 - 아니면 cmd 특수문자가 든 인자를 큰따옴표로 감싼 명령줄을 직접 만들어 `cmd /d /s /c` 로 넘긴다.
 - 출력은 bytes로 받아 UTF-8, 안 되면 OEM 코드페이지(한국어 Windows cp949)로 읽는다 — cmd 오류 문구가 깨지지 않게.
 """
@@ -47,11 +49,23 @@ def _npm_shim(cli):
     return [node, str(script)] if node and script.is_file() else None
 
 
+def _hermes_launcher(cli):
+    """Hermes 가 쓴 hermes.cmd 면 [python, -I, -c, 코드]. 본문: @echo off / "<python>" -I -c "<코드>" %*"""
+    try:
+        text = Path(cli).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    m = re.search(r'^"([^"]+\.exe)" -I -c "([^"]+)" %\*\s*$', text, re.I | re.M)
+    if not m or not Path(m.group(1)).is_file():
+        return None
+    return [m.group(1), "-I", "-c", m.group(2)]
+
+
 def command(cli, args):
     """subprocess에 넘길 명령: 실행파일이면 목록 그대로, 배치 래퍼면 node 직접 또는 인용한 cmd 명령줄(문자열)."""
     if not _is_batch(cli):
         return [cli, *args]
-    direct = _npm_shim(cli)
+    direct = _npm_shim(cli) or _hermes_launcher(cli)
     if direct:
         return [*direct, *args]
     comspec = os.environ.get("COMSPEC", "cmd.exe")
@@ -62,6 +76,8 @@ def command(cli, args):
 def decode(data):
     if not data:
         return ""
+    if isinstance(data, str):  # text=True 로 받은 출력(시험의 가짜 run 등)은 그대로
+        return data
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
