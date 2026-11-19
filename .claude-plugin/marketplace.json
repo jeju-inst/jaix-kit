@@ -171,7 +171,7 @@
         "url": "https://github.com/jeju-inst/jaix-kit.git",
         "path": "plugins/jaix-help",
         "ref": "main",
-        "sha": "06ca48c7345b6acd36132d89e0ba7cbeea50baec"
+        "sha": "1d04fc8c573c3b257cd5b8d62cfe8342ebfe91cb"
       },
       "homepage": "https://github.com/jeju-inst/jaix-kit",
       "metadata": {
