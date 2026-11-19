@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, remotemcp, runtimes, schedule, selfupdate, uvpython, winenv, works
@@ -15,6 +15,7 @@ from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
 MARK = {"ok": "[통과]", "warn": "[주의]", "fail": "[실패]", "skip": "[생략]", "info": "[안내]"}
+DETAIL_TAIL = 3  # 실패 원인의 출력 끝 줄은 doctor 에선 이만큼(전부는 jaix report)
 FIX_SETUP = "jaix setup" if IS_WIN else "jaix setup (맥은 안내된 설치 명령)"
 
 
@@ -24,6 +25,7 @@ class Check:
     area: str
     message: str
     fix: str = ""
+    detail: list = field(default_factory=list)  # 실패 원인 줄(어느 키·명령·코드·출력 끝). 실패·주의 아래에 보인다
 
 
 FIX_STALE = ("명령창은 새로 열어 다시 실행 · Claude 앱은 알림 영역(^)의 Claude 아이콘 오른쪽 클릭 → Exit 뒤 다시 열기")
@@ -558,7 +560,8 @@ def check_hermes_bot():
         return []
     area = "Hermes 슬랙"
     if rec["status"] == "failed":
-        return [Check("fail", area, rec.get("error") or "설치 실패", "jaix setup --channels hermes (AI센터 연결 코드 필요)")]
+        return [Check("fail", area, rec.get("error") or "설치 실패", "jaix setup --channels hermes (AI센터 연결 코드 필요)",
+                      hermesbot.detail_lines(rec.get("error_detail"), tail=DETAIL_TAIL))]
     if not hermesbot.find_hermes():
         return [Check("fail", area, "hermes 실행 파일이 없음", "jaix setup --channels hermes")]
     if rec["status"] == "no-code" and not hermesbot.linked_id(rec):  # 연결 기록·토큰이 있으면 연결된 것(아래 점검)
@@ -593,7 +596,8 @@ def check_hermes_bot():
                          f"jaix hermes login --model {model} --force (새로 로그인하면 예전 자격을 정리)"))
     if rec.get("last_error"):
         out.append(Check("warn", area, f"마지막 다시 설치에서 실패(기존 연결은 그대로): {rec['last_error']}",
-                         "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림"))
+                         "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림",
+                         hermesbot.detail_lines(rec.get("last_error_detail"), tail=DETAIL_TAIL)))
     return out
 
 
@@ -661,6 +665,8 @@ def render(checks):
     lines = []
     for c in checks:
         line = f"{MARK[c.status]} {c.area}: {c.message}"
+        if c.detail and c.status in ("warn", "fail"):
+            line += "".join(f"\n        · {d}" for d in c.detail)
         if c.fix and c.status in ("warn", "fail"):
             line += f"\n        → {c.fix}"
         lines.append(line)

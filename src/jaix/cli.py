@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, clis, codex, connect, doctor, gw, hancom, helper, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
+from jaix import __version__, claude, clis, codex, connect, doctor, gw, hancom, helper, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, report, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -46,7 +46,7 @@ class Steps:
     def summary(self):
         if self.failed:
             self.log(f"\n일부 단계가 실패했습니다: {', '.join(self.failed)}")
-            self.log("새 명령창에서 `jaix doctor` 를 실행해 결과를 AI센터에 보내 주세요.")
+            self.log("새 명령창에서 `jaix report` 를 실행해 출력을 그대로 AI센터에 보내 주세요.")
         return self.code
 
 
@@ -122,7 +122,7 @@ def guide(channels, result):
         out += ["■ 명령창에서 쓰기",
                 f"  새 명령창(PowerShell·cmd)을 열고 {' 또는 '.join(terms)} 를 입력하세요. 처음 한 번은 로그인을 묻습니다."]
     if failed:
-        out += [f"  ※ {', '.join(failed)} 명령을 깔지 못했습니다. 잠시 뒤 jaix-setup 을 다시 실행하거나 jaix doctor 결과를 AI센터에 보내 주세요."]
+        out += [f"  ※ {', '.join(failed)} 명령을 깔지 못했습니다. 잠시 뒤 jaix-setup 을 다시 실행하거나 jaix report 출력을 AI센터에 보내 주세요."]
     if "hermes" in channels:
         out += ["■ 슬랙으로도 쓰기 (Hermes)", *_hermes_guide(result.get("hermes") or {})]
     if (result.get("gw") or {}).get("status") in ("installed", "current"):
@@ -142,7 +142,7 @@ def guide(channels, result):
     if net.rate_limit_hit:
         out += ["", f"※ {net.RATE_LIMIT_HINT}."]
     out += ["", "명령창(cmd·PowerShell)은 새로 여세요. 이미 열려 있던 창에서는 새로 깐 gw·jaix를 찾지 못합니다.",
-            "문제가 있으면 새 명령창에서 `jaix doctor`를 실행해 결과를 AI센터에 보내 주세요."]
+            "문제가 있으면 새 명령창에서 `jaix report`를 실행해 출력을 그대로 AI센터에 보내 주세요."]
     return "\n".join(out)
 
 
@@ -153,7 +153,7 @@ def _hermes_guide(res):
     if status == "failed":
         kept = [f"  기존 슬랙 봇 Hermes-{res['kept']} 연결은 그대로 동작합니다."] if res.get("kept") else []
         return [f"  이번 설치에서 실패했습니다: {res.get('error')}", *kept,
-                "  새 명령창에서 `jaix doctor` 결과를 AI센터에 보내 주세요."]
+                "  새 명령창에서 `jaix report` 출력을 그대로 AI센터에 보내 주세요."]
     login = " ".join(["hermes", *(res.get("login") or [])])
     lines = []
     if status == "connected":
@@ -492,13 +492,21 @@ def _update(args, log):
     log(f"  {len(changed)}개 맞춤" if changed else "  맞출 것 없음")
     # 잠금에 원격 MCP 가 새로 들어왔거나 주소가 바뀌었으면 Hermes 에도 맞춘다(setup 만 넣던 것, jaix-kit#170)
     if hermes.installed() and hermesbot.find_hermes() and not args.dry_run:
+        hermesbot.reset_failures()
         if not hermesbot.refresh_mcp(hermesbot.find_hermes(), log, lock):
-            problems.append("Hermes MCP 항목 넣기 실패")
+            problems.append(_with_cause("Hermes MCP 항목 넣기 실패"))
     # Hermes 업데이트가 새 기본 스킬·명령을 들여왔을 수 있어 jaix가 깐 Hermes 면 소음 정리를 다시 건다
     if hermesbot.recorded().get("quiet") and hermesbot.find_hermes() and not args.dry_run:
+        hermesbot.reset_failures()
         if not hermesbot.quiet(hermesbot.find_hermes(), log):
-            problems.append("Hermes 소음 정리 실패")
+            problems.append(_with_cause("Hermes 소음 정리 실패"))
     return problems
+
+
+def _with_cause(problem):
+    """문제 줄에 어느 설정 키·명령이 실패했는지 붙인다(update-status → doctor '로그온 자동 갱신'·report, jaix-kit#188)."""
+    cause = hermesbot.failure_summary()
+    return f"{problem}: {cause}" if cause else problem
 
 
 def cmd_cleanup(args, log):
@@ -567,6 +575,10 @@ def build_parser():
                    help="Claude 에게 실제로 두 번 요청해 도구를 쓰는지까지 봄(본인 Claude 사용량을 씀, 기본 꺼짐)")
     t.add_argument("--keep", action="store_true", help="시험 폴더를 지우지 않고 남김")
     t.set_defaults(func=cmd_selftest)
+
+    rp = sub.add_parser("report", parents=[common],
+                        help="문제 보고: 판·doctor·실패 원인·연결 상태·기록의 실패 주변을 가려 한 파일로 저장하고 출력(그대로 붙여 보냄)")
+    rp.set_defaults(func=report.cmd_report)
 
     hp = sub.add_parser("helper", help="JAIX 도우미: 명령창에서 claude 를 도우미 안내와 함께 열고 'jaix 점검해줘'로 시작")
     hp.set_defaults(func=cmd_helper)

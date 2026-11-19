@@ -8,6 +8,7 @@ import subprocess
 import sys
 import urllib.error
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -25,6 +26,7 @@ REAL_MANAGED = claude.managed_declaration  # isolated 픽스처가 막기 전의
 LOCK_FILE = Path(__file__).resolve().parents[1] / ".claude-plugin" / "marketplace.json"
 
 REAL_HERMES_SETUP = hermesbot.setup
+REAL_HERMES_RUN = hermesbot._run  # 실패 원인 기록 시험용(subprocess.run 은 시험이 흉내 냄)
 REAL_PLUGBIN_ENSURE = plugbin.ensure
 REAL_REMOVE_USER_ENV_UNDER = winenv.remove_user_env_under
 
@@ -1698,6 +1700,92 @@ def _connected_before(isolated, monkeypatch):
     hermes_home.mkdir(parents=True, exist_ok=True)
     (hermes_home / ".env").write_text("SLACK_BOT_TOKEN=x\nSLACK_APP_TOKEN=y\n", encoding="utf-8")
     monkeypatch.setattr(hermesbot, "startup_entries", lambda: ["vbs"])
+
+
+# --- 실패 원인 기록(jaix-kit#188): 어느 키·명령·코드·출력 끝이 실패했는지 남기고 doctor 가 보인다 ----------------
+def _failing_mcp(monkeypatch, isolated):
+    """mcp_servers.korea-rio 의 hermes config set 만 실패(출력에 비밀·사용자 폴더·슬랙 ID)하는 가짜."""
+    _fake_windows(monkeypatch, isolated, [])
+    monkeypatch.setattr(hermesbot.codex, "owned_mcp", lambda: {"korea-rio": {"command": "C:\\Users\\홍길동\\uv.exe",
+                                                                             "args": ["run", "korea-rio"]}})
+    monkeypatch.setattr(hermesbot.remotemcp, "from_lock", lambda lock: {})
+    out = ("Traceback (most recent call last):\n  File \"C:\\Users\\홍길동\\hermes\\cli.py\", line 3\n"
+           "yaml.scanner.ScannerError: bad token xoxb-TEST-2-abcDEF for U01ABCDEF23\n")
+
+    def run(cmd, log, timeout=600):
+        if "mcp_servers.korea-rio" not in cmd:
+            return True, ""
+        # 진짜 _run 이 출력·코드를 다루는 길을 그대로 지나가게 하되, 자식은 띄우지 않는다
+        with mock.patch.object(hermesbot.subprocess, "run", lambda c, **kw: subprocess.CompletedProcess(c, 1, "", out)):
+            return REAL_HERMES_RUN(cmd, log, timeout)
+    monkeypatch.setattr(hermesbot, "_run", run)
+
+
+def test_hermes_setup_failure_records_cause_for_doctor(isolated, monkeypatch, the_lock):
+    _failing_mcp(monkeypatch, isolated)
+    res = REAL_HERMES_SETUP(the_lock, print)
+    assert res["status"] == "failed" and res["error"] == "Hermes 설정 실패(모델·도구·MCP)"
+    detail = hermesbot.recorded()["error_detail"]
+    assert detail == [{"cmd": "hermes config set mcp_servers.korea-rio", "code": 1, "key": "mcp_servers.korea-rio",
+                       "tail": detail[0]["tail"]}]
+    tail = detail[0]["tail"]
+    assert "ScannerError" in tail and "xoxb-***" in tail and "U***" in tail and "%USERPROFILE%" in tail
+    assert "abcDEF" not in tail and "홍길동" not in tail and "U01ABCDEF23" not in tail
+    assert "uv.exe" not in json.dumps(detail, ensure_ascii=False)  # 설정 값(명령 줄의 넷째 인자)은 싣지 않는다
+    checks = doctor.check_hermes_bot()
+    assert [c.status for c in checks] == ["fail"]
+    text = doctor.render(checks)
+    assert "· 키 mcp_servers.korea-rio · 명령 hermes config set mcp_servers.korea-rio · 코드 1" in text
+    assert "ScannerError" in text and text.index("ScannerError") < text.index("→ jaix setup")
+    assert doctor.as_dicts(checks)[0]["detail"]  # --json 에도 실림
+
+
+def test_hermes_setup_success_clears_failure_cause(isolated, monkeypatch, the_lock):
+    _failing_mcp(monkeypatch, isolated)
+    REAL_HERMES_SETUP(the_lock, print)
+    _fake_windows(monkeypatch, isolated, [])  # 다음 실행은 성공(연결 코드 없음)
+    monkeypatch.setattr(hermesbot, "quiet", lambda hermes, log: True)
+    assert REAL_HERMES_SETUP(the_lock, print)["status"] == "no-code"
+    assert "error_detail" not in hermesbot.recorded()
+
+
+def test_setter_failure_without_run_output_still_names_key(isolated, monkeypatch):
+    """가짜 _run 처럼 출력 기록 없이 실패해도 어느 설정 키였는지는 남는다."""
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (False, ""))
+    hermesbot.reset_failures()
+    put = hermesbot._Setter("hermes", print)
+    assert not put("model.provider", "openai-codex", ["config", "set", "model.provider", "openai-codex"])
+    assert hermesbot.failure_detail() == [{"key": "model.provider", "cmd": "hermes config set model.provider"}]
+    assert hermesbot.failure_summary() == "model.provider"
+
+
+def test_cmd_label_drops_values_and_paths():
+    assert hermesbot._cmd_label(["C:/x/hermes.exe", "config", "set", "skills.disabled", '["a"]']) == \
+        "hermes.exe config set skills.disabled"
+    assert hermesbot._cmd_label(["py", "C:/Users/kim/kit/setup_pc.py", "demo", "--user", "U01ABCDEF23"]) == \
+        "py setup_pc.py demo"
+
+
+def test_run_timeout_records_without_command_values(isolated, monkeypatch):
+    """str(TimeoutExpired) 에 든 명령 줄(설정 값)은 기록에 싣지 않는다."""
+    def boom(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 5)
+    hermesbot.reset_failures()
+    with mock.patch.object(hermesbot.subprocess, "run", boom):
+        assert REAL_HERMES_RUN(["hermes", "config", "set", "agent.system_prompt", "SECRET-VALUE"], print, 5) == (False, "")
+    detail = hermesbot.failure_detail()
+    assert detail == [{"cmd": "hermes config set agent.system_prompt", "code": "TimeoutExpired", "note": "5초 안에 끝나지 않음"}]
+    assert "SECRET-VALUE" not in json.dumps(detail)
+    assert hermesbot.failure_summary() == "hermes config set agent.system_prompt(TimeoutExpired)"
+    hermesbot.reset_failures()
+
+
+def test_update_problem_line_names_failed_key(isolated, monkeypatch):
+    hermesbot.reset_failures()
+    assert cli._with_cause("Hermes MCP 항목 넣기 실패") == "Hermes MCP 항목 넣기 실패"
+    hermesbot._note_failure(key="mcp_servers.korea-rio", cmd="hermes config set mcp_servers.korea-rio", code=1)
+    assert cli._with_cause("Hermes MCP 항목 넣기 실패") == "Hermes MCP 항목 넣기 실패: mcp_servers.korea-rio(코드 1)"
+    hermesbot.reset_failures()
 
 
 def test_hermes_rerun_without_code_keeps_connection(isolated, monkeypatch, the_lock):
