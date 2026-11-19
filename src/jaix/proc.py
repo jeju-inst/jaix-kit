@@ -76,6 +76,8 @@ def command(cli, args):
 def decode(data):
     if not data:
         return ""
+    if isinstance(data, str):  # text=True 로 받은 출력(시험의 가짜 run 등)은 그대로
+        return data
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
