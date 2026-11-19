@@ -154,3 +154,12 @@ def test_report_without_lock(isolated):
     args = cli.build_parser().parse_args(["report", "--offline"])
     assert report.cmd_report(args, lines.append, lock_loader=lambda *a: (_ for _ in ()).throw(FileNotFoundError("x"))) == 0
     assert "잠금 못 읽음(FileNotFoundError)" in "\n".join(lines)
+
+
+def test_redact_is_fast_on_malformed_quotes():
+    """닫히지 않은 따옴표 값 + 백슬래시가 많아도 선형 시간(Codex #189 P2: 지수 역추적으로 report 가 멈춤)."""
+    import time
+    start = time.monotonic()
+    out = redact('password="' + r"\a" * 5000 + "\n" + 'token: "' + "\\" * 5000)
+    assert time.monotonic() - start < 2
+    assert out.startswith("password=")

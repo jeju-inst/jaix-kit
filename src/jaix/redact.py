@@ -17,7 +17,7 @@ _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*")
 # `token: x`·`"api_key": "x"`·`password=x` — 이름은 두고 값만. `Authorization: Bearer x` 는 Bearer 뒤를
 _NAMED = re.compile(r"""(?ix)
     (\b[\w.-]*(?:token|secret|password|passwd|api[_-]?key|cookie|credential)[\w.-]*(?:\\?["'])?\s*[:=]\s*)
-    (?:(\\?["'])((?:(?!\2)(?:\\.|.))*)\2  # 따옴표 값(JSON 안의 \" 포함): 닫는 따옴표까지 통째로(Codex #189 P1)
+    (?:(\\?["'])((?:(?!\2)(?:\\.|[^\\\n]))*)\2  # 따옴표 값(JSON 안의 \" 포함): 닫는 따옴표까지 통째로(Codex #189 P1). 두 갈래가 겹치지 않아 선형
      |((?:[^\s"',}\\]|\\(?!["']))+))      # 따옴표 없는 값: 공백(또는 JSON 의 \" ) 전까지""")
 # 비밀이 아닌 것으로 두는 값: 가림 표시 자체와 완전한 자리표시(%VAR%·<값>)만(Codex #189 P1)
 _PLACEHOLDER = re.compile(r"\*\*\*|%[A-Za-z_][A-Za-z0-9_]*%|<[^<>\s]+>")
