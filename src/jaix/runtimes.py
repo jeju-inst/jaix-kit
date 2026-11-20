@@ -39,11 +39,11 @@ PINNED = {
     "age": {"name": "age-v1.3.2-windows-amd64.zip",  # v1.3.2 (2026-08-29)
             "url": "https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-windows-amd64.zip",
             "sha256": "f48d8f8f9ebe903ab5027ed067652f2cc1db94bc206976430133b905dcd8e8c7"},
-    # mailskill 어댑터가 1.x 문법(`-o json`, `folder`)을 쓴다. 2.x 는 `--json`·`mailbox` 로 바뀌어 조회·검색·읽기가
-    # 전부 깨진다(namun-ji 실측 2026-11-06: latest 추종으로 2.2.1 이 깔림). mailskill 이 2.x 로 옮기면 여기만 바꾼다
-    "himalaya": {"name": "himalaya.x86_64-windows.zip",  # v1.2.0 (2026-02-19)
-                 "url": "https://github.com/pimalaya/himalaya/releases/download/v1.2.0/himalaya.x86_64-windows.zip",
-                 "sha256": "e8af483e97bb66e2c48ef76695a418cf76eae13830ec2dd0d600345a38385184"},
+    # mailskill v2026.11.21.1 부터 2.x 문법(`--json`·`mailbox`)을 쓰고 2.2.1 이상 2.3.0 미만만 받는다(1.2.0 이면
+    # "지원하지 않는 himalaya 버전"으로 멈춤). 2.3.x 는 upstream BREAKING 이 많아 막아 둠 → 판을 올릴 땐 mailskill 과 함께
+    "himalaya": {"name": "himalaya.x86_64-windows.zip",  # v2.2.1 (2026-10-02)
+                 "url": "https://github.com/pimalaya/himalaya/releases/download/v2.2.1/himalaya.x86_64-windows.zip",
+                 "sha256": "34ef6f148834aeafa2c9a558ec144a678fb12dcfcc618786b0eaeceb52794e00"},
 }
 
 
@@ -80,8 +80,10 @@ class Runtime:
     path_subdir: str = ""           # tree 안에서 PATH에 넣을 하위 폴더
     winget: str | None = None
     min_major: int | None = None
-    max_major: int | None = None    # 이보다 높으면 쓸 수 없음(문법이 바뀐 새 판). Windows 는 고정 판으로 다시 깐다
-    max_reason: str = ""
+    # 이 범위 밖이면 쓸 수 없음(문법이 다른 판). [accept_from, accept_below). Windows 는 고정 판으로 다시 깐다
+    accept_from: str | None = None
+    accept_below: str | None = None
+    accept_reason: str = ""
     min_version: str | None = None  # 이보다 낮으면 doctor가 "업데이트 필요"(동작은 함 → 주의)
     min_reason: str = ""            # 그 버전이 필요한 이유(doctor 메시지)
     windows_only: bool = False
@@ -131,8 +133,8 @@ RUNTIMES = [
     Runtime("node", "Node.js (LTS)", "node", ["--version"], False, _nodejs, tree="node",
             winget="OpenJS.NodeJS.LTS", min_major=18, hint="brew install node", purpose="웍스 도구(nworks)"),
     Runtime("himalaya", "himalaya", "himalaya", ["--version"], False, _pinned("himalaya"),
-            max_major=1, max_reason="2.x 는 명령 문법이 달라 mailskill 이 못 씀",
-            hint="brew 는 2.x 를 깖 → https://github.com/pimalaya/himalaya/releases/tag/v1.2.0 에서 받아 PATH 에",
+            accept_from="2.2.1", accept_below="2.3.0", accept_reason="mailskill 이 이 범위의 명령 문법만 씀",
+            hint="https://github.com/pimalaya/himalaya/releases/tag/v2.2.1 에서 받아 PATH 에(brew 판이 2.2.x 면 그대로 됨)",
             needed_by="mail-skill", purpose="메일 도구(mail-skill 플러그인)"),
     Runtime("age", "age", "age", ["--version"], False, _pinned("age"), hint="brew install age", needed_by="mail-skill",
             purpose="메일 도구 비밀 암호화(mail-skill 플러그인)"),
@@ -208,18 +210,28 @@ def outdated(rt, found):
     return _vtuple(found.version) < _vtuple(rt.min_version)
 
 
+def _out_of_range(rt, found):
+    """accept 범위가 있고 찾은 버전이 그 밖이면 True. 버전을 못 읽으면 판정하지 않는다(False)."""
+    if not found.version or not (rt.accept_from or rt.accept_below):
+        return False
+    v = _vtuple(found.version)
+    return bool(rt.accept_from and v < _vtuple(rt.accept_from)) or bool(rt.accept_below and v >= _vtuple(rt.accept_below))
+
+
 def ok(rt, found):
     if not found.path:
         return False
-    if rt.max_major is not None and found.major is not None and found.major > rt.max_major:
+    if _out_of_range(rt, found):
         return False
     return rt.min_major is None or (found.major or 0) >= rt.min_major
 
 
 def need(rt, found):
     """found 가 왜 안 되는지(ok 가 False 이고 path 가 있을 때) 한 마디."""
-    if rt.max_major is not None and found.major is not None and found.major > rt.max_major:
-        return f"{rt.max_major}.x 필요({rt.max_reason})"
+    if _out_of_range(rt, found):
+        lo = f"{rt.accept_from} 이상" if rt.accept_from else ""
+        hi = f"{rt.accept_below} 미만" if rt.accept_below else ""
+        return f"{' '.join(x for x in (lo, hi) if x)} 필요({rt.accept_reason})"
     return f"{rt.min_major} 이상 필요"
 
 

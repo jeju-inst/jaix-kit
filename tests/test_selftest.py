@@ -297,6 +297,14 @@ def test_mail(the_lock):
     sec.parent.mkdir(parents=True)
     sec.write_bytes(b"age")
     assert selftest.check_mail(the_lock)[0].status == "ok"
+    # 예전 himalaya 1.x 형식 설정이면 비밀번호 파일이 있어도 다시 설정하라고 한다(mailskill 2.x 가 못 읽음)
+    for v1 in ('backend.type = "imap"\n', '[accounts.ji.backend]\ntype = "imap"\n',
+               'message.send.backend.type = "smtp"\n', 'backend = { type = "imap" }\n'):
+        conf.write_text('[accounts.ji]\nemail = "a@b"\n' + v1, encoding="utf-8")
+        r = selftest.check_mail(the_lock)[0]
+        assert r.status == "setup" and "1.x" in r.message and "앱 비밀번호" in r.message, v1
+    conf.write_text('[accounts.ji]\nemail = "a@b"\nimap.host = "x"\nsmtp.host = "y"\n', encoding="utf-8")
+    assert selftest.check_mail(the_lock)[0].status == "ok"  # 2.x 형식
 
 
 def test_works(the_lock, monkeypatch):
