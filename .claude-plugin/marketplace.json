@@ -131,8 +131,8 @@
         "source": "git-subdir",
         "url": "https://github.com/z0nam/mail-skill.git",
         "path": "plugins/mail-skill",
-        "ref": "v2026.11.11.1",
-        "sha": "a6f37f0f1c139a4af4510665e48fa03f216a6559"
+        "ref": "v2026.11.20.1",
+        "sha": "8d0c46dfc01d792016e40b75c22e7e45d24aad2b"
       },
       "homepage": "https://github.com/z0nam/mail-skill",
       "metadata": {
@@ -140,7 +140,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.11.1"
+      "version": "2026.11.20.1"
     },
     {
       "name": "hwp2pdf",
