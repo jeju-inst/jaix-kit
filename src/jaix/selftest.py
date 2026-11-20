@@ -556,6 +556,17 @@ def mail_config_paths():
     return conf, secrets
 
 
+# himalaya 1.x 형식 설정(mail-skill scripts/mail-setup 의 is_v1 과 같은 규칙). 2.x 는 backend 키를 읽지 않아 계정이
+# "백엔드 없음"이 된다 → mailskill v2026.11.21.1~ 는 "setup 을 다시 실행하세요"로 멈춘다. setup 이 .bak-v1-* 로 옮기고 새로 만든다
+_MAIL_V1 = re.compile(r"^[ \t]*((message\.)?send\.)?backend\.(type|host|port|login|auth|encryption)"
+                      r"|^[ \t]*\[accounts\.[^\]]*\.backend(\.[^\]]*)?\]"
+                      r"|^[ \t]*((message\.)?send\.)?backend[ \t]*=[ \t]*\{", re.M)
+
+
+def mail_config_is_v1(text):
+    return bool(_MAIL_V1.search(text or ""))
+
+
 def check_mail(lock):
     """`mailskill doctor` 는 메일 서버에 실제로 로그인하고, 설정이 없으면 himalaya 가 대화형 마법사를 띄운다 →
     부르지 않고 `mailskill setup` 이 만드는 두 파일(계정 설정·암호화한 앱 비밀번호)이 있는지만 본다."""
@@ -564,9 +575,13 @@ def check_mail(lock):
         return []
     conf, secrets = mail_config_paths()
     try:
-        accounts = tomllib.loads(conf.read_text(encoding="utf-8")).get("accounts") or {}
+        text = conf.read_text(encoding="utf-8")
+        accounts = tomllib.loads(text).get("accounts") or {}
     except (OSError, ValueError):
-        accounts = {}
+        text, accounts = "", {}
+    if MAIL_ACCOUNT in accounts and mail_config_is_v1(text):
+        return [_setup(area, "예전(himalaya 1.x) 형식 설정이라 새 메일 도구가 못 읽음 — 설정을 다시 하고 앱 비밀번호를 한 번 더 입력",
+                       CONNECT_HINT.format(item="mail"))]
     if MAIL_ACCOUNT in accounts and secrets.is_file():
         return [_ok(area, "앱 비밀번호 설정 있음(로그인 시험은 안 함)")]
     return [_setup(area, "회사메일 앱 비밀번호 설정 안 됨", CONNECT_HINT.format(item="mail"))]
