@@ -16,6 +16,10 @@
 | `.github/workflows/jaix-setup.yml` | `jaix\`(onedir, `installer/jaix.spec`)·`jaix-setup.exe` 빌드, 무인 설치·doctor·제거 시험, 태그 릴리스 |
 
 ## 채널
+
+Hermes 기능별 구현·검증 상태, 공통 설정 원본과 jaix 편입/rollback 인수조건:
+[Hermes bot 공통 기능 편입 handoff](docs/hermes-capability-handoff.md) (확인 2026-11-04).
+기존 [무인 설치 설계](docs/design-hermes-unattended.md)는 당시 결정 기록으로 유지한다.
 - `main` = **stable** (전원). 관리자 콘솔이 이 브랜치를 자동 업데이트로 배포한다.
 - `beta` = AI센터 파일럿. 새 버전은 beta에서 먼저 굴린 뒤 main으로 PR.
 
