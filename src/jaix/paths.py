@@ -12,6 +12,30 @@ IS_MAC = sys.platform == "darwin"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
 
 
+def _win_console_mode(fd):
+    """fd 가 진짜 콘솔 입력인지 — GetConsoleMode 는 콘솔 핸들에서만 성공한다(NUL·파이프·파일은 실패)."""
+    import ctypes
+    import msvcrt
+    mode = ctypes.c_ulong()
+    return bool(ctypes.windll.kernel32.GetConsoleMode(ctypes.c_void_p(msvcrt.get_osfhandle(fd)), ctypes.byref(mode)))
+
+
+def at_console(stdin=None, stdout=None):
+    """사람이 앞에 있는 콘솔에서 돌고 있어 [Y/n] 를 물어도 되는지. isatty() 만으로는 안 된다 —
+    Windows 에서는 NUL 도 문자 장치라 True 다(#180: `jaix update < NUL` 이 슬랙 권한을 묻고 그 판의 한 번 기회를 씀).
+    update 의 [Y/n]·connect 의 '이 창에서 받을지 새 창을 열지'가 같이 쓴다.
+    Windows 는 stdin 의 GetConsoleMode 가 성공해야, 다른 OS 는 stdin 이 tty 여야 한다. 묻는 글이 보이도록 stdout 도 tty 여야 한다.
+    판정이 실패하면 묻지 않는다."""
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    try:
+        if not (stdin and stdout and stdin.isatty() and stdout.isatty()):
+            return False
+        return _win_console_mode(stdin.fileno()) if IS_WIN else True
+    except Exception:  # ctypes·msvcrt 없음, fileno 없음(바꿔 끼운 스트림) 등
+        return False
+
+
 def _env_path(name, default):
     value = os.environ.get(name)
     return Path(value) if value else default

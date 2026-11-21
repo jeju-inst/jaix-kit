@@ -2,18 +2,20 @@
 
 판정: ok 통과 · warn 주의(동작은 함, 손볼 것 있음) · fail 실패(종료 코드 1) · skip 해당 없음.
 """
+import json
 import os
 import re
 import shutil
 import subprocess
-from dataclasses import asdict, dataclass
-from pathlib import Path, PureWindowsPath
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
-from jaix import claude, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, runtimes, schedule, uvpython, winenv, works
+from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, remotemcp, runtimes, schedule, selfupdate, uvpython, winenv, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
-MARK = {"ok": "[통과]", "warn": "[주의]", "fail": "[실패]", "skip": "[생략]"}
+MARK = {"ok": "[통과]", "warn": "[주의]", "fail": "[실패]", "skip": "[생략]", "info": "[안내]"}
+DETAIL_TAIL = 3  # 실패 원인의 출력 끝 줄은 doctor 에선 이만큼(전부는 jaix report)
 FIX_SETUP = "jaix setup" if IS_WIN else "jaix setup (맥은 안내된 설치 명령)"
 
 
@@ -23,6 +25,10 @@ class Check:
     area: str
     message: str
     fix: str = ""
+    detail: list = field(default_factory=list)  # 실패 원인 줄(어느 키·명령·코드·출력 끝). 실패·주의 아래에 보인다
+
+
+FIX_STALE = ("명령창은 새로 열어 다시 실행 · Claude 앱은 알림 영역(^)의 Claude 아이콘 오른쪽 클릭 → Exit 뒤 다시 열기")
 
 
 def check_runtimes(lock=None):
@@ -36,18 +42,56 @@ def check_runtimes(lock=None):
         if runtimes.ok(rt, found) and runtimes.outdated(rt, found):
             out.append(Check("warn", rt.label, f"{found.version} — 업데이트 필요: {rt.min_version} 이상({rt.min_reason})",
                              "jaix update (직접 설치했으면 새 설치기로)"))
+        elif runtimes.ok(rt, found) and found.stale:
+            out.append(Check("warn", rt.label, f"{found.version or '있음'} ({found.path}) — 새 창에서는 보이지만 "
+                                                "이 창(설치 전에 연 창·앱)에는 없음", FIX_STALE))
         elif runtimes.ok(rt, found):
             out.append(Check("ok", rt.label, f"{found.version or '있음'} ({found.path})"))
         elif not runtimes.required(rt, lock):
-            out.append(Check("skip", rt.label, f"없음 — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
+            what = f"{found.version} — {runtimes.need(rt, found)}" if found.path else \
+                ("없음 — 깔았던 기록은 있는데 파일이 사라짐, " + runtimes.AV_HINT if runtimes.vanished(rt) else "없음")
+            out.append(Check("skip", rt.label, f"{what} — 선택 도구({rt.purpose})", f"jaix setup --runtimes {rt.key}"))
         elif found.path:
-            out.append(Check("fail", rt.label, f"{found.version} — {rt.min_major} 이상 필요 ({rt.purpose})",
+            out.append(Check("fail", rt.label, f"{found.version} — {runtimes.need(rt, found)} ({rt.purpose})",
                              FIX_SETUP if IS_WIN else rt.hint))
         else:
-            out.append(Check("fail", rt.label, f"없음 ({rt.purpose})", FIX_SETUP if IS_WIN else rt.hint))
+            gone = runtimes.vanished(rt)
+            out.append(Check("fail", rt.label, f"없음 ({rt.purpose})" + (" — 깔았던 기록은 있는데 파일이 사라짐" if gone else ""),
+                             f"{runtimes.AV_HINT} · 그 뒤 {FIX_SETUP}" if gone else (FIX_SETUP if IS_WIN else rt.hint)))
         if rt.key == "hwp2pdf" and found.path and not runtimes.hancom_installed():
             out.append(Check("warn", "한컴오피스", "없음 → HWP 렌더는 rhwp 근사 렌더로 대체 (hwp2pdf는 설치돼 있음)",
                              "정확한 렌더가 필요하면 한컴오피스 설치"))
+    return out
+
+
+def check_runtime_copies():
+    """jaix 사본을 따로 두는 런타임(own_copy)이 두 벌 이상이면 알린다 — 지우지 않는다. 어느 것이 PATH 에서 먼저
+    잡히는지, 도구가 쓰는 환경변수가 jaix 사본을 가리키는지 함께 보인다."""
+    if not IS_WIN:
+        return []
+    out = []
+    for rt in runtimes.RUNTIMES:
+        if not rt.own_copy:
+            continue
+        found = runtimes.copies(rt)
+        mine = next((f for f in found if f.managed), None)
+        if mine and rt.env_var:
+            have = winenv.get_user_env(rt.env_var)
+            if not have or os.path.normcase(have) != os.path.normcase(mine.path):
+                out.append(Check("warn", f"{rt.label} 경로({rt.env_var})",
+                                 f"{have or '없음'} — jaix 사본({mine.path})을 가리키지 않음, 도구가 PATH 의 다른 사본을 쓸 수 있음",
+                                 "jaix setup"))
+        if len(found) < 2:
+            continue
+        def desc(i, f):
+            tags = ["PATH에서 먼저 잡힘"] if i == 0 else []
+            if f.managed:
+                tags.append("jaix 사본")
+            return f"{f.path} ({f.version or '판 모름'}{', ' + ', '.join(tags) if tags else ''})"
+        listing = "; ".join(desc(i, f) for i, f in enumerate(found))
+        how = (f"jaix·hwp-agent 는 {rt.env_var} 로 jaix 사본을 씀. " if rt.env_var else "")
+        out.append(Check("warn", f"{rt.label} 두 벌", listing,
+                         how + "다른 사본은 jaix 가 지우지 않음 — 안 쓰면 설정 → 앱에서 제거(관리자 설치면 관리자에게)"))
     return out
 
 
@@ -186,27 +230,32 @@ def check_works(lock):
         return []
     want = works.spec(lock)["nworks"]
     have, integrity = works.installed()
-    if not have:
+    other = None if (have == want["version"] and integrity == want["integrity"]) else works.existing(want["version"])
+    if other:
+        out = [Check("ok", area, f"이미 설치된 {other[1]} 를 씀 ({other[0]})")]
+    elif not have:
         return [Check("fail", area, "설치 안 됨", "jaix setup")]
-    if have != want["version"] or integrity != want["integrity"]:
+    elif have != want["version"] or integrity != want["integrity"]:
         return [Check("warn", area, f"{have} 설치됨 — 잠금은 {want['version']}", "jaix update")]
-    out = [Check("ok", area, f"{have} (잠금과 같음, {works.home()})")]
-    if IS_WIN and not winenv.in_user_path(works.bin_dir()):
+    else:
+        out = [Check("ok", area, f"{have} (잠금과 같음, {works.home()})")]
+    if not other and IS_WIN and not winenv.in_user_path(works.bin_dir()):
         out.append(Check("warn", area, "실행 폴더가 사용자 PATH에 없음", "jaix setup"))
-    elif not IS_WIN and not works.on_path():
+    elif not other and not IS_WIN and not works.on_path():
         out.append(Check("warn", area, "PATH에서 jaix 가 깐 nworks 가 안 보임 — 스킬이 부르지 못함",
                          f"{works.link_dir()} 를 PATH에 추가하고 jaix setup"))
     if not works.saved_client():
         out.append(Check("warn", "웍스 기관 앱 정보", "없음 — 원내망에서 받아야 함", "원내망(사무실·VPN)에서 jaix setup"))
     elif not works.logged_in():
-        out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix works login"))
+        out.append(Check("warn", "웍스 로그인", "아직 안 함 — 처음 쓸 때 한 번", "jaix connect works"))
     else:
         out.append(Check("ok", "웍스 로그인", "됨"))
     return out
 
 
 def check_plugin_bin(lock):
-    """플러그인 bin/ 명령(예: mailskill)이 PATH 에 잡히는가. Claude Code 말고는 jaix 가 올린 것만 보인다(TS-RUNTIME-4)."""
+    """플러그인 cli/(예전 bin/) 명령(예: mailskill)이 PATH 에 잡히는가. jaix 가 올린 것만 보인다(TS-RUNTIME-4) —
+    Claude Code 가 PATH 에 붙여 주던 것은 bin/ 뿐이라 cli/ 로 옮긴 뒤로는 맥·리눅스도 jaix 링크에 기댄다."""
     rec = plugbin.recorded()
     out = []
     for p in lock.plugins:
@@ -308,6 +357,9 @@ def check_load():
 
 def check_claude(lock):
     out = []
+    if claude.desktop_started_before_setup():
+        out.append(Check("warn", "Claude 앱", "jaix setup 전에 켜진 채로 떠 있음 — 새 도구·Git 위치를 몰라 Code 탭 `/`에 "
+                                             "jaix 도구가 안 보일 수 있음", FIX_STALE))
     managed = claude.managed_declaration()
     if managed:
         out.append(Check("ok", "Claude 등록", f"관리자 배포가 jaix 마켓플레이스를 내려줌 ({managed})"))
@@ -352,13 +404,18 @@ def check_claude(lock):
                          "jaix setup" if cli else
                          "Claude 앱에서 Code 탭을 열었다 닫고 한 번 더 열기(첫 번째에 등록, 두 번째에 설치)"))
     if paths.desktop_installed():
-        out.append(Check("skip", "Claude 데스크톱·Cowork",
-                         "관리자 배포 대상(조직 플러그인) — jaix는 Code 탭·Claude Code에만 등록함"))
+        if managed:
+            out.append(Check("skip", "Claude 데스크톱·Cowork",
+                             "관리자 배포 대상(조직 플러그인) — jaix는 Code 탭·Claude Code에만 등록함"))
+        else:  # 관리자 배포가 없는 PC(개인 구독 계정) — 설치 완료 안내(#119)와 같은 말
+            out.append(Check("info", "Claude 데스크톱·Cowork",
+                             "Cowork(채팅)는 직접 추가: Customize → Plugins → Add → Add marketplace → Add from a repository → jeju-inst/jaix-kit → Sync "
+                             "(GitHub 앱 접근 허용 필요, 메일 제외) — jaix 는 Cowork 설치 여부를 확인하지 못함"))
     return out
 
 
-def _exe_stem(command):
-    return PureWindowsPath(str(command)).stem.lower()
+def _what(spec):
+    return spec.get("url") if codex.is_remote(spec) else spec.get("command")
 
 
 def check_codex(lock):
@@ -386,8 +443,8 @@ def check_codex(lock):
     stale = [n for n, spec in want.items()
              if codex._current(n) != spec and (codex._current(n) is None or n in owned)]
     # jaix가 쓴 항목을 다른 실행파일(예: hwp-agent 단독 설치본 exe)이 덮어쓴 것과, 항목이 없거나 옛 경로인 것을 가른다
-    taken = {n: codex._current(n)["command"] for n in stale
-             if codex._current(n) and _exe_stem(codex._current(n)["command"]) != _exe_stem(want[n]["command"])}
+    taken = {n: _what(codex._current(n)) for n in stale
+             if codex._current(n) and codex.ident(codex._current(n)) != codex.ident(want[n])}
     fix_taken = "단독 설치본의 MCP 등록을 끈 뒤 jaix update 로 되돌리기"
     for n, cmd in taken.items():
         out.append(Check("fail", "Codex MCP", f"다른 설치본({cmd})이 {n} MCP 항목을 차지함", fix_taken))
@@ -396,8 +453,8 @@ def check_codex(lock):
     released = codex.released_mcp()
     for n, spec in want.items():
         cur = codex._current(n)
-        if n in released and n not in taken and cur and _exe_stem(cur["command"]) != _exe_stem(spec["command"]):
-            out.append(Check("warn", "Codex MCP", f"jaix가 쓴 {n} MCP 항목을 다른 실행파일({cur['command']})이 바꿔 씀",
+        if n in released and n not in taken and cur and codex.ident(cur) != codex.ident(spec):
+            out.append(Check("warn", "Codex MCP", f"jaix가 쓴 {n} MCP 항목을 다른 실행파일({_what(cur)})이 바꿔 씀",
                              f"단독 설치본이면 {fix_taken} · 직접 바꾼 것이면 무시해도 됨"))
     rest = [n for n in stale if n not in taken]
     if rest:
@@ -408,6 +465,94 @@ def check_codex(lock):
     return out
 
 
+def _installed_root(plugin):
+    """Claude 가 깐 플러그인 폴더, 없으면 Codex 사본."""
+    rec = claude.installed().get(plugin.id) or {}
+    p = rec.get("installPath")
+    if p and Path(p).is_dir():
+        return Path(p), "Claude"
+    root = codex.plugin_root(plugin.name)
+    return (root, "Codex") if root else (None, None)
+
+
+def remote_mcp_state(lock):
+    """잠금의 원격(HTTP) MCP 서버별 등록 상태 {이름: {"url", "plugin", "registered": [채널], "missing": [채널]}}.
+    Claude 는 플러그인이 깔려 있으면 등록된 것(플러그인 .mcp.json 을 그대로 띄움). Codex 는 config.toml, Hermes 는
+    config.yaml 에 같은 이름이 있어야 한다(jaix 가 적는다 — jaix-kit#170)."""
+    servers, in_claude = {}, set()
+    for p in lock.plugins:
+        root, who = _installed_root(p)
+        if not root:
+            continue
+        try:
+            cfg = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for name, spec in remotemcp.servers_in(cfg).items():
+            servers[name] = {**spec, "plugin": p.name}
+            if who == "Claude":
+                in_claude.add(name)
+    for name, spec in remotemcp.recorded().items():  # Hermes 만 고른 PC: 잠금에서 읽어 둔 목록
+        if spec.get("plugin") in {p.name for p in lock.plugins}:
+            servers.setdefault(name, spec)
+    if not servers:
+        return {}
+    by_name = {p.name: p for p in lock.plugins}
+    have_claude = claude.installed()
+    codex_on = bool(codex.find_cli() and codex.marketplace_configured())
+    hermes_on = bool(hermes.installed() and hermesbot.find_hermes())
+    try:
+        hermes_text = hermesbot.config_path().read_text(encoding="utf-8") if hermes_on else ""
+    except OSError:
+        hermes_text = ""
+    out = {}
+    for name, spec in servers.items():
+        reg, miss = [], []
+        plugin = by_name.get(spec.get("plugin"))
+        if name in in_claude:
+            reg.append("Claude")
+        elif claude.find_cli() and plugin and plugin.id not in have_claude:
+            miss.append("Claude")
+        if codex_on:
+            cur = codex._current(name)
+            if cur and cur.get("url") == spec["url"]:
+                reg.append("Codex")
+            else:
+                miss.append("Codex(다른 항목이 같은 이름을 씀)" if cur else "Codex")
+        if hermes_on:  # 같은 이름이 있어도 다른 주소(옛 것·사용자 정의)면 등록으로 보지 않는다(Codex P2)
+            if hermesbot._yaml_mcp_url(hermes_text, name) == spec["url"]:
+                reg.append("Hermes")
+            else:
+                has = hermesbot._yaml_has_key(hermes_text, "mcp_servers", name)
+                miss.append("Hermes(다른 항목이 같은 이름을 씀)" if has else "Hermes")
+        out[name] = {"url": spec["url"], "plugin": spec.get("plugin"), "registered": reg, "missing": miss}
+    return out
+
+
+def check_remote_mcp(lock, probe=None):
+    """원격 MCP: '등록 안 됨'(jaix update 로 고침)과 '접속 실패'(인터넷·서버 쪽)를 따로 알린다."""
+    probe = probe or remotemcp.probe
+    out = []
+    for name, st in sorted(remote_mcp_state(lock).items()):
+        area = f"원격 MCP {name}"
+        if st["missing"]:
+            out.append(Check("fail", f"{area} 등록", f"등록 안 됨: {', '.join(st['missing'])}"
+                             + (f" (등록됨: {', '.join(st['registered'])})" if st["registered"] else ""),
+                             "jaix update" if not any("다른 항목" in m for m in st["missing"]) else
+                             "같은 이름의 옛·직접 넣은 항목을 지운 뒤 jaix update (일부러 바꾼 것이면 그대로 둬도 됨)"))
+        elif not st["registered"]:
+            out.append(Check("fail", f"{area} 등록", "등록 안 됨(Claude·Codex·Hermes 어디에도)", "jaix update"))
+        else:
+            out.append(Check("ok", f"{area} 등록", ", ".join(st["registered"])))
+        tools, why = probe(st["url"])
+        if why:
+            out.append(Check("warn", f"{area} 접속", f"접속 실패: {why}",
+                             "인터넷 연결 확인 — 다른 사이트는 되는데 계속 실패하면 AI센터에(서버 쪽 문제)"))
+        else:
+            out.append(Check("ok", f"{area} 접속", f"접속됨(도구 {len(tools)}개)"))
+    return out
+
+
 def check_hermes_bot():
     """jaix가 깐 Hermes 슬랙 봇. jaix가 손댄 적이 없으면 보지 않는다."""
     rec = hermesbot.recorded()
@@ -415,10 +560,11 @@ def check_hermes_bot():
         return []
     area = "Hermes 슬랙"
     if rec["status"] == "failed":
-        return [Check("fail", area, rec.get("error") or "설치 실패", "jaix setup --channels hermes (AI센터 연결 코드 필요)")]
+        return [Check("fail", area, rec.get("error") or "설치 실패", "jaix setup --channels hermes (AI센터 연결 코드 필요)",
+                      hermesbot.detail_lines(rec.get("error_detail"), tail=DETAIL_TAIL))]
     if not hermesbot.find_hermes():
         return [Check("fail", area, "hermes 실행 파일이 없음", "jaix setup --channels hermes")]
-    if rec["status"] == "no-code":
+    if rec["status"] == "no-code" and not hermesbot.linked_id(rec):  # 연결 기록·토큰이 있으면 연결된 것(아래 점검)
         return [Check("warn", area, "Hermes는 있으나 슬랙 연결 안 됨(연결 코드 없음)", "AI센터에서 연결 코드를 받아 jaix-setup 다시")]
     out = []
     if not (hermesbot.env_has("SLACK_BOT_TOKEN") and hermesbot.env_has("SLACK_APP_TOKEN")):
@@ -428,13 +574,30 @@ def check_hermes_bot():
                          "hermes gateway install"))
     else:
         slack = rec.get("slack") or {}
-        out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}"))
+        renamed = f" (Hermes-{slack['renamed_from']} 에서 이름 바꿈)" if slack.get("renamed_from") else ""
+        out.append(Check("ok", area, f"Hermes-{slack.get('id')} 연결 기록 {slack.get('connected')}{renamed}"))
+        slash, want = hermesbot.env_value("HERMES_SLACK_SLASH"), hermesbot.slash_command(slack.get("id"))
+        if slash and slash != want:
+            out.append(Check("warn", area, f"슬래시 명령 /{slash} 가 연결 기록(Hermes-{slack.get('id')})과 다름 — "
+                                           f"/{want} 가 '앱이 반응하지 않음'으로 실패함", f"jaix hermes rename {slack.get('id')}"))
+    state, missing = hermesbot.user_scope_gap()  # 내 Slack 권한(slack-access)을 받은 PC 만. 오프라인이면 조용히 넘김
+    if hermesbot.scope_notice(state, missing):
+        what = ("Slack 이 내 Slack 권한(사용자 토큰)을 받지 않음" if state == "invalid"
+                else f"내 Slack 권한에 새 도구 범위 {len(missing)}개 없음({', '.join(missing)}) — 다시 허용해야 새 도구가 동작함")
+        out.append(Check("warn", area, what, "jaix hermes slack-access 를 다시 하세요(시작 메뉴 'JAIX 슬랙 권한 갱신')"))
     if hermesbot.approval_mode() == "off":
         out.append(Check("warn", area, "위험 명령 승인이 꺼져 있음(approvals.mode: off) — 에이전트가 묻지 않고 실행함",
                          "AI센터가 켠 것이 아니면 jaix hermes approvals smart"))
+    dup = hermesbot.duplicate_credentials()
+    if dup:
+        provider, n, model = dup
+        out.append(Check("warn", "Hermes 자격", f"{provider} 자격 {n}개(같은 구독 중복) — 같은 계정이면 예전 것은 이미 "
+                                               "폐기돼, Hermes 가 그것을 고르면 슬랙 봇이 실패할 수 있음",
+                         f"jaix hermes login --model {model} --force (새로 로그인하면 예전 자격을 정리)"))
     if rec.get("last_error"):
         out.append(Check("warn", area, f"마지막 다시 설치에서 실패(기존 연결은 그대로): {rec['last_error']}",
-                         "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림"))
+                         "같은 코드를 다시 쓴 것이면 무시해도 됨 · 직접 쓰지 않은 코드가 '이미 사용됨'이면 AI센터에 알림",
+                         hermesbot.detail_lines(rec.get("last_error_detail"), tail=DETAIL_TAIL)))
     return out
 
 
@@ -454,10 +617,13 @@ def check_autoupdate():
     area = "로그온 자동 갱신"
     if not schedule.supported():
         return [Check("skip", area, "이 OS는 지원 안 함 — 가끔 jaix update")]
+    if schedule.installer_managed():
+        if schedule.startup_link().is_file():
+            return [Check("warn", area, f"예전 시작프로그램 바로가기({schedule.STARTUP_LINK})가 남음 — Defender 가 jaix 를 "
+                                        "격리하는 원인", "jaix update (지움)")]
+        return [Check("info", area, "두지 않음(서명 없는 jaix 의 자동 시작이 Defender 오탐을 부름) — Claude 플러그인은 "
+                                    "Claude 가 저절로 갱신", "Codex·Hermes 도구·jaix 새 판: 가끔 시작 메뉴 'JAIX 업데이트'")]
     if not schedule.registered():
-        if schedule.installer_managed():
-            return [Check("warn", area, f"시작프로그램 바로가기({schedule.STARTUP_LINK})가 없음 — Codex·Hermes 도구가 "
-                                        "저절로 갱신되지 않음", "jaix-setup 을 다시 실행 (또는 가끔 jaix update)")]
         return [Check("warn", area, "등록 안 됨 — Codex·Hermes 도구가 저절로 갱신되지 않음", "jaix setup")]
     bad = schedule.run_mode()
     if bad:
@@ -469,8 +635,6 @@ def check_autoupdate():
         return [Check("warn", area, f"작업이 실패로 끝남({ran[0]}, 결과 0x{ran[1]:X}) — 기록: {schedule.log_file()}",
                       "jaix setup (다시 등록) 뒤 다시 로그온해 보고, 그래도 같으면 이 줄을 AI센터에 보내 주세요")]
     last = schedule.last_status()
-    if schedule.installer_managed():
-        task = " · 시작프로그램 바로가기"
     if not last:
         return [Check("ok", area, f"등록됨 (아직 돈 적 없음){task}")]
     if last.get("ok"):
@@ -480,15 +644,29 @@ def check_autoupdate():
     return [Check("warn", area, f"{last.get('time')} 실패: {why} (기록: {schedule.log_file()}){task}", "jaix update")]
 
 
+def check_clis():
+    """명령창의 claude·codex — 새 창에서 잡히나(고른 채널만)."""
+    channels, _ = selfupdate.setup_choice()
+    return [Check(st, area, msg, fix) for st, area, msg, fix in clis.doctor_rows(channels)]
+
+
+def check_self():
+    """jaix 본체(설치본) 새 판. 받는 법은 시작 메뉴 'JAIX 업데이트' 또는 jaix update --self."""
+    res = selfupdate.doctor_status()
+    return [Check(res[0], "jaix 본체", res[1], res[2])] if res else []
+
+
 def run(lock):
-    return [*check_runtimes(lock), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
-            *check_hermes(lock), *check_autoupdate(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
+    return [*check_runtimes(lock), *check_runtime_copies(), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+            *check_hermes(lock), *check_remote_mcp(lock), *check_autoupdate(), *check_self(), *check_clis(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
 def render(checks):
     lines = []
     for c in checks:
         line = f"{MARK[c.status]} {c.area}: {c.message}"
+        if c.detail and c.status in ("warn", "fail"):
+            line += "".join(f"\n        · {d}" for d in c.detail)
         if c.fix and c.status in ("warn", "fail"):
             line += f"\n        → {c.fix}"
         lines.append(line)

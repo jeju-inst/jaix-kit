@@ -8,7 +8,9 @@ name: bundle-tag
 on:
   push:
     branches: [main]
-    paths: [".claude-plugin/marketplace.json", "src/**", "installer/**", "pyproject.toml"]
+    # 빌드 방법(jaix-setup.yml)이 바뀌어도 산출물이 바뀐다 — #137(부트로더 소스 빌드)은 워크플로만 바꿔 릴리스가 안 나갔다
+    paths: [".claude-plugin/marketplace.json", "src/**", "installer/**", "pyproject.toml", ".github/workflows/jaix-setup.yml"]
+  workflow_dispatch:   # 위에 안 걸리는 변경을 급히 내보낼 때
 
 concurrency: calver-tag
 

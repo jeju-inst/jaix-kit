@@ -35,8 +35,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v2026.10.30.2",
-        "sha": "10a53b7151ab1592979f46dcbfe7a35f429e0161"
+        "ref": "v2026.11.06.1",
+        "sha": "8bca5e4113a7d1b7d0f130f57751bb631aa01d33"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
@@ -44,7 +44,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.2"
+      "version": "2026.11.06.1"
     },
     {
       "name": "ji-report-writing",
@@ -131,8 +131,8 @@
         "source": "git-subdir",
         "url": "https://github.com/z0nam/mail-skill.git",
         "path": "plugins/mail-skill",
-        "ref": "v2026.11.04.1",
-        "sha": "adce7365cb99d609e53f14934233b6239b994add"
+        "ref": "v2026.11.21.2",
+        "sha": "73e1697bc44e32057102105726c42f0b549f45f7"
       },
       "homepage": "https://github.com/z0nam/mail-skill",
       "metadata": {
@@ -140,7 +140,83 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.04.1"
+      "version": "2026.11.21.2"
+    },
+    {
+      "name": "hwp2pdf",
+      "displayName": "HWP → PDF 변환 (hwp2pdf)",
+      "description": "한컴오피스로 HWP/HWPX 파일·폴더를 PDF·DOCX·HWPX로 일괄 변환한다.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/z0nam/hwp2pdf.git",
+        "ref": "v2026.11.05.2",
+        "sha": "00a59212f9c237ef743625736ffe5150179f7594"
+      },
+      "homepage": "https://github.com/z0nam/hwp2pdf",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.11.05.2"
+    },
+    {
+      "name": "jaix-help",
+      "displayName": "JAIX 도우미",
+      "description": "jaix 도구가 안 될 때 자가시험으로 점검하고, 묻고 고치며, 계정 연결 창을 띄운다.",
+      "category": "productivity",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jeju-inst/jaix-kit.git",
+        "path": "plugins/jaix-help",
+        "ref": "main",
+        "sha": "74e6df990ca2c0c4757012e7195358d25f080592"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-kit",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
+    },
+    {
+      "name": "ji-calendar",
+      "displayName": "연구원 일정 조회",
+      "description": "직원 이름으로 공개 일정을 찾고, 여러 사람이 함께 비는 시간을 찾는다(읽기 전용 원격 MCP).",
+      "category": "productivity",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/jeju-inst/jaix-kit.git",
+        "path": "plugins/ji-calendar",
+        "ref": "main",
+        "sha": "5d911bd6c3c40c70d88dd2c937f571287cb240ef"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-kit",
+      "metadata": {
+        "jaix": {
+          "refKind": "branch"
+        }
+      }
+    },
+    {
+      "name": "jaix-works",
+      "displayName": "웍스 (NAVER WORKS)",
+      "description": "본인 웍스 계정 권한으로 드라이브·캘린더·메일을 다룬다(nworks CLI, 기관 User OAuth 앱).",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/jeju-inst/jaix-works.git",
+        "ref": "v2026.11.10.1",
+        "sha": "660b848b860b1d6323ea5ca1294cb32c6b660d4a"
+      },
+      "homepage": "https://github.com/jeju-inst/jaix-works",
+      "metadata": {
+        "jaix": {
+          "refKind": "tag"
+        }
+      },
+      "version": "2026.11.10.1"
     }
   ]
 }
