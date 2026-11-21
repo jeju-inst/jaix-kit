@@ -38,8 +38,11 @@ jobs:
         run: |
           git config user.name "jaix-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # main 에 직접 머지된 문서·CI 변경을 beta 쪽에도 실어 승격 PR 이 충돌하지 않게
-          git merge -q --no-edit origin/main
+          # main 에 직접 머지된 문서·CI 변경을 beta 쪽에도 실어 승격 PR 이 충돌하지 않게.
+          # 충돌 나는 곳은 main 쪽을 택한다(-X theirs): 코드·문서는 main 이 원본이고,
+          # 잠금은 바로 다음 jaixlock update 가 최신 태그로 다시 맞추므로 beta 쪽 값을 잃어도 된다.
+          # (11/5·11/6 에 main 에서 잠금·doctor.py·runtimes.py 를 직접 고친 뒤 이 병합이 충돌해 봇이 멈췄음)
+          git merge -q --no-edit -X theirs origin/main
           python scripts/jaixlock.py update | tee changes.txt
           python scripts/jaixlock.py check
           if git diff --quiet && git diff --quiet origin/beta HEAD; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi

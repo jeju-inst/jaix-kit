@@ -8,6 +8,7 @@ import pytest
 from jaix import cli, doctor, lock as lockmod, paths, runtimes, works
 
 WANT = works.FALLBACK["nworks"]
+REAL_EXISTING = works.existing  # 자동 픽스처가 바꾸기 전 원본
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +20,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(works.winenv, "add_to_path", lambda dirs, dry_run=False: None)
     monkeypatch.setattr(works.winenv, "in_user_path", lambda p: True)
     monkeypatch.setattr(works, "on_path", lambda: True)
+    # 이 머신 PATH 의 진짜 nworks 를 보지 않게(있는 경우의 시험은 아래에서 따로)
+    monkeypatch.setattr(works, "existing", lambda want: None)
     # Node 는 있는 것으로, 진짜로 깔지 않는다
     found = runtimes.Found("/usr/bin/node", "22.11.0", 22)
     monkeypatch.setattr(runtimes, "ensure", lambda rt, log, dry_run=False, upgrade=False: found)
@@ -122,7 +125,7 @@ def test_cli_works_login_parses():
 
 
 def test_npm_launch_failure_is_a_failed_status(monkeypatch):
-    def boom(cli, args, timeout=600):
+    def boom(cli, args, timeout=600, cwd=None):
         raise works.subprocess.TimeoutExpired("npm", 900)
     monkeypatch.setattr(works, "_npm", lambda: "/x/npm")
     monkeypatch.setattr(works.proc, "run", boom)
@@ -137,3 +140,50 @@ def test_expose_links_into_local_bin(monkeypatch):
     works.ensure(_lock(), print, offline=True)
     link = works.link_dir() / "nworks"
     assert link.is_symlink() and os.readlink(link) == str(works.bin_dir() / "nworks")
+
+
+def test_existing_nworks_is_used_instead_of_npm(monkeypatch):
+    """이미 깔린 nworks 가 있으면 npm 으로 한 벌 더 깔지 않는다(사용자 요구 11/9)."""
+    monkeypatch.setattr(works, "existing", lambda want: ("/usr/local/bin/nworks", "1.3.2"))
+    monkeypatch.setattr(works, "_npm_install", lambda v: pytest.fail("npm 을 부르면 안 됨"))
+    monkeypatch.setattr(works, "fetch_client", lambda url, timeout=8: {"client_id": "c", "client_secret": "s"})
+    lines = []
+    assert works.ensure(_lock(), lines.append, offline=True)["status"] == "existing"
+    assert any("이미 설치된 nworks 1.3.2" in ln for ln in lines)
+    monkeypatch.setattr(works, "spec", lambda lock, offline=False: works.FALLBACK)
+    checks = {c.area: c.status for c in doctor.check_works(_lock())}
+    assert checks["웍스(nworks)"] == "ok"
+    assert works.cli() == "/usr/local/bin/nworks"
+
+
+def test_existing_accepts_same_major_not_older(monkeypatch):
+    monkeypatch.setattr(works.shutil, "which", lambda name, path=None: "/opt/bin/nworks" if path is None else None)
+    for out, ok in (("1.3.1", True), ("1.4.0", True), ("1.2.9", False), ("2.0.0", False), ("garbage", False)):
+        monkeypatch.setattr(works.proc, "run", lambda c, a, timeout=30, out=out: (0, out + "\n"))
+        assert bool(REAL_EXISTING("1.3.1")) is ok, out
+    monkeypatch.setattr(works.proc, "run", lambda c, a, timeout=30: (1, "1.3.1\n"))
+    assert REAL_EXISTING("1.3.1") is None
+
+
+def test_npm_failure_shows_npm_error_lines(monkeypatch):
+    out = ("npm error code EPERM\nnpm error syscall rename\nnpm error path C:\\x\n"
+           "npm error A complete log of this run can be found in: C:\\log.txt\n")
+    monkeypatch.setattr(works, "_npm", lambda: "/x/npm")
+    seen = {}
+    monkeypatch.setattr(works.proc, "run", lambda c, a, timeout=600, cwd=None: (seen.update(cwd=cwd), (1, out))[1])
+    ok, why = works._npm_install("1.3.1")
+    assert not ok and "EPERM" in why and "rename" in why and "complete log" not in why
+    assert seen["cwd"] == str(works.home())  # Windows npm 은 현재 폴더의 package.json 을 읽는다
+
+
+def test_cli_prefers_accepted_external_over_stale_managed(monkeypatch):
+    """낡은 jaix 사본(1.2.9)과 받아들인 기존 nworks(1.3.2)가 같이 있으면 로그인도 기존 것을 쓴다(Codex #154)."""
+    monkeypatch.setattr(works, "exe", lambda: "/jaix/nworks")
+    monkeypatch.setattr(works, "installed", lambda: ("1.2.9", "sha512-old"))
+    monkeypatch.setattr(works, "existing", lambda want: ("/usr/local/bin/nworks", "1.3.2"))
+    assert works.cli() == "/usr/local/bin/nworks"
+    monkeypatch.setattr(works, "installed", lambda: (WANT["version"], WANT["integrity"]))
+    assert works.cli() == "/jaix/nworks"
+    monkeypatch.setattr(works, "installed", lambda: ("1.2.9", "sha512-old"))
+    monkeypatch.setattr(works, "existing", lambda want: None)
+    assert works.cli() == "/jaix/nworks"

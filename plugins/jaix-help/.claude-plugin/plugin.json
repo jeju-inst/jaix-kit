@@ -1,0 +1,10 @@
+{
+  "name": "jaix-help",
+  "description": "JAIX 도우미 — jaix 도구가 안 될 때 자가시험(jaix selftest)으로 점검하고, 고칠 수 있는 것은 묻고 고치며, 계정 연결 창(jaix connect)을 띄운다.",
+  "author": {
+    "name": "제주연구원 AI센터",
+    "url": "https://github.com/jeju-inst/jaix-kit"
+  },
+  "homepage": "https://github.com/jeju-inst/jaix-kit",
+  "license": "MIT"
+}

@@ -53,7 +53,9 @@ a = Analysis(  # noqa: F821
     [os.path.join(ROOT, "src", "jaix", "__main__.py")],
     pathex=[os.path.join(ROOT, "src")],
     # 잠금 사본을 묶어 네트워크가 막혀도 doctor가 돈다(평소엔 GitHub의 최신 잠금을 먼저 본다)
-    datas=[(os.path.join(ROOT, ".claude-plugin", "marketplace.json"), ".")],
+    # JAIX 도우미 스킬 사본: 플러그인 설치가 실패해도 시작 메뉴 'JAIX 도우미'(jaix helper)가 쓴다
+    datas=[(os.path.join(ROOT, ".claude-plugin", "marketplace.json"), "."),
+           (os.path.join(ROOT, "plugins", "jaix-help", "skills", "jaix-help", "SKILL.md"), "jaix-help")],
 )
 pyz = PYZ(a.pure)  # noqa: F821
 
@@ -62,7 +64,8 @@ jaix = EXE(  # noqa: F821
     pyz, a.scripts, [], exclude_binaries=True, name="jaix", console=True, hide_console="hide-early",
     upx=False, version=version_info("jaix", "JAIX 도구 설치·점검·갱신"),
 )
-# 창 없는 빌드: 예약 작업(로그온 갱신·설치 중 setup)이 부른다. hide-early 는 콘솔이 생긴 뒤 숨겨 깜빡임이 남는다
+# 창 없는 빌드. 예전엔 예약 작업(로그온 갱신·설치 중 setup)이 불렀으나 Defender 가 그 흐름의 jaixw 를 격리해(11/4·11/7)
+# 이제 자동으로 띄우는 곳이 없다(설치 중 setup 은 jaix.exe + hide-early, 깜빡임 한 번). 손으로 부르는 용도로만 남긴다
 jaixw = EXE(  # noqa: F821
     pyz, a.scripts, [], exclude_binaries=True, name="jaixw", console=False,
     upx=False, version=version_info("jaixw", "JAIX 도구 갱신(창 없음)"),
