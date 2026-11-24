@@ -488,7 +488,10 @@ def _update(args, log):
         if res.get("failed"):
             problems.append(f"Codex 플러그인 설치 실패: {', '.join(res['failed'])}")
     log("\n[3/3] Hermes 스킬")
+    hermesbot.reset_changes()
     changed = hermes.sync(lock, log, dry_run=args.dry_run)
+    if changed:
+        hermesbot.note_change()
     log(f"  {len(changed)}개 맞춤" if changed else "  맞출 것 없음")
     # 잠금에 원격 MCP 가 새로 들어왔거나 주소가 바뀌었으면 Hermes 에도 맞춘다(setup 만 넣던 것, jaix-kit#170)
     if hermes.installed() and hermesbot.find_hermes() and not args.dry_run:
@@ -500,6 +503,9 @@ def _update(args, log):
         hermesbot.reset_failures()
         if not hermesbot.quiet(hermesbot.find_hermes(), log):
             problems.append(_with_cause("Hermes 소음 정리 실패"))
+    # 바꾼 설정·스킬은 gateway 가 다시 떠야 먹는다(jaix-kit#196). 실패해도 문제로 올리지 않는다(다음 로그온에 뜸)
+    if hermesbot.find_hermes() and not args.dry_run:
+        hermesbot.restart_if_needed(hermesbot.find_hermes(), log)
     return problems
 
 
