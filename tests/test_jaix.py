@@ -4309,3 +4309,62 @@ def test_hermes_remind_skill_in_jaix_help_plugin():
     text = (LOCK_FILE.parents[1] / "plugins" / "jaix-help" / "skills" / "hermes-remind" / "SKILL.md").read_text(encoding="utf-8")
     assert text.startswith("---\nname: hermes-remind\n")
     assert 'jaix hermes remind "<시각>" "<내용>"' in text and "slack_schedule_message" in text
+
+
+# --- 다시 설치·업데이트 뒤 gateway 다시 띄우기(jaix-kit#196 jaix-test 11/24: 멈춘 gateway 가 재설치로 안 풀림) ----------
+def _restart_calls(calls):
+    return [c for c in calls if c[1:] == ["gateway", "restart"]]
+
+
+def test_hermes_setup_on_linked_pc_restarts_gateway_once(isolated, monkeypatch, the_lock):
+    _connected_before(isolated, monkeypatch)
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    monkeypatch.setattr(hermesbot, "refresh_kit", lambda h, ident, log: True)
+    monkeypatch.setattr(hermesbot, "bot_room", lambda h, ident, log, call=None: True)
+    lines = []
+    res = REAL_HERMES_SETUP(the_lock, lines.append)
+    assert res["status"] == "connected"
+    assert len(_restart_calls(calls)) == 1
+    assert "Hermes gateway 를 다시 시작함" in "\n".join(lines)
+
+
+def test_hermes_setup_skips_second_restart_when_plugin_refresh_already_did(isolated, monkeypatch, the_lock):
+    _connected_before(isolated, monkeypatch)
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    monkeypatch.setattr(hermesbot, "refresh_kit",
+                        lambda h, ident, log: hermesbot.restart_gateway(h, log, "done", "failed") or True)
+    monkeypatch.setattr(hermesbot, "bot_room", lambda h, ident, log, call=None: True)
+    REAL_HERMES_SETUP(the_lock, print)
+    assert len(_restart_calls(calls)) == 1
+
+
+def test_restart_if_needed_only_for_linked_pc_with_changes(isolated, monkeypatch):
+    calls = []
+    _fake_windows(monkeypatch, isolated, calls)
+    hermesbot.reset_changes()
+    assert hermesbot.restart_if_needed("hermes", print) and calls == []          # 연결 안 됨·바뀐 것 없음
+    hermesbot.note_change()
+    assert hermesbot.restart_if_needed("hermes", print) and calls == []          # 연결 안 된 PC 는 띄울 봇이 없다
+    _connected_before(isolated, monkeypatch)
+    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (calls.append(cmd), (True, ""))[1])
+    hermesbot.reset_changes()
+    hermesbot.restart_if_needed("hermes", print)
+    assert calls == []                                                           # 바뀐 것 없으면 그대로
+    hermesbot.note_change()
+    hermesbot.restart_if_needed("hermes", print)
+    hermesbot.restart_if_needed("hermes", print)
+    assert len(_restart_calls(calls)) == 1                                       # 한 실행에 한 번
+
+
+def test_setter_marks_change_only_when_it_ran(isolated, monkeypatch):
+    calls = []
+    _fake_windows(monkeypatch, isolated, calls)
+    hermesbot.reset_changes()
+    put = hermesbot._Setter("hermes", print)
+    put.applied["a"] = "1"
+    put("a", "1", ["config", "set", "a", "1"])
+    assert not hermesbot._changes["config"]
+    put("b", "2", ["config", "set", "b", "2"])
+    assert hermesbot._changes["config"]

@@ -308,6 +308,40 @@ def reset_failures():
     _failures.clear()
 
 
+# --- gateway 다시 띄우기(jaix-kit#196) ------------------------------------------------------------
+# gateway 는 config.yaml 을 시작할 때만 읽는다. 그리고 슬랙 소켓이 끊겼다 붙는 사이 이벤트 처리가 멈춘 채 프로세스만
+# 남는 일이 있다(jaix-test 11/22-24: 로그 기록이 멈추고 DM 수신 0건, `hermes gateway restart` 뒤에야 답함). 그래서
+# 이미 연결된 PC 에서 jaix 가 설정을 실제로 바꿨거나(update) 사람이 설치기를 다시 돌렸으면(setup) 끝에 한 번 다시 띄운다.
+# 한 실행 안에서 플러그인 갱신·전용 채널이 이미 다시 띄웠으면 또 하지 않는다.
+_changes = {"config": False, "restarted": False}
+
+
+def reset_changes():
+    _changes.update(config=False, restarted=False)
+
+
+def note_change():
+    _changes["config"] = True
+
+
+def restart_gateway(hermes, log, done, failed):
+    ok = _run([hermes, "gateway", "restart"], log, timeout=180)[0]
+    if ok:
+        _changes["restarted"] = True
+    log(done if ok else failed)
+    return ok
+
+
+def restart_if_needed(hermes, log, force=False):
+    """연결된 봇이 있고(linked_id), 이번에 설정을 바꿨거나 force(설치기 다시 실행)일 때만. 이미 다시 띄웠으면 건너뜀."""
+    if _changes["restarted"] or not linked_id() or not (force or _changes["config"]):
+        return True
+    why = "다시 설치" if force and not _changes["config"] else "바뀐 설정 적용"
+    return restart_gateway(hermes, log, f"    Hermes gateway 를 다시 시작함({why})",
+                           "    gateway 를 다시 시작하지 못함 — 바뀐 설정은 다음 로그온부터 적용됩니다"
+                           "(지금 하려면 새 명령창에서 hermes gateway restart)")
+
+
 def failure_detail():
     """지금까지 모은 실패 중 마지막 FAILURE_LIMIT 개(일어난 순서). 없으면 []."""
     return [dict(f) for f in _failures[-FAILURE_LIMIT:]]
@@ -474,6 +508,7 @@ class _Setter:
         ok = _run([self.hermes, *args], self.log)[0]
         if ok:
             self.applied[key] = value
+            note_change()
         else:
             self.applied.pop(key, None)
             if len(_failures) > before:  # _run 이 명령·코드·출력을 남겼다 — 어느 설정 키였는지 붙인다
@@ -1008,10 +1043,8 @@ def refresh_kit(hermes, ident, log):
     rec.setdefault("slack", {})["kit"] = SLACKBOT_SHA
     rec["slack"].pop("keep_name", None)
     _save_record(rec)
-    if _run([hermes, "gateway", "restart"], log, timeout=180)[0]:
-        log("    슬랙 플러그인을 새 판으로 맞추고 Hermes gateway 를 다시 시작함")
-    else:
-        log("    슬랙 플러그인을 새 판으로 맞춤 — gateway 를 다시 시작하지 못해 다음 로그온부터 적용됩니다")
+    restart_gateway(hermes, log, "    슬랙 플러그인을 새 판으로 맞추고 Hermes gateway 를 다시 시작함",
+                    "    슬랙 플러그인을 새 판으로 맞춤 — gateway 를 다시 시작하지 못해 다음 로그온부터 적용됩니다")
     return True
 
 
@@ -1193,10 +1226,8 @@ def bot_room(hermes, ident, log, call=None):
     # gateway 는 설정을 시작할 때만 읽는다. 연결(setup_pc)·플러그인 갱신이 gateway 를 먼저 다시 띄운 뒤라, 새로 넣은
     # 전용 채널은 한 번 더 다시 띄워야 먹는다(jaix-test 실측 11/9: 채널은 생겼는데 멘션 없는 말에 답 안 함)
     if restart:
-        if _run([hermes, "gateway", "restart"], log, timeout=180)[0]:
-            log("    전용 채널 설정을 적용하려고 Hermes gateway 를 다시 시작함")
-        else:
-            log("    gateway 를 다시 시작하지 못해 전용 채널은 다음 로그온부터 멘션 없이 답합니다")
+        restart_gateway(hermes, log, "    전용 채널 설정을 적용하려고 Hermes gateway 를 다시 시작함",
+                        "    gateway 를 다시 시작하지 못해 전용 채널은 다음 로그온부터 멘션 없이 답합니다")
     put.save()
     rec = recorded()
     rec["room"] = owned
@@ -1382,6 +1413,7 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
     linked = linked_id(rec)
     rec.update({"model": model, "status": "installing"})
     reset_failures()
+    reset_changes()
     if not dry_run:
         _save_record(rec)
     # 코드 파일은 무엇보다 먼저 읽고 지운다(아래 단계가 실패해도 디스크에 남지 않게)
@@ -1409,6 +1441,9 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
     if not code:
         if linked:
             log(f"    슬랙 연결: Hermes-{linked} 그대로 씀(새 연결 코드 없음 — 필요 없음)")
+            # 사람이 설치기를 다시 돌린 것은 대개 "봇이 이상해서"다 — 멈춘 gateway 도 여기서 풀리게 한다(jaix-kit#196)
+            if not dry_run:
+                restart_if_needed(hermes, log, force=True)
             return _done({"status": "connected", "id": linked, "login": PROVIDERS[model]["login"]}, dry_run)
         log("    슬랙 연결 코드가 없어 슬랙 연결은 건너뜀 — AI센터에서 코드를 받아 jaix-setup 을 다시 실행하세요")
         return _done({"status": "no-code", "login": PROVIDERS[model]["login"]}, dry_run)

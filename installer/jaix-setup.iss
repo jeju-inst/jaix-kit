@@ -373,10 +373,13 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := ((PageID = HermesPage.ID) or (PageID = ModelPage.ID)) and not ChannelPage.Values[2];
-  // 로그인 페이지: Hermes 를 골랐고 실제로 깔렸을 때만. 무인 설치는 페이지를 띄우지 않는다
+  // 로그인 페이지: Hermes 를 골랐고 실제로 깔렸을 때만. 무인 설치는 페이지를 띄우지 않는다.
+  // hermes.exe 가 없고 hermes.cmd 래퍼만 있는 PC(jaix-kit#188)도 깔린 것으로 본다 — 안내문은 이 화면을 가리키므로
+  // 건너뛰면 로그인할 곳을 놓친다(jaix-kit#196)
   if PageID = LoginPage.ID then
     Result := WizardSilent() or IsAutoUpdate() or not HermesChosen() or
-      not FileExists(ExpandConstant('{localappdata}\hermes\bin\hermes.exe'));
+      not (FileExists(ExpandConstant('{localappdata}\hermes\bin\hermes.exe')) or
+           FileExists(ExpandConstant('{localappdata}\hermes\bin\hermes.cmd')));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
