@@ -37,7 +37,7 @@ TTL_HOURS = 72
 CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
-SLACKBOT_SHA = "2affced312a511ed7f33c439b679be450c5e9917"  # hermes-slackbot#32: remind.py(봇이 정한 시각에 주인 DM). #31 slack-tools 주제 편집 포함
+SLACKBOT_SHA = "27a21770274d09e07c1c6e7c0c2254d932453942"  # hermes-slackbot#35: slack-tools 채널 캔버스(user token canvases:read/write). #32 remind.py·#31 주제 편집 포함
 # ChatGPT 기기 코드 로그인은 계정 설정에서 켜야 한다(기본 꺼짐으로 보임 — 11/25 연구원 PC 에서 이 스위치에 막힘)
 DEVICE_CODE_SETTING = ("코드 입력이 막히면: chatgpt.com → 설정 → 보안 → "
                        "'Codex, Excel, PowerPoint 및 Word의 기기 코드 로그인 활성화'를 켜고 다시 하세요.")
