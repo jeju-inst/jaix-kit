@@ -32,6 +32,14 @@ def blocked(err):
     return getattr(err, "winerror", None) == BLOCKED
 
 
+def explain(err, read=None):
+    """4551 차단을 사람이 읽을 말로. SAC 가 켜져(또는 평가 중) 있을 때만 SAC 를 지목하고, 아니면 기관 정책
+    (App Control·Device Guard)일 수 있으니 원래 오류를 남긴다(Codex #207)."""
+    if state(read) in ("on", "eval"):
+        return hint()
+    return f"설치기 실행 실패: {err} — 애플리케이션 제어 정책(기관 보안 정책일 수 있음)이 막았습니다. 화면을 찍어 AI센터에 보내 주세요."
+
+
 def hint():
     return f"Windows 스마트 앱 컨트롤이 막았습니다. {WHERE} 후 다시 하세요(백신·SmartScreen 은 그대로 켜져 있음)."
 

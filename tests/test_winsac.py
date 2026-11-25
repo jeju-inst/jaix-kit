@@ -26,6 +26,7 @@ def test_doctor_includes_sac(monkeypatch):
 
 
 def test_launch_blocked_by_app_control_explains(tmp_path, monkeypatch):
+    monkeypatch.setattr(winsac, "state", lambda read=None: "on")
     monkeypatch.setattr(selfupdate, "verified", lambda st: tmp_path / "jaix-setup.exe")
     monkeypatch.setattr(selfupdate, "save_state", lambda st: None)
 
@@ -47,3 +48,11 @@ def test_launch_other_oserror_keeps_message(tmp_path, monkeypatch):
     st = {}
     selfupdate.launch(st, lambda m: None, popen=popen, close=lambda log: None)
     assert st["error"].startswith("설치기 실행 실패")
+
+
+def test_4551_without_sac_keeps_original_error():
+    e = OSError("애플리케이션 제어 정책에서 이 파일을 차단했습니다")
+    e.winerror = 4551
+    msg = winsac.explain(e, read=lambda: 0)
+    assert "스마트 앱 컨트롤" not in msg and "애플리케이션 제어 정책에서" in msg and "기관" in msg
+    assert "스마트 앱 컨트롤" in winsac.explain(e, read=lambda: 2)

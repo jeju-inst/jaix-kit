@@ -434,7 +434,7 @@ def launch(state, log, popen=None, close=None):
         (popen or subprocess.Popen)(cmd, creationflags=flags, close_fds=True, cwd=str(updates_dir()))
     except OSError as e:  # 실행 차단(Defender·SmartScreen·스마트 앱 컨트롤)
         from jaix import winsac
-        state["error"] = winsac.hint() if winsac.blocked(e) else f"설치기 실행 실패: {e}"
+        state["error"] = winsac.explain(e) if winsac.blocked(e) else f"설치기 실행 실패: {e}"
         save_state(state)
         log(f"jaix 업데이트: {state['error']}")
         return False
