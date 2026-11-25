@@ -2199,6 +2199,26 @@ def test_hermes_login_quick_failure_does_not_open_browser(isolated, monkeypatch)
     assert not opened
 
 
+def test_chatgpt_login_points_to_device_code_setting(isolated, monkeypatch):
+    # ChatGPT 계정 설정의 '기기 코드 로그인' 스위치가 꺼져 있으면 코드 입력이 막힌다(11/25 연구원 PC)
+    monkeypatch.setattr(hermesbot, "show_console", lambda: None)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "/x/hermes")
+    monkeypatch.setattr(hermesbot, "OPEN_DELAY", 30)
+    out = []
+    hermesbot.cmd_login(argparse.Namespace(model="chatgpt", no_wait=True), lambda m="": out.append(m), run=lambda cmd: 2,
+                        opener=lambda u: True, pause=lambda sec, log: None)
+    hint = [m for m in out if "기기 코드 로그인 활성화" in m]
+    assert len(hint) == 2  # 시작 전 안내 + 실패 뒤 다시
+    hits = [i for i, m in enumerate(out) if "기기 코드 로그인 활성화" in m]
+    assert hits[1] > next(i for i, m in enumerate(out) if "로그인이 끝나지 않았습니다" in m)
+    out.clear()
+    hermesbot.cmd_login(argparse.Namespace(model="claude", no_wait=True), lambda m="": out.append(m), run=lambda cmd: 2,
+                        pause=lambda sec, log: None)
+    assert not any("기기 코드" in m for m in out)
+    iss = (Path(__file__).resolve().parents[1] / "installer" / "jaix-setup.iss").read_text(encoding="utf-8-sig")
+    assert "기기 코드 로그인 활성화" in iss
+
+
 # --- 설치본 로그온 자동 갱신 = 설치기가 둔 시작프로그램 바로가기 (Defender Persistence.A!ml, jaix-win 11/4) ----------
 @pytest.fixture
 def managed(isolated, monkeypatch, tmp_path):
