@@ -625,6 +625,25 @@ def test_run_via_task_streams_log_and_returns_code(isolated, monkeypatch):
     assert any(a[:2] == ["schtasks", "/Delete"] for a in calls)  # 끝나면 지운다
 
 
+def test_run_via_task_heartbeat_while_quiet(isolated, monkeypatch):
+    # 설치창은 줄이 와야 다시 그려진다 — 조용한 단계에서도 몇 초마다 한 줄(설치창 "응답 없음" 방지)
+    import threading
+    logf, status = isolated / "setup.log", isolated / "st.json"
+    seen = []
+
+    def fake_run(args):
+        if args[:2] == ["schtasks", "/Run"]:
+            logf.write_text("[1/3] 런타임\n", encoding="utf-8")
+            threading.Timer(1.6, lambda: status.write_text('{"code": 0}', encoding="utf-8")).start()
+        return True, ""
+    monkeypatch.setattr(schedule, "_run", fake_run)
+    monkeypatch.setattr(schedule, "_user_id", lambda: "u")
+    assert schedule.run_via_task(["jaix.exe"], logf, status, seen.append, heartbeat=0.5) == 0
+    beats = [s for s in seen if "진행 중" in s]
+    assert beats and seen.index("[1/3] 런타임") < seen.index(beats[0])
+    assert len(beats) <= 4  # 쏟아내지 않는다
+
+
 def test_run_via_task_falls_back_when_cannot_register(isolated, monkeypatch):
     monkeypatch.setattr(schedule, "_run", lambda args: (False, "액세스 거부"))
     monkeypatch.setattr(schedule, "_user_id", lambda: "u")

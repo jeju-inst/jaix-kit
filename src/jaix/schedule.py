@@ -339,9 +339,12 @@ def last_status():
 # 사용자 세션에 새로 만드는 프로세스라 설치본의 프로세스 계보·완화 정책과 무관하다 — 로그온 자동 갱신(#12)
 # CI 에서 schtasks /Run 으로 실제로 도는 것도 확인했다. 그래서 설치본은 이 작업을 /Run 하고 결과를 기다린다.
 ONCE_TASK = "jaix-setup-once"
+# 설치본(ExecAndLogOutput)은 출력 줄이 올 때만 창을 다시 그린다. Hermes 플러그인 설치처럼 몇 분 조용한 단계에서는
+# Windows 가 설치창을 "응답 없음"으로 바래게 만든다(11/25 연구원 PC). 그래서 조용하면 몇 초마다 한 줄을 흘린다
+HEARTBEAT = 2
 
 
-def run_via_task(cmd, log_path, status_path, echo, start_timeout=120, timeout=3600):
+def run_via_task(cmd, log_path, status_path, echo, start_timeout=120, timeout=3600, heartbeat=HEARTBEAT):
     """cmd 를 한 번짜리 작업으로 돌리고 끝날 때까지 log_path 에 새로 붙는 줄을 echo 로 흘린다.
     작업을 만들거나 띄우지 못하면 None(호출자가 직접 실행으로 물러선다), 끝나면 status_path 의 종료 코드."""
     import time
@@ -363,8 +366,14 @@ def run_via_task(cmd, log_path, status_path, echo, start_timeout=120, timeout=36
             return None
         echo("(작업 스케줄러로 jaix setup 을 돌리는 중 — 설치 프로그램의 프로세스 제약을 물려받지 않게)")
         began, started = time.monotonic(), False
+        quiet_since = last_beat = began
         while time.monotonic() - began < timeout:
+            now = time.monotonic()
+            if heartbeat and now - last_beat >= heartbeat and now - quiet_since >= heartbeat:
+                echo(f"  … 진행 중 ({int(now - quiet_since)}초째 — 멈춘 게 아닙니다)")
+                last_beat = now
             if log_path.exists() and log_path.stat().st_size > offset:
+                quiet_since = last_beat = time.monotonic()
                 started = True
                 with open(log_path, "rb") as f:
                     f.seek(offset)
@@ -380,7 +389,7 @@ def run_via_task(cmd, log_path, status_path, echo, start_timeout=120, timeout=36
             if not started and time.monotonic() - began > start_timeout:
                 echo("(작업이 시작되지 않음 → 직접 실행)")
                 return None
-            time.sleep(1)
+            time.sleep(0.5 if heartbeat else 1)
         echo("(시간 초과 — 작업이 끝나지 않음)")
         return 1
     finally:
