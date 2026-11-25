@@ -3705,7 +3705,8 @@ def test_slack_access_cli_dry_run(isolated, monkeypatch):
 
 
 # --- 내 Slack 권한(사용자 토큰)이 새 슬랙 도구 범위에 모자라면 알리고, 화면에서 직접 돌린 update 면 다시 허용을 잇는다 ---
-OLD_USER_SCOPES = [s for s in hermesbot.KIT_USER_SCOPES if not s.endswith(":write.topic")]   # hermes-slackbot#31 전 15개
+OLD_USER_SCOPES = [s for s in hermesbot.KIT_USER_SCOPES
+                   if not s.endswith(":write.topic") and not s.startswith("canvases:")]   # hermes-slackbot#31 전 15개
 
 
 def _auth_test(scopes=None, error=None, raises=None, seen=None):
@@ -3720,14 +3721,16 @@ def _auth_test(scopes=None, error=None, raises=None, seen=None):
     return call
 
 
-def test_kit_user_scopes_matches_hermes_slackbot_31():
-    assert len(hermesbot.KIT_USER_SCOPES) == 17 == len(set(hermesbot.KIT_USER_SCOPES))
-    assert {"channels:write.topic", "groups:write.topic"} <= set(hermesbot.KIT_USER_SCOPES)
+def test_kit_user_scopes_matches_hermes_slackbot_35():
+    assert len(hermesbot.KIT_USER_SCOPES) == 19 == len(set(hermesbot.KIT_USER_SCOPES))
+    assert {"channels:write.topic", "groups:write.topic", "canvases:read", "canvases:write"} <= set(hermesbot.KIT_USER_SCOPES)
 
 
 @pytest.mark.parametrize("call,want", [
     (_auth_test(scopes=hermesbot.KIT_USER_SCOPES), ("ok", [])),
-    (_auth_test(scopes=OLD_USER_SCOPES), ("ok", ["channels:write.topic", "groups:write.topic"])),
+    (_auth_test(scopes=OLD_USER_SCOPES), ("ok", ["channels:write.topic", "groups:write.topic", "canvases:read", "canvases:write"])),
+    (_auth_test(scopes=[s for s in hermesbot.KIT_USER_SCOPES if not s.startswith("canvases:")]),
+     ("ok", ["canvases:read", "canvases:write"])),  # 설명·주제까지 받은 PC 도 캔버스 범위를 다시 허용하라고 안내
     (_auth_test(scopes=[*hermesbot.KIT_USER_SCOPES, "extra:read"]), ("ok", [])),
     (_auth_test(error="invalid_auth"), ("invalid", [])),
     (_auth_test(error="token_revoked"), ("invalid", [])),
