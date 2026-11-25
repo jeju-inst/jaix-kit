@@ -987,6 +987,8 @@ def quiet(hermes, log):
     ident = (rec.get("slack") or {}).get("id")
     if ident:  # 이미 연결된 PC(jaix update·재설치). 처음 연결은 setup() 이 connect_slack 뒤에 부른다
         refresh_kit(hermes, ident, log)  # 실패해도 막지 않는다(다음 update 때 다시)
+        from jaix import hermesnotice  # 순환을 피한다(hermesnotice 가 hermesbot 을 부른다)
+        hermesnotice.install(log)  # JAIX 새 판이 나오면 봇이 소유자 DM 으로 알림(실패해도 막지 않음)
         if not bot_room(hermes, ident, log):
             _note_failure(step="전용 채널(bot_room)", note="위 기록의 '전용 채널' 줄 참고")
             ok = False

@@ -90,9 +90,9 @@ def due(state, now=None):
     return (time.time() if now is None else now) - checked >= interval
 
 
-def _fetch():
+def _fetch(timeout=15):
     # digest 가 API 응답에만 있어 웹 경로(net._web_release)로 물러서지 않는다 — 한도에 걸리면 다음에 다시
-    return net.get_json(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=15)
+    return net.get_json(f"https://api.github.com/repos/{REPO}/releases/latest", timeout=timeout)
 
 
 def prune_installed(log=None):
@@ -156,6 +156,45 @@ def _rejudge(state):
     cur = current()
     state["newer"] = bool(cur and state.get("url") and parse_version(state.get("latest")) > cur)
     return state
+
+
+# --- 새 판 알림(설치는 하지 않는다) ------------------------------------------------------------------
+# hwp2pdf 처럼 "쓸 때 확인하고 부드럽게 알려 준다". 설치본은 로그온 자동 갱신이 없어(#46) 새 판이 나와도 아무도
+# 모르고 지나갔다(2026-11-25). 그래서 사용자가 이미 쓰고 있는 곳 — Claude 세션 시작(jaix-help 플러그인 훅)과
+# Hermes 봇(게이트웨이 훅이 소유자 DM) — 에서 한 줄 알린다. 받기·설치는 여전히 사용자가 시작 메뉴 'JAIX 업데이트'로.
+NOTICE_CHANNELS = ("claude", "hermes")
+NOTICE_AGAIN = {"claude": 24 * 60 * 60, "hermes": 3 * 24 * 60 * 60}  # 같은 판을 다시 알리는 간격
+NOTICE_TIMEOUT = 5  # 세션 시작을 붙잡지 않게 짧게. 못 받으면 지난 상태로 판단하고 다음에 다시
+
+
+def notice_text(state):
+    head = "[중요] " if state.get("critical") else ""
+    return (f"{head}JAIX 새 판 {state.get('latest')} 이 나왔습니다(지금 {__version__}). "
+            "시작 메뉴 'JAIX 업데이트'를 누르면 몇 분 안에 바뀝니다.")
+
+
+def pending_notice(channel, now=None, fetch=None):
+    """채널(claude·hermes)에 알릴 새 판 상태(알릴 때가 아니면 None). 알렸으면 mark_noticed 로 기록한다 —
+    보내기가 실패하면 기록하지 않아 다음에 다시 알린다. 같은 판은 NOTICE_AGAIN(중요 판이면 1시간) 간격으로만."""
+    if channel not in NOTICE_CHANNELS or not applies():
+        return None
+    state = check(fetch=fetch or (lambda: _fetch(NOTICE_TIMEOUT)), now=now)
+    if not state.get("newer"):
+        return None
+    now = time.time() if now is None else now
+    seen = (state.get("noticed") or {}).get(channel) or {}
+    again = CRITICAL_INTERVAL if state.get("critical") else NOTICE_AGAIN[channel]
+    try:
+        recent = seen.get("version") == state.get("latest") and now - float(seen.get("at")) < again
+    except (TypeError, ValueError):
+        recent = False
+    return None if recent else state
+
+
+def mark_noticed(channel, state, now=None):
+    state.setdefault("noticed", {})[channel] = {"version": state.get("latest"),
+                                                "at": time.time() if now is None else now}
+    save_state(state)
 
 
 def sha256(path):

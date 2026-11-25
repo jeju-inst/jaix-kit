@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from jaix import __version__, claude, clis, codex, connect, doctor, gw, hancom, helper, hermes, hermesbot, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, report, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
+from jaix import __version__, claude, clis, codex, connect, doctor, gw, hancom, helper, hermes, hermesbot, hermesnotice, hwpjar, hwprhwp, lock as lockmod, net, paths, plugbin, report, runtimes, schedule, selftest, selfupdate, uvpython, winenv, works
 
 CHANNELS = ("claude", "codex", "hermes")
 
@@ -531,6 +531,37 @@ def cmd_cleanup(args, log):
     return 0
 
 
+CLAUDE_NOTICE_CONTEXT = (
+    "JAIX 새 판 알림: {text} 사용자의 첫 답 끝에 이 내용을 한 줄로만 덧붙이세요(이 세션에서 한 번). "
+    "사용자가 JAIX 도구가 안 된다고 하면 먼저 이 업데이트를 권하세요. 설치를 대신 실행하지는 마세요.")
+
+
+def cmd_notice(args, log):
+    """새 판 알림 한 줄(설치는 하지 않음). Claude 세션 시작 훅·Hermes 게이트웨이 훅이 부른다.
+    알릴 것이 없거나 무엇이 실패해도 조용히 0 — 훅이 세션·봇을 붙잡거나 오류를 띄우면 안 된다."""
+    try:
+        state = selfupdate.pending_notice(args.target)
+        if not state:
+            return 0
+        text = selfupdate.notice_text(state)
+        if args.target == "claude":
+            out = {"systemMessage": text,
+                   "hookSpecificOutput": {"hookEventName": "SessionStart",
+                                          "additionalContext": CLAUDE_NOTICE_CONTEXT.format(text=text)}}
+            # ASCII 이스케이프 JSON — 콘솔 코드페이지(cp949)와 무관하게 Claude 가 읽는다
+            sys.stdout.write(json.dumps(out) + "\n")
+            sys.stdout.flush()
+        elif args.send:
+            if not hermesnotice.send_owner(text):
+                return 0  # 기록하지 않음 — 다음에 다시
+        else:
+            log(text)
+        selfupdate.mark_noticed(args.target, state)
+    except Exception:  # noqa: BLE001
+        pass
+    return 0
+
+
 def cmd_works(args, log):
     if args.works_cmd == "login":
         return works.login(log)
@@ -634,6 +665,11 @@ def build_parser():
     lg.add_argument("--no-wait", action="store_true", help="끝나고 Enter 를 기다리지 않음")
     lg.add_argument("--force", action="store_true", help="이미 로그인돼 있어도 묻지 않고 다시 로그인(예전 자격은 정리)")
     lg.set_defaults(func=hermesbot.cmd_login)
+
+    nt = sub.add_parser("notice", help=argparse.SUPPRESS)  # 훅이 부른다: 새 판 알림 한 줄(설치는 하지 않음)
+    nt.add_argument("--for", dest="target", choices=selfupdate.NOTICE_CHANNELS, required=True)
+    nt.add_argument("--send", action="store_true", help="hermes: 내 봇이 소유자 DM 으로 보냄")
+    nt.set_defaults(func=cmd_notice)
 
     w = sub.add_parser("works", parents=[common], help="웍스(NAVER WORKS) 도구")
     wsub = w.add_subparsers(dest="works_cmd", required=True)
