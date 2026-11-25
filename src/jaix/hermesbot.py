@@ -1579,13 +1579,15 @@ def cmd_slack_access(args, log, opener=None, sleep=None, clock=None):
 
 
 # 공용 OAuth 앱(JAIX Slack 연결)이 구성원 사용자 토큰에 요청하는 범위. 출처: z0nam/hermes-slackbot
-# scripts/make_manifest.py KIT_USER_SCOPES(hermes-slackbot#31 에서 15→17: channels/groups:write.topic). 그쪽이 늘면 같이 올린다
+# scripts/make_manifest.py KIT_USER_SCOPES(hermes-slackbot#31 에서 15→17: channels/groups:write.topic, #35 에서 →19:
+# canvases:read/write 채널 캔버스). 그쪽이 늘면 같이 올린다
 KIT_USER_SCOPES = (
     "identify", "search:read",
     "channels:history", "groups:history", "im:history", "mpim:history",
     "channels:read", "groups:read", "im:read", "mpim:read", "users:read",
     "files:read", "files:write", "chat:write", "im:write",
     "channels:write.topic", "groups:write.topic",
+    "canvases:read", "canvases:write",
 )
 SLACK_TOKEN_DEAD = ("invalid_auth", "token_revoked", "token_expired", "account_inactive", "not_authed")
 
