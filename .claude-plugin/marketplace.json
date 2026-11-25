@@ -16,8 +16,8 @@
         "source": "git-subdir",
         "url": "https://github.com/jeju-inst/calendar-worklog.git",
         "path": "plugin",
-        "ref": "v2026.10.30.1",
-        "sha": "dab8e0e00e9a17b54e1a2db3d522c1a956e6bcc6"
+        "ref": "v2026.11.21.1",
+        "sha": "a6d5d12e87c37d0022b29820ee19f6fd5a093ee6"
       },
       "homepage": "https://github.com/jeju-inst/calendar-worklog",
       "metadata": {
@@ -25,7 +25,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.1"
+      "version": "2026.11.21.1"
     },
     {
       "name": "hwp-agent",
@@ -35,8 +35,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v2026.11.06.1",
-        "sha": "8bca5e4113a7d1b7d0f130f57751bb631aa01d33"
+        "ref": "v2026.11.25.3",
+        "sha": "73752b11c0c4c3e99726ea14486c287b9d17afe7"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
@@ -44,7 +44,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.06.1"
+      "version": "2026.11.25.3"
     },
     {
       "name": "ji-report-writing",
@@ -54,8 +54,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/ji-writing-standards.git",
-        "ref": "v2026.10.27.1",
-        "sha": "81aa08cf71332cd18f2e13feea80c82a2589bc15"
+        "ref": "v2026.11.13.1",
+        "sha": "46ffe073b1e04b5f0a4f373368610d697c4dab93"
       },
       "homepage": "https://github.com/jeju-inst/ji-writing-standards",
       "metadata": {
@@ -63,7 +63,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.27.1"
+      "version": "2026.11.13.1"
     },
     {
       "name": "ji-project-template",
@@ -73,8 +73,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/ji-project-template.git",
-        "ref": "v2026.10.27.1",
-        "sha": "d41f4765a1cbb20933c23fbb9a502ea440e2b2af"
+        "ref": "v2026.11.18.1",
+        "sha": "e768f3403df02bf0260a14aa884558081c9a5596"
       },
       "homepage": "https://github.com/jeju-inst/ji-project-template",
       "metadata": {
@@ -82,7 +82,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.27.1"
+      "version": "2026.11.18.1"
     },
     {
       "name": "korea-rio-mcp",
@@ -92,8 +92,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/korea-rio-mcp.git",
-        "ref": "v2026.10.27.2",
-        "sha": "7794491d6579526132aaf22c59ea2214cd1aa6e7"
+        "ref": "v2026.11.21.1",
+        "sha": "2200510946851abaa0db37a313c26204fbf118c2"
       },
       "homepage": "https://github.com/z0nam/korea-rio-mcp",
       "metadata": {
@@ -101,7 +101,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.27.2"
+      "version": "2026.11.21.1"
     },
     {
       "name": "gw",
@@ -111,8 +111,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/jaix-gw.git",
-        "ref": "v2026.10.30.3",
-        "sha": "1d951fdd4d0ac893bf0a9bdda7aca5ceb8c87eb9"
+        "ref": "v2026.11.06.1",
+        "sha": "48467c135da8a3216608fe3a088125799189cff5"
       },
       "homepage": "https://github.com/jeju-inst/jaix-gw",
       "metadata": {
@@ -120,7 +120,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.10.30.3"
+      "version": "2026.11.06.1"
     },
     {
       "name": "mail-skill",
@@ -150,8 +150,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp2pdf.git",
-        "ref": "v2026.11.05.2",
-        "sha": "00a59212f9c237ef743625736ffe5150179f7594"
+        "ref": "v2026.11.24.1",
+        "sha": "fdb5fcc4f9fa7f7e3f098c621af0dfa918b6d9f5"
       },
       "homepage": "https://github.com/z0nam/hwp2pdf",
       "metadata": {
@@ -159,7 +159,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.05.2"
+      "version": "2026.11.24.1"
     },
     {
       "name": "jaix-help",
@@ -170,15 +170,16 @@
         "source": "git-subdir",
         "url": "https://github.com/jeju-inst/jaix-kit.git",
         "path": "plugins/jaix-help",
-        "ref": "main",
-        "sha": "74e6df990ca2c0c4757012e7195358d25f080592"
+        "ref": "v2026.11.25.5",
+        "sha": "206431b56f2930c89c8341c7be4eb52dce52b229"
       },
       "homepage": "https://github.com/jeju-inst/jaix-kit",
       "metadata": {
         "jaix": {
-          "refKind": "branch"
+          "refKind": "tag"
         }
-      }
+      },
+      "version": "2026.11.25.5"
     },
     {
       "name": "ji-calendar",
@@ -189,15 +190,16 @@
         "source": "git-subdir",
         "url": "https://github.com/jeju-inst/jaix-kit.git",
         "path": "plugins/ji-calendar",
-        "ref": "main",
-        "sha": "5d911bd6c3c40c70d88dd2c937f571287cb240ef"
+        "ref": "v2026.11.25.5",
+        "sha": "206431b56f2930c89c8341c7be4eb52dce52b229"
       },
       "homepage": "https://github.com/jeju-inst/jaix-kit",
       "metadata": {
         "jaix": {
-          "refKind": "branch"
+          "refKind": "tag"
         }
-      }
+      },
+      "version": "2026.11.25.5"
     },
     {
       "name": "jaix-works",
