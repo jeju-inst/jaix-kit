@@ -86,6 +86,12 @@ SYSTEM_PROMPT = (
 )
 FOOTER_KEY = "display.platforms.slack.runtime_footer.enabled"
 PROMPT_KEY = "agent.system_prompt"
+# 슬랙 진행 표시: Hermes 의 슬랙 기본값은 도구 진행·중간 답·오래 걸림 알림을 모두 끈다(gateway/display_config.py
+# _PLATFORM_DEFAULTS). 그러면 긴 작업 중 아무것도 안 보여 먹통인지 생각 중인지 모른다(연구원 PC 11/25). 관리자 봇
+# (Hermes-namun)처럼 켠다. 슬랙 몫(display.platforms.slack.*)에만 넣어 CLI 표시는 건드리지 않는다
+PROGRESS = (("display.platforms.slack.tool_progress", "all", "슬랙 진행 표시(tool_progress)"),
+            ("display.platforms.slack.interim_assistant_messages", "true", "슬랙 중간 답(interim_assistant_messages)"),
+            ("display.platforms.slack.long_running_notifications", "true", "슬랙 오래 걸림 알림(long_running_notifications)"))
 BASE_NAME_KEY = "plugins.entries.slack-model-display.settings.base_name"
 ROOM_KEY = "slack.free_response_channels"
 INSTALL_TIMEOUT = 3600  # 첫 설치 실측 14분·3GB(namun-ji). 느린 망을 넉넉히
@@ -980,6 +986,8 @@ def quiet(hermes, log):
     ok &= _own_scalar(put, owned, FOOTER_KEY,
                       _yaml_scalar(text, "display", "platforms", "slack", "runtime_footer", "enabled"), "false", log,
                       "슬랙 답 끝 정보줄(runtime_footer)")
+    for key, want, label in PROGRESS:
+        ok &= _own_scalar(put, owned, key, _yaml_scalar(text, *key.split(".")), want, log, label)
     put.save()
     rec = recorded()
     rec["quiet"] = owned

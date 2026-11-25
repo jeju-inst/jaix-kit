@@ -1877,7 +1877,8 @@ def test_hermes_quiet_keeps_user_settings(isolated, monkeypatch):
     lines = []
     assert hermesbot.quiet("hermes", lines.append)
     keys = [c[3] for c in calls if c[1:3] == ["config", "set"]]
-    assert keys == ["compression.codex_gpt55_autoraise_notice", hermesbot.PROMPT_KEY, hermesbot.FOOTER_KEY]  # 정하지 않은 것만
+    assert keys == ["compression.codex_gpt55_autoraise_notice", hermesbot.PROMPT_KEY, hermesbot.FOOTER_KEY,
+                    *[k for k, _, _ in hermesbot.PROGRESS]]  # 정하지 않은 것만
     assert any("사용자 설정" in l for l in lines)
 
 
@@ -4371,3 +4372,19 @@ def test_setter_marks_change_only_when_it_ran(isolated, monkeypatch):
     assert not hermesbot._changes["config"]
     put("b", "2", ["config", "set", "b", "2"])
     assert hermesbot._changes["config"]
+
+
+def test_quiet_turns_on_slack_progress_unless_user_set(isolated, monkeypatch):
+    calls = []
+    monkeypatch.setattr(hermesbot, "_run", _hermes_fake_run(calls))
+    monkeypatch.setattr(hermesbot, "builtin_skills", lambda: [])
+    assert hermesbot.quiet("hermes", print)
+    sets = {c[3]: c[4] for c in calls if c[1:3] == ["config", "set"]}
+    assert sets["display.platforms.slack.tool_progress"] == "all"
+    assert sets["display.platforms.slack.interim_assistant_messages"] == "true"
+    assert sets["display.platforms.slack.long_running_notifications"] == "true"
+    calls.clear()  # 사용자가 끈 것은 그대로 둔다
+    hermesbot.config_path().write_text("display:\n  platforms:\n    slack:\n      tool_progress: 'off'\n", encoding="utf-8")
+    assert hermesbot.quiet("hermes", print)
+    keys = [c[3] for c in calls if c[1:3] == ["config", "set"]]
+    assert "display.platforms.slack.tool_progress" not in keys
