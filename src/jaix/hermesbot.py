@@ -38,6 +38,9 @@ CODE_RE = re.compile(r"^JX-[A-Z2-7]{26}$")
 # setup_pc.py 를 받는 커밋(z0nam/hermes-slackbot). 바꿀 때는 그 저장소의 시험을 확인하고 올린다
 SLACKBOT_REPO = "z0nam/hermes-slackbot"
 SLACKBOT_SHA = "2affced312a511ed7f33c439b679be450c5e9917"  # hermes-slackbot#32: remind.py(봇이 정한 시각에 주인 DM). #31 slack-tools 주제 편집 포함
+# ChatGPT 기기 코드 로그인은 계정 설정에서 켜야 한다(기본 꺼짐으로 보임 — 11/25 연구원 PC 에서 이 스위치에 막힘)
+DEVICE_CODE_SETTING = ("코드 입력이 막히면: chatgpt.com → 설정 → 보안 → "
+                       "'Codex, Excel, PowerPoint 및 Word의 기기 코드 로그인 활성화'를 켜고 다시 하세요.")
 PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal 은 쓰지 않는다
     # open: hermes 의 openai-codex 로그인은 device code 방식이라 브라우저를 스스로 열지 않는다(주소와 코드만 찍음,
     # hermes_cli/auth_codex.py) → jaix 가 그 주소를 연다(jaix-win 11/5). anthropic 은 hermes 가 직접 연다
@@ -45,7 +48,9 @@ PROVIDERS = {  # 설치기의 구독 선택 → Hermes model 설정. Nous Portal
                 "base_url": "https://chatgpt.com/backend-api/codex", "login": ["auth", "add", "openai-codex"],
                 "open": "https://auth.openai.com/codex/device",
                 "how": ["잠시 뒤 브라우저에 OpenAI 로그인 페이지가 열립니다. ChatGPT 계정으로 로그인한 뒤,",
-                        "이 창에 나오는 코드(예: ABCD-12345)를 그 페이지에 넣으세요."]},
+                        "이 창에 나오는 코드(예: ABCD-12345)를 그 페이지에 넣으세요.",
+                        DEVICE_CODE_SETTING],
+                "fail": [DEVICE_CODE_SETTING]},
     "claude": {"provider": "anthropic", "default": "claude-sonnet-5-5",
                "login": ["auth", "add", "anthropic", "--type", "oauth"],
                "how": ["회사 Claude 계정(Team)으로 로그인하세요 — 개인 Claude 구독(Pro·Max)도 연결은 되지만 Anthropic 약관상 권하지 않습니다.",
@@ -909,6 +914,8 @@ def cmd_login(args, log, run=None, wait=None, opener=None, pause=None, auth=None
             log(f"로그인을 취소했습니다. 나중에 새 명령창에서 `{again}` 로 다시 하세요.")
         else:
             log(f"로그인이 끝나지 않았습니다(코드 {code}). 새 명령창에서 `{again}` 로 다시 하세요.")
+            for line in prov.get("fail", []):
+                log(f"  {line}")
         _login_record(args.model, code)
     if IS_WIN and getattr(args, "no_wait", False):  # 설치기 페이지: 결과를 잠깐 보이고 닫혀 페이지로 돌아간다
         (pause or _pause)(CLOSE_AFTER.get(code, CLOSE_AFTER_OTHER), log)

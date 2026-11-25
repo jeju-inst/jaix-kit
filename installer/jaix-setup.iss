@@ -339,16 +339,17 @@ begin
     Width := LoginPage.SurfaceWidth;
     AutoSize := False;
     WordWrap := True;
-    Height := ScaleY(72);
+    Height := ScaleY(96);
     Caption :=
       '[로그인 창 열기]를 누르면 검은 창과 브라우저 로그인 페이지가 열립니다' +
       '(ChatGPT는 검은 창에 나온 코드를 브라우저에 입력). 승인하면 검은 창에 결과가 몇 초 보인 뒤 닫히고, 결과가 아래에도 나옵니다.' + #13#10 +
+      'ChatGPT 코드 입력이 막히면 chatgpt.com → 설정 → 보안에서 "기기 코드 로그인 활성화"를 켜고 다시 누르세요.' + #13#10 +
       '지금 하지 않아도 됩니다 — [다음]으로 넘어가고, 나중에 시작 메뉴의 "JAIX Hermes 로그인"으로 하세요.';
   end;
   LoginButton := TNewButton.Create(LoginPage);
   LoginButton.Parent := LoginPage.Surface;
   LoginButton.Left := 0;
-  LoginButton.Top := ScaleY(84);
+  LoginButton.Top := ScaleY(108);
   LoginButton.Width := ScaleX(160);
   LoginButton.Height := ScaleY(26);
   LoginButton.Caption := '로그인 창 열기';
@@ -356,7 +357,7 @@ begin
   LoginResult := TNewStaticText.Create(LoginPage);
   LoginResult.Parent := LoginPage.Surface;
   LoginResult.Left := 0;
-  LoginResult.Top := ScaleY(124);
+  LoginResult.Top := ScaleY(148);
   LoginResult.Width := LoginPage.SurfaceWidth;
   LoginResult.AutoSize := False;
   LoginResult.WordWrap := True;
