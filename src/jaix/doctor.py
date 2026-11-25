@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, remotemcp, runtimes, schedule, selfupdate, uvpython, winenv, works
+from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, remotemcp, runtimes, schedule, selfupdate, uvpython, winenv, winsac, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -650,6 +650,11 @@ def check_clis():
     return [Check(st, area, msg, fix) for st, area, msg, fix in clis.doctor_rows(channels)]
 
 
+def check_sac():
+    """스마트 앱 컨트롤 — 켜져 있으면 서명 없는 jaix 설치기·도구가 막힌다(WinError 4551)."""
+    return [Check(*row) for row in winsac.doctor_rows()]
+
+
 def check_self():
     """jaix 본체(설치본) 새 판. 받는 법은 시작 메뉴 'JAIX 업데이트' 또는 jaix update --self."""
     res = selfupdate.doctor_status()
@@ -657,7 +662,7 @@ def check_self():
 
 
 def run(lock):
-    return [*check_runtimes(lock), *check_runtime_copies(), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
+    return [*check_sac(), *check_runtimes(lock), *check_runtime_copies(), *check_uv_python(), *check_mail_python(lock), *check_hwp_jar(lock), *check_rhwp(lock), *check_hancom_consent(), *check_gw(), *check_works(lock), *check_plugin_bin(lock), *check_path(), *check_claude(lock), *check_codex(lock),
             *check_hermes(lock), *check_remote_mcp(lock), *check_autoupdate(), *check_self(), *check_clis(), *check_path_tools(lock), *check_overlaps(lock), *check_load()]
 
 
