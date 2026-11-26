@@ -452,3 +452,15 @@ def test_connect_code_needs_installed_hermes_and_valid_code(monkeypatch):
 def test_slack_is_a_connect_item():
     assert "slack" in connect.ITEMS and "slack" in connect.NEEDS_CONSOLE
     assert connect.result_line("slack", 0).startswith("[완료]")
+
+
+def test_connect_code_after_remove(monkeypatch):
+    """remove 가 기록을 hermes.removed.json 으로 옮긴 뒤에도 코드를 받는다(안내한 복구 길)."""
+    _hermes_pc(monkeypatch)
+    (paths.data_dir() / "hermes.json").unlink()
+    (paths.data_dir() / "hermes.removed.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(hermesbot, "claim", lambda code: {"id": "demo", "user": "U0T", "bot_token": "b", "app_token": "a"})
+    monkeypatch.setattr(hermesbot, "connect_slack", lambda bundle, log: True)
+    monkeypatch.setattr(hermesbot, "bot_room", lambda *a, **k: True)
+    assert hermesbot.cmd_connect_code(print, ask=lambda q: "JX-" + "A" * 26) == 0
+    assert hermesbot.recorded()["status"] == "connected"

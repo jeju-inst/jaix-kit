@@ -1545,7 +1545,9 @@ def cmd_connect_code(log, ask=None):
         return 1
     hermes = find_hermes()
     rec = recorded()
-    if not hermes or not rec.get("status"):
+    # `jaix hermes remove` 는 기록을 hermes.removed.json 으로 옮긴다 — 그 뒤 다시 잇는 것이 이 명령의 주 용도다
+    installed = rec.get("status") or _removed_record_file().exists()
+    if not hermes or not installed:
         log("이 PC 에는 JAIX 가 설치한 Hermes 가 없습니다. JAIX 설치기에서 '슬랙으로도 쓰기'를 고르고 코드를 넣으세요.")
         return 1
     other = foreign_bot(rec)
