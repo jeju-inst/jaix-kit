@@ -163,3 +163,32 @@ def refresh_process_path():
     current = os.environ.get("PATH", "").split(os.pathsep)
     have = {_norm(p) for p in current if p}
     os.environ["PATH"] = os.pathsep.join(current + [p for p in extra if _norm(p) not in have])
+
+
+# --- PowerShell 7 창에서 부를 때(jaix-kit#205) ----------------------------------------------------------
+# PS7(pwsh) 은 자기 모듈 폴더(Documents\PowerShell\Modules, Program Files\PowerShell\…)를 PSModulePath 앞에 붙여
+# 자식에게 물려준다. jaix 가 그 창에서 Windows PowerShell 5.1(mail-setup.ps1·Hermes 설치 스크립트)을 부르면
+# 5.1 이 PS7 용 Microsoft.PowerShell.Security 를 읽다 실패한다(ConvertTo-SecureString CouldNotAutoloadMatchingModule).
+# jaix 자신은 PSModulePath 를 쓰지 않으므로, 시작할 때 PS7 폴더만 빼 두면 모든 자식이 깨끗한 값을 받는다.
+# 다른 항목(기관이 넣은 모듈 경로 등)은 그대로 둔다. pwsh 는 시작할 때 자기 폴더를 다시 붙이므로 영향이 없다.
+def _is_ps7_module_dir(entry):
+    parts = [p for p in _norm(entry).lower().replace("/", "\\").split("\\") if p]
+    return "powershell" in parts  # WindowsPowerShell 은 다른 이름이라 걸리지 않는다
+
+
+def clean_psmodulepath(env=None):
+    """env(기본 os.environ)의 PSModulePath 에서 PS7 모듈 폴더를 뺀다. 바뀌었으면 True. 다 빠지면 변수를 지운다
+    (5.1 은 변수가 없으면 기본값을 스스로 만든다)."""
+    env = os.environ if env is None else env
+    value = env.get("PSModulePath")
+    if not value:
+        return False
+    entries = [e for e in value.split(";") if e]
+    keep = [e for e in entries if not _is_ps7_module_dir(e)]
+    if len(keep) == len(entries):
+        return False
+    if keep:
+        env["PSModulePath"] = ";".join(keep)
+    else:
+        env.pop("PSModulePath", None)
+    return True
