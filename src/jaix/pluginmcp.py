@@ -27,7 +27,7 @@ def _merge(mcp_json, plugin_jsons, load):
     for pj in plugin_jsons:
         spec = (pj or {}).get("mcpServers")
         if isinstance(spec, str):
-            spec = load(spec.lstrip("./")) or {}
+            spec = load(spec[2:] if spec.startswith("./") else spec) or {}  # "./" 만 뗀다 — 숨은 폴더(.config) 점은 둔다
         for name, s in _servers(spec).items():
             out.setdefault(name, s)
     return {"mcpServers": out}

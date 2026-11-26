@@ -59,3 +59,9 @@ def test_remote_reads_plugin_json_404_is_not_failure():
 def test_remote_network_failure_flagged():
     cfg, failed = pluginmcp.remote(_plugin(), _fetcher({}, fail={".mcp.json"}))
     assert cfg["mcpServers"] == {} and failed is True
+
+
+def test_local_plugin_json_points_to_hidden_dir(tmp_path):
+    _write(tmp_path / ".config" / "servers.json", {"mcpServers": RIO})
+    _write(tmp_path / ".claude-plugin" / "plugin.json", {"mcpServers": "./.config/servers.json"})
+    assert pluginmcp.local(tmp_path)["mcpServers"] == RIO
