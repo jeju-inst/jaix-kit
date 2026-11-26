@@ -8,6 +8,7 @@
   - mail: 앱 비밀번호 발급 안내를 브라우저로 열고 `mailskill setup` (숨김 입력이라 진짜 콘솔이 필요)
   - works: `jaix works login` (브라우저)
   - hermes: `jaix hermes login` (설치 때 고른 AI 구독)
+  - slack: AI센터에서 받은 슬랙 연결 코드(JX-…)를 넣어 Hermes 를 봇에 잇는다(설치기를 다시 돌리지 않고)
 - 에이전트(Claude·Codex)가 부르면 표준 입력이 콘솔이 아니다. 콘솔이 필요한 항목(mail·hermes)은 **새 창**을 열어
   거기서 입력받고, 끝날 때까지 기다려 결과를 한 줄로 알린다.
 """
@@ -24,9 +25,9 @@ from pathlib import Path
 from jaix import gw, hermesbot, paths, plugbin, proc, selftest, works
 from jaix.paths import IS_MAC, IS_WIN
 
-ITEMS = ("gw", "mail", "works", "hermes")
-LABEL = {"gw": "그룹웨어", "mail": "회사메일", "works": "웍스", "hermes": "Hermes AI 구독"}
-NEEDS_CONSOLE = {"mail", "hermes"}  # 숨김 입력·기기 코드를 콘솔에서 받는다. gw 는 스스로 창을 띄우고 웍스는 브라우저
+ITEMS = ("gw", "mail", "works", "hermes", "slack")
+LABEL = {"gw": "그룹웨어", "mail": "회사메일", "works": "웍스", "hermes": "Hermes AI 구독", "slack": "Hermes 슬랙 연결 코드"}
+NEEDS_CONSOLE = {"mail", "hermes", "slack"}  # 숨김 입력·기기 코드를 콘솔에서 받는다. gw 는 스스로 창을 띄우고 웍스는 브라우저
 MAIL_GUIDE = "https://github.com/z0nam/mail-skill/blob/main/plugins/mail-skill/docs/naver-works-app-password.md"
 WAIT_LIMIT = 30 * 60  # 새 창에서 입력을 기다리는 최대 시간
 POLL = 1.0
@@ -50,8 +51,9 @@ CLOSED_MEANING = "창을 닫았거나 Ctrl+C 로 멈춰 연결하지 않음"
 WORKS_RESULT = {0: "완료 — 웍스에 로그인함"}
 HERMES_RESULT = {0: "완료 — AI 구독에 로그인함", hermesbot.ALREADY: "이미 로그인돼 있어 그대로 둠",
                  hermesbot.CANCELLED: "취소함"}
-RESULT = {"gw": GW_RESULT, "mail": MAIL_RESULT, "works": WORKS_RESULT, "hermes": HERMES_RESULT}
-DONE = {"gw": {0}, "mail": {0}, "works": {0}, "hermes": {0, hermesbot.ALREADY}}
+SLACK_RESULT = {0: "완료 — 슬랙 봇에 연결함", 2: "코드 형식이 다름", hermesbot.CANCELLED: "코드를 넣지 않아 그만둠"}
+RESULT = {"gw": GW_RESULT, "mail": MAIL_RESULT, "works": WORKS_RESULT, "hermes": HERMES_RESULT, "slack": SLACK_RESULT}
+DONE = {"gw": {0}, "mail": {0}, "works": {0}, "hermes": {0, hermesbot.ALREADY}, "slack": {0}}
 
 
 @dataclass
@@ -120,10 +122,21 @@ def status_hermes(credentials=None):
     return Status("hermes", "missing", f"{model} 에 아직 로그인 안 함")
 
 
+def status_slack():
+    """JAIX 가 Hermes 를 설치한 PC 에서만: 슬랙 봇이 연결됐는지(연결 기록 + .env 토큰)."""
+    rec = hermesbot.recorded()
+    if not rec.get("status") or not hermesbot.find_hermes():
+        return None
+    ident = hermesbot.linked_id(rec)
+    if ident:
+        return Status("slack", "ok", f"Hermes-{ident} 연결됨")
+    return Status("slack", "missing", "슬랙 봇에 아직 연결 안 됨(AI센터에서 받은 JX-… 코드 필요)")
+
+
 def statuses(lock):
     """적용되는 항목만, ITEMS 순서로."""
     out = []
-    for fn in (status_gw, lambda: status_mail(lock), lambda: status_works(lock), status_hermes):
+    for fn in (status_gw, lambda: status_mail(lock), lambda: status_works(lock), status_hermes, status_slack):
         try:
             st = fn()
         except Exception as e:  # noqa: BLE001 — 한 항목이 막혀도 나머지를 보인다
@@ -247,8 +260,13 @@ def connect_hermes(log, login=None, wait=True):
     return (login or hermesbot.cmd_login)(args, log)
 
 
+def connect_slack(log, run=None):
+    return (run or hermesbot.cmd_connect_code)(log)
+
+
 def run_here(item, log, **kw):
-    fn = {"gw": connect_gw, "mail": connect_mail, "works": connect_works, "hermes": connect_hermes}[item]
+    fn = {"gw": connect_gw, "mail": connect_mail, "works": connect_works, "hermes": connect_hermes,
+          "slack": connect_slack}[item]
     return fn(log, **kw)
 
 

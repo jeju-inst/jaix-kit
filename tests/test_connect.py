@@ -393,3 +393,62 @@ def test_selftest_hints_point_to_connect():
 
 def test_guide_mentions_connect():
     assert "jaix connect" in cli.guide(["claude"], {})
+
+
+# --- slack: 연결 코드만 넣기(설치기를 다시 돌리지 않고, 11/26) ------------------------------------------
+def _hermes_pc(monkeypatch, env_lines=""):
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    monkeypatch.setattr(hermesbot, "find_hermes", lambda: "hermes")
+    hermesbot._save_record({"status": "no-code", "model": "chatgpt"})
+    home = paths.hermes_home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".env").write_text(env_lines, encoding="utf-8")
+
+
+def test_status_slack(monkeypatch):
+    assert connect.status_slack() is None                     # JAIX 가 Hermes 를 깔지 않은 PC
+    _hermes_pc(monkeypatch)
+    assert connect.status_slack().state == "missing"
+    hermesbot._save_record({"status": "connected", "slack": {"id": "demo"}})
+    (paths.hermes_home() / ".env").write_text("SLACK_BOT_TOKEN=b\nSLACK_APP_TOKEN=a\n", encoding="utf-8")
+    st = connect.status_slack()
+    assert st.state == "ok" and "Hermes-demo" in st.detail
+
+
+def test_connect_code_connects(monkeypatch):
+    _hermes_pc(monkeypatch)
+    got = {}
+    monkeypatch.setattr(hermesbot, "claim", lambda code: got.setdefault("code", code) and
+                        {"id": "demo", "user": "U0T", "bot_token": "b", "app_token": "a"})
+    monkeypatch.setattr(hermesbot, "connect_slack", lambda bundle, log: True)
+    monkeypatch.setattr(hermesbot, "bot_room", lambda *a, **k: True)
+    lines = []
+    code = "jx-" + "a" * 26
+    assert hermesbot.cmd_connect_code(lines.append, ask=lambda q: f"  {code} ") == 0
+    assert got["code"] == code.upper() and hermesbot.recorded()["status"] == "connected"
+    assert code.upper() not in "\n".join(lines)               # 코드를 화면 기록에 다시 찍지 않는다
+
+
+def test_connect_code_stops_before_claim_on_foreign_bot(monkeypatch):
+    _hermes_pc(monkeypatch, "SLACK_BOT_TOKEN=xoxb-OLD\n")
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t, **k: {"ok": True, "user": "hermeszh"})
+    monkeypatch.setattr(hermesbot, "claim", lambda code: pytest.fail("코드를 쓰면 안 됨"))
+    lines = []
+    assert hermesbot.cmd_connect_code(lines.append, ask=lambda q: pytest.fail("코드를 묻지 않아야 함")) == 1
+    assert "hermeszh" in "\n".join(lines) and "jaix hermes remove" in "\n".join(lines)
+
+
+def test_connect_code_needs_installed_hermes_and_valid_code(monkeypatch):
+    monkeypatch.setattr(hermesbot, "IS_WIN", True)
+    lines = []
+    assert hermesbot.cmd_connect_code(lines.append, ask=lambda q: pytest.fail("묻지 않음")) == 1
+    assert "슬랙으로도 쓰기" in lines[-1]
+    _hermes_pc(monkeypatch)
+    monkeypatch.setattr(hermesbot, "claim", lambda code: pytest.fail("형식이 틀리면 받지 않음"))
+    assert hermesbot.cmd_connect_code(print, ask=lambda q: "") == hermesbot.CANCELLED
+    assert hermesbot.cmd_connect_code(print, ask=lambda q: "JX-123") == 2
+
+
+def test_slack_is_a_connect_item():
+    assert "slack" in connect.ITEMS and "slack" in connect.NEEDS_CONSOLE
+    assert connect.result_line("slack", 0).startswith("[완료]")
