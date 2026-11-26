@@ -1521,7 +1521,7 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
     if other:
         # 연결 코드는 한 번만 쓸 수 있다 — 받은 뒤 setup_pc 가 기존 토큰 때문에 멈추면 코드만 헛되이 쓰인다(11/26 이중화)
         log(f"    이 PC 의 Hermes 에 이미 다른 슬랙 봇({other})이 연결돼 있어 연결 코드를 쓰지 않았습니다(코드는 그대로 유효).")
-        log("    그 봇을 버리고 새 봇으로 바꾸려면 `jaix hermes remove` 를 실행한 뒤 같은 코드로 다시 설치하세요.")
+        log("    그 봇을 버리고 새 봇으로 바꾸려면 `jaix hermes remove` 를 실행한 뒤 `jaix connect slack` 에 같은 코드를 넣으세요.")
         log("    그 봇을 계속 쓰려면 AI센터에 알려 주세요.")
         return _done({"status": "failed", "error": f"다른 슬랙 봇이 이미 연결됨({other}) — 코드는 쓰지 않음"}, dry_run, linked, log)
     if dry_run:
@@ -1535,6 +1535,51 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
         return _done({"status": "failed", "error": "슬랙 연결 실패(gateway)"}, dry_run, linked, log)
     bot_room(hermes, bundle["id"], log)  # 전용 채널. 실패해도 봇은 돈다(안내만)
     return _done({"status": "connected", "id": bundle["id"], "login": PROVIDERS[model]["login"]}, dry_run)
+
+
+def cmd_connect_code(log, ask=None):
+    """슬랙 연결 코드만 넣어 이 PC 의 Hermes 를 봇에 잇는다 — 설치기를 처음부터 다시 돌리지 않고('JAIX 계정 연결' 의 slack).
+    Hermes 설치·설정은 설치기가 이미 한 PC 에서만 한다. 예전 봇이 남아 있으면 코드를 받기 전에 멈춘다(코드는 그대로 유효)."""
+    if not IS_WIN:
+        log("슬랙 연결 코드는 Windows 에서만 넣습니다(맥은 hermes-slackbot 안내대로).")
+        return 1
+    hermes = find_hermes()
+    rec = recorded()
+    # `jaix hermes remove` 는 기록을 hermes.removed.json 으로 옮긴다 — 그 뒤 다시 잇는 것이 이 명령의 주 용도다
+    installed = rec.get("status") or _removed_record_file().exists()
+    if not hermes or not installed:
+        log("이 PC 에는 JAIX 가 설치한 Hermes 가 없습니다. JAIX 설치기에서 '슬랙으로도 쓰기'를 고르고 코드를 넣으세요.")
+        return 1
+    other = foreign_bot(rec)
+    if other:
+        log(f"이 PC 의 Hermes 에 이미 다른 슬랙 봇({other})이 연결돼 있어 멈춥니다(코드는 아직 쓰지 않았습니다).")
+        log("그 봇을 버리고 새 봇으로 바꾸려면 `jaix hermes remove` 를 실행한 뒤 다시 하세요.")
+        return 1
+    linked = linked_id(rec)
+    if linked:
+        log(f"지금 Hermes-{linked} 가 연결돼 있습니다. 새 코드를 넣으면 그 봇으로 바뀝니다(Enter 만 누르면 그만둠).")
+    try:
+        code = (ask or input)("슬랙 연결 코드(JX-…)를 붙여 넣고 Enter: ").strip().upper()
+    except (EOFError, KeyboardInterrupt):
+        code = ""
+    if not code:
+        log("코드를 넣지 않아 그만둡니다.")
+        return CANCELLED
+    if not CODE_RE.match(code):
+        log("코드 형식이 다릅니다(JX-로 시작하는 29자). 받은 코드를 그대로 붙여 넣으세요.")
+        return 2
+    try:
+        bundle = claim(code)
+    except HandoffError as e:
+        log(str(e))
+        return 1
+    if not connect_slack(bundle, log):
+        _done({"status": "failed", "error": "슬랙 연결 실패(gateway)"}, False, linked, log)
+        return 1
+    bot_room(hermes, bundle["id"], log)
+    _done({"status": "connected", "id": bundle["id"]}, False)
+    log(f"완료: 슬랙에서 Hermes-{bundle['id']} 에게 말을 걸어 보세요. DM·캔버스까지 쓰려면 이어서 `jaix hermes slack-access`.")
+    return 0
 
 
 def _done(result, dry_run, linked=None, log=None):
