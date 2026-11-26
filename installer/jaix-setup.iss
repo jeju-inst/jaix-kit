@@ -114,6 +114,7 @@ var
   // 이미 로그인돼 있다고 한 번 알린 뒤([다시 로그인])에는 --force 로 묻지 않고 새로 로그인한다
   ForceLogin: Boolean;
   ProgressPage: TOutputProgressWizardPage;
+  ProgressLog: TNewMemo;  // 리눅스 설치기처럼 지나가는 줄을 모두 보이는 창(맨 아래로 따라감)
   SetupLines: Integer;
   SetupFailed: Boolean;
   JaixCode: Integer;
@@ -319,6 +320,17 @@ begin
   ApplyPreviousChoice();
 
   ProgressPage := CreateOutputProgressPage('도구 설치 중', '런타임을 내려받고 AI에 도구를 등록합니다. 몇 분 걸릴 수 있습니다.');
+  ProgressLog := TNewMemo.Create(ProgressPage);
+  ProgressLog.Parent := ProgressPage.Surface;
+  ProgressLog.Left := 0;
+  ProgressLog.Top := ProgressPage.ProgressBar.Top + ProgressPage.ProgressBar.Height + ScaleY(10);
+  ProgressLog.Width := ProgressPage.SurfaceWidth;
+  ProgressLog.Height := ProgressPage.SurfaceHeight - ProgressLog.Top;
+  ProgressLog.ReadOnly := True;
+  ProgressLog.ScrollBars := ssVertical;
+  ProgressLog.WordWrap := True;
+  ProgressLog.Font.Name := 'Consolas';
+  ProgressLog.Font.Size := 8;
 
   GuidePage := CreateOutputMsgMemoPage(
     wpInstalling,
@@ -434,6 +446,15 @@ begin
   SetupLines := SetupLines + 1;
   ProgressPage.SetText(S, '');
   ProgressPage.SetProgress(SetupLines mod 40, 40);
+  // "… 진행 중 (n초째 …)" 맥박 줄은 위 한 줄에만 — 아래 기록 창에는 실제 진행 줄만 쌓는다
+  if Pos('… 진행 중 (', S) = 0 then
+  begin
+    ProgressLog.Lines.Add(S);
+    if ProgressLog.Lines.Count > 400 then
+      ProgressLog.Lines.Delete(0);
+    ProgressLog.SelStart := Length(ProgressLog.Text);
+    SendMessage(ProgressLog.Handle, $00B7 { EM_SCROLLCARET }, 0, 0);
+  end;
   Log('jaix: ' + S);
 end;
 
