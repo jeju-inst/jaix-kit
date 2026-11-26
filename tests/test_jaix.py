@@ -4503,3 +4503,16 @@ def test_run_stream_logs_lines_as_they_come_and_redacts(tmp_path, monkeypatch):
     assert not ok and "step one" in out
     assert lines[0].startswith("    → ") and "      step one" in lines
     assert fake not in text and "→ 코드 3" in text
+
+
+def test_run_stream_lines_arrive_before_child_exits(tmp_path, monkeypatch):
+    """print 만 쓰는 파이썬 자식도 줄이 끝나기 전에 와야 한다(PYTHONUNBUFFERED, Codex P2)."""
+    import sys
+    import time
+    script = tmp_path / "slow.py"
+    script.write_text("import time\nprint('first')\ntime.sleep(1.5)\nprint('second')\n", encoding="utf-8")
+    monkeypatch.setattr(hermesbot.proc, "command", lambda cli, args: [cli, *args])
+    began, stamps = time.monotonic(), {}
+    hermesbot._run_stream([sys.executable, str(script)],
+                          lambda line: stamps.setdefault(line.strip(), time.monotonic() - began))
+    assert stamps["first"] < stamps["second"] - 1.0

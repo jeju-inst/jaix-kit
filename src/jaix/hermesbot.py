@@ -450,9 +450,11 @@ def _run_stream(cmd, log, timeout=600):
     줄마다 redact 를 거친다. 돌려주는 값도 _run 과 같다: (성공 여부, 전체 출력)."""
     import threading
     log(f"    → {_cmd_label(cmd)}")
+    env = _child_env()
+    env["PYTHONUNBUFFERED"] = "1"  # 파이프로 받으면 print 가 블록 버퍼링돼 끝날 때 몰려 나온다(Codex P2) — 손자 프로세스까지
     try:
         p = subprocess.Popen(proc.command(cmd[0], cmd[1:]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             stdin=subprocess.DEVNULL, env=_child_env(), creationflags=paths.NO_WINDOW)
+                             stdin=subprocess.DEVNULL, env=env, creationflags=paths.NO_WINDOW)
     except OSError as e:
         log(f"    {Path(cmd[0]).name}: {type(e).__name__}")
         _note_failure(cmd=_cmd_label(cmd), code=type(e).__name__, note=e.strerror or "")
