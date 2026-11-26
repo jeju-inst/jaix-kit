@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from jaix import __version__, claude, codex, doctor, gw, hancom, hermesbot, net, paths, proc, remotemcp, runtimes, winenv, works
+from jaix import __version__, claude, codex, doctor, gw, hancom, hermesbot, net, paths, pluginmcp, proc, remotemcp, runtimes, winenv, works
 from jaix.paths import IS_MAC, IS_WIN
 
 MARK = {"ok": "[통과]", "setup": "[설정 필요]", "skip": "[건너뜀]", "fail": "[실패]", "info": "[안내]"}
@@ -196,10 +196,7 @@ def mcp_specs(lock):
         root = plugin_root(p.name)
         if not root:
             continue
-        try:
-            servers = json.loads((root / ".mcp.json").read_text(encoding="utf-8")).get("mcpServers") or {}
-        except (OSError, ValueError):
-            continue
+        servers = pluginmcp.local(root)["mcpServers"]
         for name, spec in servers.items():
             if "command" not in spec:  # http 서버 등
                 continue
