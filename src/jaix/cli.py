@@ -692,6 +692,8 @@ def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(raw)
     args.raw_argv = raw[1:]  # 하위 명령 뒤의 인자(--via-task 가 그대로 다시 넘김)
+    if paths.IS_WIN:
+        winenv.clean_psmodulepath()  # PS7 창에서 불러도 자식 PowerShell 5.1 이 깨지지 않게(#205)
     paths.migrate_data()  # 예전 설치본이 프로그램 폴더에 둔 기록·상태를 데이터 폴더로
     # --via-task 는 진행 줄을 setup.log 에서 읽어 흘리므로 같은 파일에 또 쓰지 않는다
     # hermes handoff 에는 --log 가 없다(연결 코드가 기록 파일에 남지 않게) → 없는 하위 명령도 있다(#67)
