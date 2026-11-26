@@ -633,7 +633,7 @@ def test_run_via_task_heartbeat_while_quiet(isolated, monkeypatch):
 
     def fake_run(args):
         if args[:2] == ["schtasks", "/Run"]:
-            logf.write_text("[1/3] 런타임\n", encoding="utf-8")
+            logf.write_text("[1/3] 런타임\n    → hermes plugins install\n", encoding="utf-8")
             threading.Timer(1.6, lambda: status.write_text('{"code": 0}', encoding="utf-8")).start()
         return True, ""
     monkeypatch.setattr(schedule, "_run", fake_run)
@@ -642,6 +642,7 @@ def test_run_via_task_heartbeat_while_quiet(isolated, monkeypatch):
     beats = [s for s in seen if "진행 중" in s]
     assert beats and seen.index("[1/3] 런타임") < seen.index(beats[0])
     assert len(beats) <= 4  # 쏟아내지 않는다
+    assert all("hermes plugins install" in b for b in beats)  # 맥박에 지금 하는 일을 붙인다
 
 
 def test_run_via_task_falls_back_when_cannot_register(isolated, monkeypatch):
@@ -995,7 +996,8 @@ def test_hermesbot_run_goes_through_proc_command(tmp_path, monkeypatch):
     lines = []
     ok, out = hermesbot._run(["hermes.CMD", "config", "set", "k", "v"], lines.append)
     assert seen["cmd"] == ["direct", "hermes.CMD", "config", "set", "k", "v"] and "text" not in seen["kw"]
-    assert not ok and out == "실패" and "→ 코드 1" in lines[0]
+    assert lines[0] == "    → hermes.CMD config set k"   # 부르기 전에 무엇을 하는지(값 v 는 싣지 않음)
+    assert not ok and out == "실패" and "→ 코드 1" in lines[1]
 
 
 def test_quote_roundtrips_msvcrt_rules():
@@ -3590,7 +3592,7 @@ def test_connect_records_kit_release(isolated, monkeypatch):
     """처음 연결은 setup_pc.py 가 install.py 를 돌리므로 그 판을 기록한다(바로 다음 update 에서 다시 깔지 않음)."""
     monkeypatch.setattr(hermesbot.uvpython, "find", lambda v: "/x/python")
     monkeypatch.setattr(hermesbot, "_slackbot_dir", lambda w: Path(w))
-    monkeypatch.setattr(hermesbot, "_run", lambda cmd, log, timeout=600: (True, ""))
+    monkeypatch.setattr(hermesbot, "_run_stream", lambda cmd, log, timeout=600: (True, ""))
     assert hermesbot.connect_slack({"id": "demo", "user": "U1", "bot_token": "b", "app_token": "a"}, print)
     assert hermesbot.recorded()["slack"]["kit"] == hermesbot.SLACKBOT_SHA
 
@@ -4485,3 +4487,32 @@ def test_quiet_turns_on_slack_progress_unless_user_set(isolated, monkeypatch):
     assert hermesbot.quiet("hermes", print)
     keys = [c[3] for c in calls if c[1:3] == ["config", "set"]]
     assert "display.platforms.slack.tool_progress" not in keys
+
+
+def test_run_stream_logs_lines_as_they_come_and_redacts(tmp_path, monkeypatch):
+    """setup_pc 처럼 오래 걸리는 명령은 끝까지 모으지 않고 나오는 대로 기록에 흘린다(11/26 설치창 '진행 중'만 수 분)."""
+    import sys
+    script = tmp_path / "s.py"
+    fake = "xo" + "xb-123-456-abcdefghijklmnop"  # 저장소 비밀 검사에 걸리지 않게 나눠 쓴다
+    script.write_text(f"import sys\nprint('step one', flush=True)\nprint('token {fake}')\nsys.exit(3)\n",
+                      encoding="utf-8")
+    monkeypatch.setattr(hermesbot.proc, "command", lambda cli, args: [cli, *args])
+    lines = []
+    ok, out = hermesbot._run_stream([sys.executable, str(script)], lines.append)
+    text = "\n".join(lines)
+    assert not ok and "step one" in out
+    assert lines[0].startswith("    → ") and "      step one" in lines
+    assert fake not in text and "→ 코드 3" in text
+
+
+def test_run_stream_lines_arrive_before_child_exits(tmp_path, monkeypatch):
+    """print 만 쓰는 파이썬 자식도 줄이 끝나기 전에 와야 한다(PYTHONUNBUFFERED, Codex P2)."""
+    import sys
+    import time
+    script = tmp_path / "slow.py"
+    script.write_text("import time\nprint('first')\ntime.sleep(1.5)\nprint('second')\n", encoding="utf-8")
+    monkeypatch.setattr(hermesbot.proc, "command", lambda cli, args: [cli, *args])
+    began, stamps = time.monotonic(), {}
+    hermesbot._run_stream([sys.executable, str(script)],
+                          lambda line: stamps.setdefault(line.strip(), time.monotonic() - began))
+    assert stamps["first"] < stamps["second"] - 1.0

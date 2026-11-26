@@ -424,7 +424,9 @@ def detail_lines(detail, tail=None):
 
 
 def _run(cmd, log, timeout=600):
-    """출력은 기록에 남기되 끝 몇 줄만. 표준 입력은 주지 않는다(대화형 질문은 기본값으로 지나감)."""
+    """출력은 기록에 남기되 끝 몇 줄만. 표준 입력은 주지 않는다(대화형 질문은 기본값으로 지나감).
+    부르기 전에 무엇을 하는지 한 줄(→ …) 남긴다 — 설치창이 조용한 몇 분 동안 무엇을 기다리는지 보이게(11/26)."""
+    log(f"    → {_cmd_label(cmd)}")
     try:
         # hermes.cmd 래퍼면 cmd.exe 를 거치지 않게 바꾼다 — MCP JSON 값의 `<`·`>`·`"` 가 깨진다(jaix-kit#188)
         r = subprocess.run(proc.command(cmd[0], cmd[1:]), capture_output=True, timeout=timeout,
@@ -441,6 +443,49 @@ def _run(cmd, log, timeout=600):
         log(f"    {Path(cmd[0]).name} {' '.join(cmd[1:3])} → 코드 {r.returncode}\n{tail}")
         _note_failure(cmd=_cmd_label(cmd), code=r.returncode, tail=tail)
     return r.returncode == 0, out
+
+
+def _run_stream(cmd, log, timeout=600):
+    """_run 과 같되 출력을 끝까지 모으지 않고 나오는 대로 한 줄씩 기록에 흘린다(가장 오래 걸리는 setup_pc 용).
+    줄마다 redact 를 거친다. 돌려주는 값도 _run 과 같다: (성공 여부, 전체 출력)."""
+    import threading
+    log(f"    → {_cmd_label(cmd)}")
+    env = _child_env()
+    env["PYTHONUNBUFFERED"] = "1"  # 파이프로 받으면 print 가 블록 버퍼링돼 끝날 때 몰려 나온다(Codex P2) — 손자 프로세스까지
+    try:
+        p = subprocess.Popen(proc.command(cmd[0], cmd[1:]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL, env=env, creationflags=paths.NO_WINDOW)
+    except OSError as e:
+        log(f"    {Path(cmd[0]).name}: {type(e).__name__}")
+        _note_failure(cmd=_cmd_label(cmd), code=type(e).__name__, note=e.strerror or "")
+        return False, ""
+    lines = []
+
+    def pump():
+        for raw in p.stdout:
+            line = proc.decode(raw).rstrip()
+            lines.append(line)
+            if line.strip():
+                log("      " + redact.redact(line))
+
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
+    try:
+        p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        log(f"    {Path(cmd[0]).name}: {timeout}초 안에 끝나지 않음")
+        _note_failure(cmd=_cmd_label(cmd), code="TimeoutExpired", note=f"{timeout}초 안에 끝나지 않음")
+        t.join(5)
+        return False, "\n".join(lines)
+    t.join(5)
+    out = "\n".join(lines)
+    if p.returncode != 0:
+        tail = "\n".join(out.strip().splitlines()[-TAIL_LINES:])
+        log(f"    {Path(cmd[0]).name} {' '.join(str(a) for a in cmd[1:3])} → 코드 {p.returncode}")
+        _note_failure(cmd=_cmd_label(cmd), code=p.returncode, tail=tail)
+    return p.returncode == 0, out
 
 
 def install_hermes(log, dry_run=False):
@@ -1431,8 +1476,8 @@ def _setup_pc(python, ident, user, payload, extra, log):
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f)
         try:
-            return _run([python, str(kit / "scripts" / "setup_pc.py"), ident, "--user", user,
-                         "--secrets-file", secret, *extra], log, timeout=900)
+            return _run_stream([python, str(kit / "scripts" / "setup_pc.py"), ident, "--user", user,
+                                "--secrets-file", secret, *extra], log, timeout=900)
         finally:
             Path(secret).unlink(missing_ok=True)
 

@@ -367,10 +367,11 @@ def run_via_task(cmd, log_path, status_path, echo, start_timeout=120, timeout=36
         echo("(작업 스케줄러로 jaix setup 을 돌리는 중 — 설치 프로그램의 프로세스 제약을 물려받지 않게)")
         began, started = time.monotonic(), False
         quiet_since = last_beat = began
+        step = ""  # 마지막 '→ 무엇' 줄 — 맥박에 지금 하는 일을 붙인다
         while time.monotonic() - began < timeout:
             now = time.monotonic()
             if heartbeat and now - last_beat >= heartbeat and now - quiet_since >= heartbeat:
-                echo(f"  … 진행 중 ({int(now - quiet_since)}초째 — 멈춘 게 아닙니다)")
+                echo(f"  … 진행 중 ({int(now - quiet_since)}초째 — {step or '멈춘 게 아닙니다'})")
                 last_beat = now
             if log_path.exists() and log_path.stat().st_size > offset:
                 quiet_since = last_beat = time.monotonic()
@@ -381,6 +382,8 @@ def run_via_task(cmd, log_path, status_path, echo, start_timeout=120, timeout=36
                 offset += len(chunk)
                 for line in chunk.decode("utf-8", errors="replace").splitlines():
                     echo(line)
+                    if line.lstrip().startswith("→ "):
+                        step = line.strip()[2:][:60]
             if status_path.exists():
                 try:
                     return int(json.loads(status_path.read_text(encoding="utf-8"))["code"])
