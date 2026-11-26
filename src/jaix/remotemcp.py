@@ -10,7 +10,7 @@ import json
 import urllib.error
 import urllib.request
 
-from jaix import __version__, net, paths, uvpython
+from jaix import __version__, net, paths, pluginmcp
 
 HTTP_TYPES = (None, "http", "streamable-http", "streamable_http")
 PROBE_TIMEOUT = 15
@@ -47,18 +47,8 @@ def from_lock(lock, offline=False, fetch=None):
     fetch = fetch or net.get_json
     out, failed = {}, False
     for p in lock.plugins:
-        url = uvpython._raw_url(p, ".mcp.json")
-        if not url:
-            continue
-        try:
-            cfg = fetch(url)
-        except urllib.error.HTTPError as e:
-            if e.code != 404:  # 404 = MCP 없는 플러그인
-                failed = True
-            continue
-        except (urllib.error.URLError, OSError, ValueError):
-            failed = True
-            continue
+        cfg, bad = pluginmcp.remote(p, fetch)  # .mcp.json 과 plugin.json mcpServers(404 = 그 파일 없음)
+        failed = failed or bad
         for name, spec in servers_in(cfg).items():
             out[name] = {**spec, "plugin": p.name}
     if failed and not out:

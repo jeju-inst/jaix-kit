@@ -2,7 +2,6 @@
 
 판정: ok 통과 · warn 주의(동작은 함, 손볼 것 있음) · fail 실패(종료 코드 1) · skip 해당 없음.
 """
-import json
 import os
 import re
 import shutil
@@ -10,7 +9,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, proc, remotemcp, runtimes, schedule, selfupdate, uvpython, winenv, winsac, works
+from jaix import claude, clis, codex, gw, hancom, hermes, hermesbot, hwpjar, hwprhwp, overlap, paths, plugbin, pluginmcp, proc, remotemcp, runtimes, schedule, selfupdate, uvpython, winenv, winsac, works
 from jaix.lock import MARKETPLACE, same_commit
 from jaix.paths import IS_WIN
 
@@ -484,10 +483,7 @@ def remote_mcp_state(lock):
         root, who = _installed_root(p)
         if not root:
             continue
-        try:
-            cfg = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
+        cfg = pluginmcp.local(root)
         for name, spec in remotemcp.servers_in(cfg).items():
             servers[name] = {**spec, "plugin": p.name}
             if who == "Claude":

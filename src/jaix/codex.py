@@ -12,7 +12,7 @@ import subprocess
 import tomllib
 from pathlib import PureWindowsPath
 
-from jaix import paths, proc, remotemcp, uvpython
+from jaix import paths, pluginmcp, proc, remotemcp, uvpython
 from jaix.paths import IS_WIN
 from jaix.lock import GIT_URL, MARKETPLACE, same_commit
 
@@ -165,10 +165,7 @@ def mcp_servers(lock):
         root = plugin_root(p.name)
         if not root or p.id not in have:
             continue
-        try:
-            servers = json.loads((root / ".mcp.json").read_text(encoding="utf-8")).get("mcpServers") or {}
-        except (OSError, ValueError):
-            continue
+        servers = pluginmcp.local(root)["mcpServers"]
         for name, spec in servers.items():
             if "command" in spec and "cwd" not in spec:  # codex mcp add 가 cwd를 받지 않는다
                 out[name] = _subst({"command": spec["command"], "args": _pin_python(spec),
