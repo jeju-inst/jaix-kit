@@ -574,6 +574,18 @@ def cmd_works(args, log):
     return 2
 
 
+def cmd_slack_access(args, log):
+    """jaix hermes slack-access. 설치기 마지막 화면이 부를 때(--no-wait)는 콘솔을 보이고(브라우저가 안 열리면
+    주소를 거기서 본다) 끝나면 결과를 몇 초 보인 뒤 닫혀 설치기 페이지로 돌아간다."""
+    if getattr(args, "no_wait", False):
+        hermesbot.show_console()
+    code = hermesbot.cmd_slack_access(args, log)
+    if getattr(args, "no_wait", False) and paths.IS_WIN:
+        import time
+        time.sleep(5 if code == 0 else 15)
+    return code
+
+
 def cmd_connect(args, log):
     """본인 비밀이 필요한 첫 설정을 여는 곳(시작 메뉴 'JAIX 계정 연결'). 값은 사용자가 뜨는 창에 직접 넣는다."""
     if not args.item:
@@ -656,7 +668,8 @@ def build_parser():
     sa = hsub.add_parser("slack-access",
                          help="내 봇이 내 Slack 자격(DM·비공개 채널·검색·파일)도 쓰게: 브라우저에서 본인이 허용(쓰기는 매번 확인)")
     sa.add_argument("--dry-run", action="store_true")
-    sa.set_defaults(func=hermesbot.cmd_slack_access)
+    sa.add_argument("--no-wait", action="store_true", help=argparse.SUPPRESS)  # 설치기 페이지: 결과를 몇 초 보이고 닫힘
+    sa.set_defaults(func=cmd_slack_access)
     rm = hsub.add_parser("remove",
                          help="이 PC 에서만 Hermes 슬랙 봇을 뺌(한 봇을 두 PC 에 연결했을 때): 봇 멈춤·토큰 삭제·연결 기록 정리")
     rm.add_argument("--yes", action="store_true", help="묻지 않고 진행")

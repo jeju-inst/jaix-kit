@@ -25,9 +25,10 @@ from pathlib import Path
 from jaix import gw, hermesbot, paths, plugbin, proc, selftest, works
 from jaix.paths import IS_MAC, IS_WIN
 
-ITEMS = ("gw", "mail", "works", "hermes", "slack")
-LABEL = {"gw": "그룹웨어", "mail": "회사메일", "works": "웍스", "hermes": "Hermes AI 구독", "slack": "Hermes 슬랙 연결 코드"}
-NEEDS_CONSOLE = {"mail", "hermes", "slack"}  # 숨김 입력·기기 코드를 콘솔에서 받는다. gw 는 스스로 창을 띄우고 웍스는 브라우저
+ITEMS = ("gw", "mail", "works", "hermes", "slack", "slack-access")
+LABEL = {"gw": "그룹웨어", "mail": "회사메일", "works": "웍스", "hermes": "Hermes AI 구독", "slack": "Hermes 슬랙 연결 코드",
+         "slack-access": "슬랙 내 권한(봇이 내 DM·캔버스)"}
+NEEDS_CONSOLE = {"mail", "hermes", "slack", "slack-access"}  # 숨김 입력·기기 코드를 콘솔에서 받는다. gw 는 스스로 창을 띄우고 웍스는 브라우저
 MAIL_GUIDE = "https://github.com/z0nam/mail-skill/blob/main/plugins/mail-skill/docs/naver-works-app-password.md"
 WAIT_LIMIT = 30 * 60  # 새 창에서 입력을 기다리는 최대 시간
 POLL = 1.0
@@ -52,8 +53,10 @@ WORKS_RESULT = {0: "완료 — 웍스에 로그인함"}
 HERMES_RESULT = {0: "완료 — AI 구독에 로그인함", hermesbot.ALREADY: "이미 로그인돼 있어 그대로 둠",
                  hermesbot.CANCELLED: "취소함"}
 SLACK_RESULT = {0: "완료 — 슬랙 봇에 연결함", 2: "코드 형식이 다름", hermesbot.CANCELLED: "코드를 넣지 않아 그만둠"}
-RESULT = {"gw": GW_RESULT, "mail": MAIL_RESULT, "works": WORKS_RESULT, "hermes": HERMES_RESULT, "slack": SLACK_RESULT}
-DONE = {"gw": {0}, "mail": {0}, "works": {0}, "hermes": {0, hermesbot.ALREADY}, "slack": {0}}
+SLACK_ACCESS_RESULT = {0: "완료 — 봇이 내 DM·캔버스를 쓸 수 있음(보내기는 매번 확인)"}
+RESULT = {"gw": GW_RESULT, "mail": MAIL_RESULT, "works": WORKS_RESULT, "hermes": HERMES_RESULT, "slack": SLACK_RESULT,
+          "slack-access": SLACK_ACCESS_RESULT}
+DONE = {"gw": {0}, "mail": {0}, "works": {0}, "hermes": {0, hermesbot.ALREADY}, "slack": {0}, "slack-access": {0}}
 
 
 @dataclass
@@ -133,10 +136,27 @@ def status_slack():
     return Status("slack", "missing", "슬랙 봇에 아직 연결 안 됨(AI센터에서 받은 JX-… 코드 필요)")
 
 
+def status_slack_access(gap=None):
+    """슬랙 봇이 연결된 PC 에서만: 봇이 내 Slack 자격(사용자 토큰)을 받았고 지금 범위가 다 있는지."""
+    if not hermesbot.linked_id():
+        return None
+    state, missing = (gap or hermesbot.user_scope_gap)()
+    if state == "ok" and not missing:
+        return Status("slack-access", "ok", "봇이 내 DM·캔버스를 쓸 수 있음")
+    if state == "unknown":
+        return Status("slack-access", "unknown", "Slack 에 확인하지 못함(오프라인?)")
+    if state == "ok":
+        return Status("slack-access", "missing", f"새 권한 {len(missing)}개 필요 — 브라우저에서 다시 허용")
+    if state == "invalid":
+        return Status("slack-access", "missing", "Slack 이 예전 허용을 받지 않음 — 다시 허용")
+    return Status("slack-access", "missing", "아직 허용 안 함 — 봇이 내 DM·캔버스를 못 씀")
+
+
 def statuses(lock):
     """적용되는 항목만, ITEMS 순서로."""
     out = []
-    for fn in (status_gw, lambda: status_mail(lock), lambda: status_works(lock), status_hermes, status_slack):
+    for fn in (status_gw, lambda: status_mail(lock), lambda: status_works(lock), status_hermes, status_slack,
+               status_slack_access):
         try:
             st = fn()
         except Exception as e:  # noqa: BLE001 — 한 항목이 막혀도 나머지를 보인다
@@ -264,9 +284,13 @@ def connect_slack(log, run=None):
     return (run or hermesbot.cmd_connect_code)(log)
 
 
+def connect_slack_access(log, run=None):
+    return (run or hermesbot.cmd_slack_access)(Namespace(dry_run=False), log)
+
+
 def run_here(item, log, **kw):
     fn = {"gw": connect_gw, "mail": connect_mail, "works": connect_works, "hermes": connect_hermes,
-          "slack": connect_slack}[item]
+          "slack": connect_slack, "slack-access": connect_slack_access}[item]
     return fn(log, **kw)
 
 
