@@ -1467,6 +1467,40 @@ def test_hermes_config_failure_stops_before_claim(isolated, monkeypatch, the_loc
     assert REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file))["status"] == "failed"
 
 
+def test_hermes_setup_foreign_bot_stops_before_claim(isolated, monkeypatch, the_lock):
+    """jaix 가 넣지 않은 슬랙 토큰이 이미 있으면 코드를 받기 전에 멈춘다 — 받은 뒤 멈추면 1회용 코드만 버려진다(11/26)."""
+    _fake_windows(monkeypatch, isolated, [])
+    home = paths.hermes_home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".env").write_text("SLACK_BOT_TOKEN=xoxb-OLD\nSLACK_APP_TOKEN=xapp-OLD\n", encoding="utf-8")
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t, **k: {"ok": True, "user": "hermeszh"})
+    monkeypatch.setattr(hermesbot, "claim", lambda code: pytest.fail("코드를 쓰면 안 됨"))
+    lines = []
+    code_file = isolated / "code"
+    code_file.write_text("JX-" + "A" * 26, encoding="utf-8")
+    res = REAL_HERMES_SETUP(the_lock, lines.append, code_file=str(code_file))
+    text = "\n".join(lines)
+    assert res["status"] == "failed" and "hermeszh" in res["error"]
+    assert "jaix hermes remove" in text and "코드는 그대로 유효" in text and "xoxb-OLD" not in text
+
+
+def test_hermes_setup_own_bot_still_claims(isolated, monkeypatch, the_lock):
+    """jaix 가 전에 넣은 토큰(연결 기록에 아이디)은 다른 봇이 아니다 — 코드를 받아 --replace 로 바꾼다."""
+    _fake_windows(monkeypatch, isolated, [])
+    home = paths.hermes_home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".env").write_text("SLACK_BOT_TOKEN=xoxb-OLD\n", encoding="utf-8")
+    hermesbot._save_record({"status": "connected", "slack": {"id": "demo"}})
+    claimed = []
+    monkeypatch.setattr(hermesbot, "claim", lambda code: claimed.append(code) or
+                        {"id": "demo", "user": "U0TEST", "bot_token": "b", "app_token": "a"})
+    monkeypatch.setattr(hermesbot, "connect_slack", lambda bundle, log: True)
+    monkeypatch.setattr(hermesbot, "bot_room", lambda *a, **k: True)
+    code_file = isolated / "code"
+    code_file.write_text("JX-" + "A" * 26, encoding="utf-8")
+    assert REAL_HERMES_SETUP(the_lock, print, code_file=str(code_file))["status"] == "connected" and claimed
+
+
 def test_hermes_dry_run_keeps_code_file(isolated, monkeypatch, the_lock):
     _fake_windows(monkeypatch, isolated, [])
     code_file = isolated / "code"
@@ -3648,6 +3682,30 @@ def test_refresh_kit_says_it_may_take_minutes(isolated, monkeypatch, tmp_path):
     assert any("몇 분 걸릴 수 있습니다" in l for l in lines)
     lines.clear()
     assert REAL_REFRESH_KIT("/x/hermes", "namun", lines.append) and lines == []   # 같은 판이면 안내도 없음
+
+
+def test_cmd_handoff_again_reuses_kept_tokens(tmp_path, monkeypatch, capsys):
+    """다시 낼 때(--again) 관리자가 슬랙 앱 화면에서 토큰을 또 복사하지 않게, 처음 넣은 토큰을 0600 으로 보관해 쓴다."""
+    monkeypatch.setattr(hermesbot.secret, "masked_input",
+                        lambda prompt, out=None: ("xoxb-" if "xoxb" in prompt else "xapp-") + "TEST-1" + "x" * 40)
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": True, "user": "hermes-demo", "team": "T"})
+    spool = tmp_path / "share" / "hermes"
+    args = type("A", (), {"id": "demo", "user": "U0TEST", "ttl": 72, "spool": str(spool), "again": False})()
+    assert hermesbot.cmd_handoff(args, print) == 0
+    kept = tmp_path / "share" / "tokens" / "demo.json"
+    if not paths.IS_WIN:
+        assert oct(kept.stat().st_mode & 0o777) == "0o600"
+    monkeypatch.setattr(hermesbot.secret, "masked_input", lambda prompt, out=None: pytest.fail("다시 묻지 않아야 함"))
+    args.again = True
+    capsys.readouterr()
+    assert hermesbot.cmd_handoff(args, print) == 0 and len(list(spool.glob("*.json"))) == 2
+    out = capsys.readouterr().out
+    assert "전에 넣은 것을 씁니다" in out and "xoxb-TEST" not in out
+    # 토큰이 죽었으면(앱 삭제·재발급) 보관본을 버리고 다시 묻는다
+    monkeypatch.setattr(hermesbot, "slack_call", lambda m, t: {"ok": False, "error": "invalid_auth"})
+    asked = []
+    monkeypatch.setattr(hermesbot.secret, "masked_input", lambda prompt, out=None: asked.append(prompt) or "")
+    assert hermesbot.cmd_handoff(args, lambda *a: None) == 2 and asked
 
 
 def test_cmd_handoff_asks_xapp_before_xoxb(tmp_path, monkeypatch):
