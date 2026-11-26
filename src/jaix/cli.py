@@ -227,6 +227,7 @@ def cmd_setup(args, log):
     if not args.dry_run:
         paths.bin_dir().mkdir(parents=True, exist_ok=True)
         steps.run("PATH", winenv.add_to_path, [paths.bin_dir()])
+        steps.run("PATH 길이", winenv.shrink_user_path, log)
         for old in steps.run("PATH 정리", winenv.drop_old_exe_dir) or []:
             log(f"  PATH에서 뺌(예전 설치 위치): {old}")
     log("\n[1/3] 런타임")
@@ -454,6 +455,11 @@ def _update(args, log):
     log(f"jaix {__version__} · 잠금: {lock.source}")
     if schedule.installer_managed():  # 예전 판이 남긴 자동 시작 항목(Defender 가 jaixw 를 격리하는 원인)을 지운다
         schedule.drop_legacy(log, dry_run=args.dry_run)
+    if not args.dry_run:  # 너무 긴 사용자 PATH 는 새 창이 통째로 못 받는다(11/26) — 업데이트 때도 고친다
+        try:
+            winenv.shrink_user_path(log)
+        except OSError as e:
+            log(f"  (PATH 길이 정리 건너뜀: {type(e).__name__})")
     log("\n[1/3] 런타임 갱신")
     for rt in runtimes.RUNTIMES:
         must = runtimes.required(rt, lock)

@@ -180,6 +180,10 @@ def check_path():
     if not IS_WIN:
         return []
     out = []
+    state, n = winenv.path_length_state()
+    if state == "long":
+        out.append(Check("fail", "PATH", f"사용자 PATH 가 너무 김({n}자) — 새 창에 jaix·claude 가 안 잡힘",
+                         "jaix update (원래 값을 남기고 중복·없는 폴더를 빼 줄임)"))
     # jaix가 깐 폴더와 winget 바로가기 폴더는 사용자 PATH에 있어야 새 창·다시 연 앱이 찾는다
     dirs = {paths.bin_dir()}
     # 설치본(Inno 가 {app}\\jaix 에 깔고 PATH 에 넣음)만: 새 명령창이 jaix 를 찾으려면 그 폴더가 있어야 한다.
