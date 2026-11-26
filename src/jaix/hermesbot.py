@@ -184,6 +184,42 @@ def record_issued(spool, ident, user, expires):
                             "expires_at": expires.isoformat(timespec="seconds")}) + "\n")
 
 
+def kept_path(spool, ident):
+    """관리자 PC 에 아이디별로 보관하는 토큰(0600). 묶음은 연구원 PC 가 받으면 지워지므로, 코드를 다시 낼 때
+    (--again: 코드가 헛되이 쓰였거나 PC 를 옮길 때) 관리자가 슬랙 앱 화면에서 토큰을 다시 복사하지 않게 한다."""
+    return Path(spool).expanduser().parent / "tokens" / f"{ident}.json"
+
+
+def keep_tokens(spool, ident, bot, app):
+    path = kept_path(spool, ident)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not IS_WIN:
+        os.chmod(path.parent, 0o700)
+    tmp = path.with_suffix(".tmp")
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"bot_token": bot, "app_token": app}, f)
+    os.replace(tmp, path)
+
+
+def kept_tokens(spool, ident):
+    try:
+        data = json.loads(kept_path(spool, ident).read_text(encoding="utf-8"))
+        return data.get("bot_token"), data.get("app_token")
+    except (OSError, ValueError, AttributeError):
+        return None, None
+
+
+def _tokens_ok(bot, app, ident):
+    """보관한 토큰이 아직 이 봇의 살아 있는 토큰인지(앱을 지웠거나 토큰을 새로 만들었으면 다시 묻는다)."""
+    try:
+        auth = slack_call("auth.test", bot)
+        return bool(auth.get("ok") and bot_name_matches(auth, ident) and slack_call("apps.connections.open", app).get("ok"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
 def cmd_handoff(args, log):
     """관리자(studio)용. 토큰은 숨김 입력으로만 받는다."""
     ident = args.id.strip().lower()
@@ -200,13 +236,17 @@ def cmd_handoff(args, log):
         log("봇 하나를 두 PC 에서 돌리면 슬랙 메시지가 두 PC 로 나뉘어 들어가 대화가 끊깁니다(Socket Mode 는 이벤트를 연결 하나에만 보냄).")
         log("코드가 만료됐거나 PC 를 옮기는 것이면 --again 을 붙여 다시 내세요. PC 를 옮길 때는 예전 PC 의 Hermes 를 먼저 끄게 하세요.")
         return 3
-    log("토큰을 붙여 넣으세요. 글자 대신 *가 찍힙니다.")
-    # xapp 먼저: 관리자는 App-Level Token 을 만든 직후라 클립보드에 xapp 가 있다(onboard_batch 첫 사용 피드백, 11/10)
-    app = secret.ask_secret("App-Level Token (xapp-…)", secret.slack_token("xapp-"), "xapp-로 시작", log=log)
-    bot = app and secret.ask_secret("Bot User OAuth Token (xoxb-…)", secret.slack_token("xoxb-"), "xoxb-로 시작", log=log)
-    if not (bot and app):
-        log("토큰을 받지 못해 멈춥니다(세 번 모두 형식이 맞지 않음).")
-        return 2
+    bot, app = kept_tokens(spool, ident)
+    if bot and app and _tokens_ok(bot, app, ident):
+        log(f"Hermes-{ident} 토큰은 전에 넣은 것을 씁니다(다시 붙여 넣지 않음).")
+    else:
+        log("토큰을 붙여 넣으세요. 글자 대신 *가 찍힙니다.")
+        # xapp 먼저: 관리자는 App-Level Token 을 만든 직후라 클립보드에 xapp 가 있다(onboard_batch 첫 사용 피드백, 11/10)
+        app = secret.ask_secret("App-Level Token (xapp-…)", secret.slack_token("xapp-"), "xapp-로 시작", log=log)
+        bot = app and secret.ask_secret("Bot User OAuth Token (xoxb-…)", secret.slack_token("xoxb-"), "xoxb-로 시작", log=log)
+        if not (bot and app):
+            log("토큰을 받지 못해 멈춥니다(세 번 모두 형식이 맞지 않음).")
+            return 2
     auth = slack_call("auth.test", bot)
     if not auth.get("ok"):
         log(f"봇 토큰을 슬랙이 거부: {auth.get('error')}")
@@ -220,6 +260,7 @@ def cmd_handoff(args, log):
         return 1
     code, expires = write_bundle(spool, ident, args.user, bot, app, args.ttl)
     record_issued(spool, ident, args.user, expires)
+    keep_tokens(spool, ident, bot, app)
     local = expires.astimezone().strftime("%m/%d %H:%M")
     log(f"확인됨: 봇 {auth.get('user')} · 워크스페이스 {auth.get('team')}")
     log(f"\n연결 코드 (1회용, {local}까지, 원내망에서만):\n\n  {code}\n")
@@ -1396,6 +1437,18 @@ def _setup_pc(python, ident, user, payload, extra, log):
             Path(secret).unlink(missing_ok=True)
 
 
+def foreign_bot(rec):
+    """jaix 가 넣지 않은 슬랙 봇 토큰이 Hermes .env 에 있으면 그 봇 이름(모르면 '이름 확인 못 함'), 없으면 None.
+    jaix 가 전에 넣은 토큰(연결 기록에 아이디가 있음)은 connect_slack 이 --replace 로 바꾸므로 해당 없다."""
+    if (rec.get("slack") or {}).get("id") or not env_has("SLACK_BOT_TOKEN"):
+        return None
+    try:
+        auth = slack_call("auth.test", env_value("SLACK_BOT_TOKEN"))
+    except (urllib.error.URLError, OSError, ValueError):
+        auth = {}
+    return auth.get("user") if auth.get("ok") and auth.get("user") else "이름 확인 못 함"
+
+
 def connect_slack(bundle, log):
     """받은 묶음을 setup_pc.py 에 파일로 넘긴다(읽자마자 setup_pc 가 지운다). 실패는 설치 실패다."""
     python = uvpython.find(uvpython.DEFAULT)
@@ -1464,6 +1517,13 @@ def setup(lock, log, code_file=None, model="chatgpt", dry_run=False):
             return _done({"status": "connected", "id": linked, "login": PROVIDERS[model]["login"]}, dry_run)
         log("    슬랙 연결 코드가 없어 슬랙 연결은 건너뜀 — AI센터에서 코드를 받아 jaix-setup 을 다시 실행하세요")
         return _done({"status": "no-code", "login": PROVIDERS[model]["login"]}, dry_run)
+    other = foreign_bot(rec)
+    if other:
+        # 연결 코드는 한 번만 쓸 수 있다 — 받은 뒤 setup_pc 가 기존 토큰 때문에 멈추면 코드만 헛되이 쓰인다(11/26 이중화)
+        log(f"    이 PC 의 Hermes 에 이미 다른 슬랙 봇({other})이 연결돼 있어 연결 코드를 쓰지 않았습니다(코드는 그대로 유효).")
+        log("    그 봇을 버리고 새 봇으로 바꾸려면 `jaix hermes remove` 를 실행한 뒤 같은 코드로 다시 설치하세요.")
+        log("    그 봇을 계속 쓰려면 AI센터에 알려 주세요.")
+        return _done({"status": "failed", "error": f"다른 슬랙 봇이 이미 연결됨({other}) — 코드는 쓰지 않음"}, dry_run, linked, log)
     if dry_run:
         return {"status": "dry-run"}
     try:
