@@ -41,3 +41,17 @@ def test_unexpanded_variables_are_kept():
     entries = [r"%NOPE%\x"] + ["C:\\t%03d\\" % i + "x" * 40 for i in range(50)]
     keep, _ = winenv.plan_shrink(entries, [], lambda p: False, env=ENV)
     assert r"%NOPE%\x" in keep
+
+
+def test_entries_already_using_variables_are_not_cut():
+    """%USERPROFILE%\\AppData\\Local\\… 를 %LOCALAPPDATA% 로 바꾸며 원문을 펼친 길이로 자르면 경로가 깨진다(Codex P1)."""
+    entries = ["%USERPROFILE%" + rf"\AppData\Local\Programs\tool{i:03d}\bin" for i in range(70)]
+    keep, _ = winenv.plan_shrink(entries, [], lambda p: True, env=ENV)
+    assert keep == entries
+
+
+def test_expanded_length_is_case_insensitive_and_covers_all_variables():
+    env = dict(ENV, TOOLS="C:\\" + "t" * 3000)
+    assert winenv._expanded_len([r"%localappdata%\x"], env) == len(ENV["LOCALAPPDATA"] + r"\x")
+    assert winenv._expanded_len([r"%Tools%\bin"], env) > 3000
+    assert winenv._expand(r"%NOPE%\x", env) == r"%NOPE%\x"

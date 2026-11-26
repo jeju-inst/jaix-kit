@@ -180,13 +180,15 @@ def _joined(entries):
     return ";".join(entries)
 
 
-def _expanded_len(entries, env=None):
+def _expand(p, env=None):
+    """Windows 처럼 %이름% 을 대소문자 없이, 정의된 변수 전부 펼친다(없는 이름은 그대로)."""
     env = os.environ if env is None else env
-    def expand(p):
-        for k in _SHORT_VARS + ("SystemRoot", "ProgramFiles", "ProgramData"):
-            p = p.replace(f"%{k}%", env.get(k, f"%{k}%"))
-        return p
-    return len(_joined(expand(p) for p in entries))
+    low = {k.lower(): v for k, v in env.items()}
+    return re.sub(r"%([^%;]+)%", lambda m: low.get(m.group(1).lower(), m.group(0)), p)
+
+
+def _expanded_len(entries, env=None):
+    return len(_joined(_expand(p, env) for p in entries))
 
 
 def plan_shrink(entries, system_entries, exists, env=None, limit=PATH_LIMIT):
@@ -212,7 +214,7 @@ def plan_shrink(entries, system_entries, exists, env=None, limit=PATH_LIMIT):
     if too_long(keep):
         nxt = []
         for p in keep:
-            full = os.path.expandvars(p)
+            full = _expand(p, env)
             # 드라이브는 있는데 폴더가 없을 때만 — 빼 둔 USB·외장 드라이브(E: 등)의 항목은 지금 안 보일 뿐이다
             if "%" not in full and _LOCAL_DRIVE.match(full) and exists(full[:3]) and not exists(full):
                 removed.append((p, "없는 폴더"))
@@ -222,11 +224,13 @@ def plan_shrink(entries, system_entries, exists, env=None, limit=PATH_LIMIT):
     if len(_joined(keep)) > limit:
         short = []
         for p in keep:
-            for k in _SHORT_VARS:
-                base = env.get(k)
-                if base and _norm(p).startswith(_norm(base) + "\\"):
-                    p = f"%{k}%" + p[len(base.rstrip("\\/")):]
-                    break
+            # 이미 %변수% 로 적힌 항목은 그대로 둔다 — 원문과 펼친 값의 길이가 달라 잘라 붙이면 경로가 깨진다(Codex P1)
+            if "%" not in p:
+                for k in _SHORT_VARS:
+                    base = (env.get(k) or "").rstrip("\\/")
+                    if base and p.lower().startswith(base.lower() + "\\"):
+                        p = f"%{k}%" + p[len(base):]
+                        break
             short.append(p)
         keep = short
     return keep, removed
