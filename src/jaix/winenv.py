@@ -3,6 +3,7 @@
 Windows가 아니면 레지스트리 대신 지금 프로세스의 PATH만 고친다(맥은 개발·AI센터용).
 """
 import os
+import re
 
 from jaix import paths
 from jaix.paths import IS_WIN
@@ -163,6 +164,108 @@ def refresh_process_path():
     current = os.environ.get("PATH", "").split(os.pathsep)
     have = {_norm(p) for p in current if p}
     os.environ["PATH"] = os.pathsep.join(current + [p for p in extra if _norm(p) not in have])
+
+
+# --- 사용자 PATH 길이(11/26 이중화 PC) -------------------------------------------------------------------
+# 사용자 Path(REG_EXPAND_SZ)가 너무 길면 Windows 가 새로 여는 창에 사용자 PATH 를 통째로 싣지 않는다.
+# 그러면 jaix·claude·WindowsApps 가 한꺼번에 사라지고, 안내문의 "새 창을 여세요" 가 통하지 않는다.
+# 실측: 사용자 Path 3279자(71항목) PC 의 새 PowerShell 창 PATH 가 시스템 PATH(1218자)뿐이었다.
+# 한도는 2047자로 본다(펼치기 전·후 어느 쪽에 걸리는지 확정하지 못해 둘 다 이 안에 들게 줄인다).
+PATH_LIMIT = 2047
+_LOCAL_DRIVE = re.compile(r"^[A-Za-z]:\\")
+_SHORT_VARS = ("LOCALAPPDATA", "APPDATA", "USERPROFILE")  # 긴 접두부터 — %LOCALAPPDATA% 가 %USERPROFILE%\AppData\Local 보다 짧다
+
+
+def _joined(entries):
+    return ";".join(entries)
+
+
+def _expanded_len(entries, env=None):
+    env = os.environ if env is None else env
+    def expand(p):
+        for k in _SHORT_VARS + ("SystemRoot", "ProgramFiles", "ProgramData"):
+            p = p.replace(f"%{k}%", env.get(k, f"%{k}%"))
+        return p
+    return len(_joined(expand(p) for p in entries))
+
+
+def plan_shrink(entries, system_entries, exists, env=None, limit=PATH_LIMIT):
+    """사용자 PATH 를 한도 안으로 줄이는 계획(순수 함수). (새 항목 목록, [(뺀 항목, 이유)]).
+    1) 빈 칸·중복 빼기 2) 시스템 PATH 에도 있는 것 빼기 3) 아직 길면, 이 PC 로컬 드라이브에 없는 폴더 빼기
+    (드라이브째 없는 것·네트워크 경로·%변수%가 안 풀리는 것은 두기) 4) 아직 길면 사용자 폴더 아래 AppData\\Local 같은 앞부분을
+    %LOCALAPPDATA% 로 줄여 쓰기(뜻은 같다). 순서·다른 항목은 그대로 둔다."""
+    env = os.environ if env is None else env
+    removed, keep, seen = [], [], set()
+    system = {_norm(p) for p in system_entries}
+    for p in entries:
+        n = _norm(p) if p.strip() else ""
+        if not n:
+            continue
+        if n in seen:
+            removed.append((p, "중복"))
+        elif n in system:
+            removed.append((p, "시스템 PATH 에 이미 있음"))
+        else:
+            seen.add(n)
+            keep.append(p)
+    too_long = lambda e: len(_joined(e)) > limit or _expanded_len(e, env) > limit
+    if too_long(keep):
+        nxt = []
+        for p in keep:
+            full = os.path.expandvars(p)
+            # 드라이브는 있는데 폴더가 없을 때만 — 빼 둔 USB·외장 드라이브(E: 등)의 항목은 지금 안 보일 뿐이다
+            if "%" not in full and _LOCAL_DRIVE.match(full) and exists(full[:3]) and not exists(full):
+                removed.append((p, "없는 폴더"))
+            else:
+                nxt.append(p)
+        keep = nxt
+    if len(_joined(keep)) > limit:
+        short = []
+        for p in keep:
+            for k in _SHORT_VARS:
+                base = env.get(k)
+                if base and _norm(p).startswith(_norm(base) + "\\"):
+                    p = f"%{k}%" + p[len(base.rstrip("\\/")):]
+                    break
+            short.append(p)
+        keep = short
+    return keep, removed
+
+
+def shrink_user_path(log=print, dry_run=False):
+    """사용자 PATH 가 한도를 넘으면 원래 값을 jaix 기록 폴더에 남기고 줄인다. 바꿨으면 True."""
+    if not IS_WIN:
+        return False
+    entries = user_path_entries()
+    if len(_joined(entries)) <= PATH_LIMIT and _expanded_len(entries) <= PATH_LIMIT:
+        return False
+    keep, removed = plan_shrink(entries, system_path_entries(), os.path.isdir)
+    before, after = len(_joined(entries)), len(_joined(keep))
+    log(f"  사용자 PATH 가 너무 깁니다({before}자, {len(entries)}개): 새 창이 PATH 를 통째로 못 받습니다. 줄입니다.")
+    for p, why in removed:
+        log(f"    뺌({why}): {p}")
+    if keep != entries:
+        if dry_run:
+            log(f"  (예정) {before}자 → {after}자")
+            return False
+        import datetime
+        backup = paths.data_dir() / f"path-backup-{datetime.datetime.now():%Y%m%d-%H%M%S}.txt"
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_text(_joined(entries), encoding="utf-8")
+        _write_user_path(keep)
+        log(f"  {before}자 → {after}자. 원래 값: {backup}")
+    if len(_joined(keep)) > PATH_LIMIT or _expanded_len(keep) > PATH_LIMIT:
+        log(f"  아직 깁니다({after}자). 안 쓰는 프로그램의 PATH 항목을 '환경 변수 편집'에서 지우거나 AI센터에 알려 주세요.")
+    return keep != entries
+
+
+def path_length_state():
+    """(상태, 사용자 PATH 글자 수): ok · long. Windows 가 아니면 ok."""
+    if not IS_WIN:
+        return "ok", 0
+    entries = user_path_entries()
+    n = len(_joined(entries))
+    return ("long" if n > PATH_LIMIT or _expanded_len(entries) > PATH_LIMIT else "ok"), n
 
 
 # --- PowerShell 7 창에서 부를 때(jaix-kit#205) ----------------------------------------------------------
