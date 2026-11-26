@@ -111,6 +111,8 @@ var
   LoginPage: TWizardPage;
   LoginButton: TNewButton;
   LoginResult: TNewStaticText;
+  SlackButton: TNewButton;      // 같은 화면에서 '봇이 내 DM·캔버스도 쓰게'(slack-access) — 명령창을 따로 열지 않게(11/26)
+  SlackResult: TNewStaticText;
   // 이미 로그인돼 있다고 한 번 알린 뒤([다시 로그인])에는 --force 로 묻지 않고 새로 로그인한다
   ForceLogin: Boolean;
   ProgressPage: TOutputProgressWizardPage;
@@ -283,6 +285,46 @@ begin
     LoginResult.Caption := '로그인이 끝나지 않았습니다(코드 ' + IntToStr(ResultCode) + '). 다시 누르거나, 나중에 ' + Again;
 end;
 
+// 슬랙 봇이 이번 설치로 연결됐는가(jaix 의 hermes.json — 연결 기록). 문자열만 본다
+function SlackConnected(): Boolean;
+var
+  Text: AnsiString;
+begin
+  Result := LoadStringFromFile(ExpandConstant('{localappdata}\jaix\hermes.json'), Text) and
+    (Pos('"connected"', String(Text)) > 0) and (Pos('"slack"', String(Text)) > 0);
+end;
+
+procedure SlackButtonClick(Sender: TObject);
+var
+  ResultCode: Integer;
+  WasBack: Boolean;
+begin
+  WasBack := WizardForm.BackButton.Enabled;
+  SlackButton.Enabled := False;
+  WizardForm.NextButton.Enabled := False;
+  WizardForm.BackButton.Enabled := False;
+  WizardForm.CancelButton.Enabled := False;
+  SlackResult.Caption := '브라우저의 Slack 화면에서 본인 계정인지 확인하고 [허용]을 누르세요(10분 안에)...';
+  try
+    if not Exec(ExpandConstant('{app}\jaix\jaix.exe'), 'hermes slack-access --no-wait',
+                ExpandConstant('{app}'), SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode) then
+      ResultCode := -1;
+  finally
+    SlackButton.Enabled := True;
+    WizardForm.NextButton.Enabled := True;
+    WizardForm.BackButton.Enabled := WasBack;
+    WizardForm.CancelButton.Enabled := True;
+  end;
+  Log('jaix hermes slack-access 종료 코드 ' + IntToStr(ResultCode));
+  if ResultCode = 0 then
+  begin
+    SlackButton.Caption := '다시 허용';
+    SlackResult.Caption := '허용했습니다. 이제 봇이 내 DM·캔버스를 씁니다(보내기는 매번 확인). [다음]을 누르세요.';
+  end
+  else
+    SlackResult.Caption := '허용이 끝나지 않았습니다(코드 ' + IntToStr(ResultCode) + '). 다시 누르거나, 나중에 시작 메뉴의 "JAIX 슬랙 권한 갱신"으로 하세요.';
+end;
+
 procedure InitializeWizard();
 begin
   ChannelPage := CreateInputOptionPage(
@@ -341,8 +383,8 @@ begin
 
   LoginPage := CreateCustomPage(
     GuidePage.ID,
-    'AI 구독 로그인',
-    'Hermes가 쓸 AI 구독에 처음 한 번 로그인합니다.');
+    'AI 구독 로그인 · 슬랙 권한',
+    'Hermes가 쓸 AI 구독에 처음 한 번 로그인하고, 봇이 내 슬랙 DM·캔버스를 쓰게 허용합니다.');
   with TNewStaticText.Create(LoginPage) do
   begin
     Parent := LoginPage.Surface;
@@ -375,12 +417,41 @@ begin
   LoginResult.WordWrap := True;
   LoginResult.Height := ScaleY(60);
   LoginResult.Caption := '';
+  // 화면 높이가 빠듯해(modern 마법사) 로그인 버튼 옆에 두고, 결과 줄을 위아래로 나눠 쓴다
+  LoginResult.Height := ScaleY(40);
+  SlackButton := TNewButton.Create(LoginPage);
+  SlackButton.Parent := LoginPage.Surface;
+  SlackButton.Left := ScaleX(176);
+  SlackButton.Top := ScaleY(108);
+  SlackButton.Width := ScaleX(200);
+  SlackButton.Height := ScaleY(26);
+  SlackButton.Caption := '슬랙 권한 허용(DM·캔버스)';
+  SlackButton.OnClick := @SlackButtonClick;
+  SlackResult := TNewStaticText.Create(LoginPage);
+  SlackResult.Parent := LoginPage.Surface;
+  SlackResult.Left := 0;
+  SlackResult.Top := ScaleY(192);
+  SlackResult.Width := LoginPage.SurfaceWidth;
+  SlackResult.AutoSize := False;
+  SlackResult.WordWrap := True;
+  SlackResult.Height := ScaleY(40);
+  SlackResult.Caption := '[슬랙 권한 허용]: 봇이 내 DM 보내기·캔버스까지 하게 브라우저에서 본인이 허용합니다(보내기는 매번 확인).';
 end;
 
 // {code:...} 로 부르는 형(시작 메뉴 바로가기 인자)
 function HermesModelArg(Param: string): string;
 begin
   Result := HermesModel();
+end;
+
+// 로그인 화면에 올 때마다: 이번 설치로 슬랙 봇이 연결됐을 때만 [슬랙 권한 허용]을 보인다
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = LoginPage.ID then
+  begin
+    SlackButton.Visible := SlackConnected();
+    SlackResult.Visible := SlackButton.Visible;
+  end;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;

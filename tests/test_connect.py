@@ -464,3 +464,35 @@ def test_connect_code_after_remove(monkeypatch):
     monkeypatch.setattr(hermesbot, "bot_room", lambda *a, **k: True)
     assert hermesbot.cmd_connect_code(print, ask=lambda q: "JX-" + "A" * 26) == 0
     assert hermesbot.recorded()["status"] == "connected"
+
+
+# --- 슬랙 내 권한(slack-access)을 따로 명령창에서 치지 않게(11/26 UX) ------------------------------------
+def test_connect_code_offers_slack_access_right_away(monkeypatch):
+    _hermes_pc(monkeypatch)
+    monkeypatch.setattr(hermesbot, "claim", lambda code: {"id": "demo", "user": "U0T", "bot_token": "b", "app_token": "a"})
+    monkeypatch.setattr(hermesbot, "connect_slack", lambda bundle, log: True)
+    monkeypatch.setattr(hermesbot, "bot_room", lambda *a, **k: True)
+    ran = []
+    monkeypatch.setattr(hermesbot, "cmd_slack_access", lambda args, log: ran.append(args) or 0)
+    answers = iter(["JX-" + "A" * 26, ""])  # 코드, 그다음 Enter(=예)
+    assert hermesbot.cmd_connect_code(print, ask=lambda q: next(answers)) == 0
+    assert len(ran) == 1
+    answers = iter(["JX-" + "A" * 26, "n"])
+    assert hermesbot.cmd_connect_code(print, ask=lambda q: next(answers)) == 0 and len(ran) == 1
+
+
+def test_status_slack_access(monkeypatch):
+    monkeypatch.setattr(hermesbot, "linked_id", lambda rec=None: None)
+    assert connect.status_slack_access(lambda: pytest.fail("연결 안 된 PC 는 묻지 않음")) is None
+    monkeypatch.setattr(hermesbot, "linked_id", lambda rec=None: "demo")
+    assert connect.status_slack_access(lambda: ("none", [])).state == "missing"
+    assert connect.status_slack_access(lambda: ("ok", [])).state == "ok"
+    assert connect.status_slack_access(lambda: ("ok", ["canvases:write"])).state == "missing"
+    assert connect.status_slack_access(lambda: ("invalid", [])).state == "missing"
+    assert connect.status_slack_access(lambda: ("unknown", [])).state == "unknown"
+    assert "slack-access" in connect.ITEMS and connect.result_line("slack-access", 0).startswith("[완료]")
+
+
+def test_slack_access_no_wait_flag_parses():
+    args = cli.build_parser().parse_args(["hermes", "slack-access", "--no-wait"])
+    assert args.no_wait and args.func is cli.cmd_slack_access

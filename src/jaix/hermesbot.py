@@ -1623,7 +1623,17 @@ def cmd_connect_code(log, ask=None):
         return 1
     bot_room(hermes, bundle["id"], log)
     _done({"status": "connected", "id": bundle["id"]}, False)
-    log(f"완료: 슬랙에서 Hermes-{bundle['id']} 에게 말을 걸어 보세요. DM·캔버스까지 쓰려면 이어서 `jaix hermes slack-access`.")
+    log(f"완료: 슬랙에서 Hermes-{bundle['id']} 에게 말을 걸어 보세요.")
+    # 명령창을 따로 열어 slack-access 를 치게 하지 않는다 — 이 자리에서 이어 간다(11/26 UX)
+    try:
+        answer = (ask or input)("봇이 내 DM·캔버스도 쓰게 지금 브라우저에서 허용할까요? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = "n"
+    if answer in ("", "y", "yes", "예", "ㅛ"):
+        import argparse
+        cmd_slack_access(argparse.Namespace(dry_run=False), log)
+    else:
+        log(f"건너뜀 — 나중에 {SCOPE_FIX}")
     return 0
 
 
