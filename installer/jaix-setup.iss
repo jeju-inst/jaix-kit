@@ -115,6 +115,9 @@ var
   SlackResult: TNewStaticText;
   // 이미 로그인돼 있다고 한 번 알린 뒤([다시 로그인])에는 --force 로 묻지 않고 새로 로그인한다
   ForceLogin: Boolean;
+  // [다음]에서 슬랙 권한 허용을 저절로 한 번 띄웠는가 — 화면 글을 안 읽고 지나쳐 허용을 놓치는 일이 실제로 있었다(11/27)
+  SlackAutoAsked: Boolean;
+  SlackAccessOk: Boolean;
   ProgressPage: TOutputProgressWizardPage;
   ProgressLog: TNewMemo;  // 리눅스 설치기처럼 지나가는 줄을 모두 보이는 창(맨 아래로 따라감)
   SetupLines: Integer;
@@ -294,6 +297,15 @@ begin
     (Pos('"connected"', String(Text)) > 0) and (Pos('"slack"', String(Text)) > 0);
 end;
 
+// 이 PC 의 봇이 이미 내 Slack 권한(사용자 토큰)을 받은 적이 있는가 — hermes.json 의 slack.user_token 기록
+function SlackAccessRecorded(): Boolean;
+var
+  Text: AnsiString;
+begin
+  Result := LoadStringFromFile(ExpandConstant('{localappdata}\jaix\hermes.json'), Text) and
+    (Pos('"user_token"', String(Text)) > 0);
+end;
+
 procedure SlackButtonClick(Sender: TObject);
 var
   ResultCode: Integer;
@@ -316,6 +328,7 @@ begin
     WizardForm.CancelButton.Enabled := True;
   end;
   Log('jaix hermes slack-access 종료 코드 ' + IntToStr(ResultCode));
+  SlackAccessOk := ResultCode = 0;
   if ResultCode = 0 then
   begin
     SlackButton.Caption := '다시 허용';
@@ -471,6 +484,20 @@ var
   Code: string;
 begin
   Result := True;
+  // 로그인 화면에서 [다음]: 슬랙 봇이 연결됐는데 아직 권한을 허용하지 않았으면 허용 창을 한 번 저절로 띄운다.
+  // 버튼만 두었더니 안내를 못 보고 지나쳐 봇이 DM·캔버스를 못 쓰는 PC 가 나왔다. 실패하면 이 화면에 남아 결과를 보이고,
+  // 한 번 더 [다음]을 누르면 그냥 넘어간다(나중에 시작 메뉴 'JAIX 슬랙 권한 갱신')
+  if (CurPageID = LoginPage.ID) and SlackButton.Visible and not SlackAutoAsked and
+     not SlackAccessOk and not SlackAccessRecorded() then
+  begin
+    SlackAutoAsked := True;
+    MsgBox('마지막 단계: 슬랙 권한 허용' + #13#10 + #13#10 +
+      '[확인]을 누르면 브라우저에 Slack 허용 화면이 열립니다. 본인 계정인지 확인하고 [허용]을 눌러 주세요.' + #13#10 +
+      '이걸 해야 봇이 내 DM을 보내고 캔버스를 만들 수 있습니다(보내기는 매번 확인).', mbInformation, MB_OK);
+    SlackButtonClick(SlackButton);
+    Result := SlackAccessOk;
+    exit;
+  end;
   // 모델 화면은 Hermes 를 체크했을 때만 나온다(ShouldSkipPage). 무인 설치는 /HERMESMODEL 또는 내부 기본값
   if (CurPageID = ModelPage.ID) and not WizardSilent() and not ModelPage.Values[0] and not ModelPage.Values[1] then
   begin
