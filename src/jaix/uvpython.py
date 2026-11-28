@@ -7,23 +7,16 @@ MCP는 화면에 오류 없이 안 뜬다. 앱 밖에서 `uv python install`을 
 """
 import json
 import os
-import re
 import subprocess
-import urllib.error
 from pathlib import Path, PureWindowsPath  # 명령 경로는 \\ · / 둘 다 올 수 있다
 
-from jaix import net, paths, runtimes
+from jaix import net, paths, pluginmcp, runtimes
 from jaix.paths import IS_WIN
 
 DEFAULT = "3.12"  # 고정 없는 uvx가 쓰게 미리 깔 버전(hwp-agent requires-python >=3.11)
 
 
-def _raw_url(plugin, name):
-    m = re.match(r"https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", plugin.url)
-    if not m:
-        return None
-    sub = f"{plugin.subdir.strip('/')}/" if plugin.subdir else ""
-    return f"https://raw.githubusercontent.com/{m.group(1)}/{plugin.sha}/{sub}{name}"
+_raw_url = pluginmcp.raw_url
 
 
 def pins(mcp_config):
@@ -46,13 +39,8 @@ def needed(lock, offline=False):
     versions = {DEFAULT}
     if not offline:
         for p in lock.plugins:
-            url = _raw_url(p, ".mcp.json")
-            if not url:
-                continue
-            try:
-                versions |= pins(net.get_json(url))
-            except (urllib.error.URLError, OSError, ValueError):
-                pass  # .mcp.json 없음(MCP 없는 플러그인)·오프라인
+            cfg, _ = pluginmcp.remote(p, net.get_json)  # 못 받는 파일(MCP 없는 플러그인·오프라인)은 건너뛴다
+            versions |= pins(cfg)
     return sorted(versions)
 
 

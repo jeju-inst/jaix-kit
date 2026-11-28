@@ -107,6 +107,51 @@ def on_path():
     return bool(found and mine and Path(found).resolve() == Path(mine).resolve())
 
 
+def _vtuple(v):
+    try:
+        return tuple(int(x) for x in str(v).strip().lstrip("v").split("-")[0].split("."))
+    except ValueError:
+        return None
+
+
+def existing(want_version):
+    """jaix 가 깐 것 말고 PATH 에 이미 있는 nworks(사용자가 따로 깐 것). 같은 주 버전이고 잠금 버전 이상이면
+    (경로, 버전), 아니면 None. 이미 깐 PC 에 npm 으로 한 벌 더 깔지 않게 한다(사용자 요구 11/9)."""
+    found = shutil.which(PACKAGE)
+    mine = exe()
+    if not found or (mine and Path(found).resolve() == Path(mine).resolve()):
+        return None
+    try:
+        code, out = proc.run(found, ["--version"], timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = out.strip().splitlines()
+    have, want = (_vtuple(lines[-1]) if code == 0 and lines else None), _vtuple(want_version)
+    if not have or not want or have[0] != want[0] or have < want:
+        return None
+    return found, lines[-1].strip()
+
+
+def _saved_want():
+    """setup 이 쓴 runtime.json 사본의 nworks(버전·무결성). 없으면 기본값."""
+    try:
+        nw = json.loads(saved_spec_file().read_text(encoding="utf-8"))["nworks"]
+        return {"version": nw["version"], "integrity": nw["integrity"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return dict(FALLBACK["nworks"])
+
+
+def cli():
+    """로그인·connect 가 부를 nworks. setup 의 판단과 같게: jaix 사본이 잠금과 맞으면 그것, 아니면 받아들인 기존 nworks,
+    둘 다 없을 때만 (낡았더라도) jaix 사본."""
+    want = _saved_want()
+    mine = exe()
+    if mine and installed() == (want["version"], want["integrity"]):
+        return mine
+    got = existing(want["version"])
+    return got[0] if got else mine
+
+
 def client_file():
     return home() / "client.json"
 
@@ -148,11 +193,16 @@ def _npm_install(version):
     if not npm:
         return False, "npm 을 찾지 못함"
     try:
+        # cwd 도 home() 으로 — Windows npm 은 --prefix 를 줘도 현재 폴더의 package.json 을 읽어 ENOENT 로 실패했다
+        # (CI 11/9: 'Could not read package.json ... D:\\a\\jaix-kit\\jaix-kit\\package.json'). 설치기는 {app} 에서 돈다
         code, out = proc.run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", "--prefix", str(home())],
-                             timeout=900)
+                             timeout=900, cwd=str(home()))
     except (OSError, subprocess.TimeoutExpired) as e:  # update 가 다른 단계까지 멈추지 않게 실패로 돌려준다
         return False, f"npm 실행 실패: {e}"
-    return code == 0, (out.strip().splitlines() or [""])[-1][:200]
+    lines = [ln.strip() for ln in out.strip().splitlines()]
+    # 마지막 줄은 늘 "A complete log ..." 라 원인이 안 보였다(CI 11/9) — npm error 줄을 모아 보여 준다
+    errs = [ln for ln in lines if ln.lower().startswith("npm err") and "complete log" not in ln.lower()]
+    return code == 0, (" / ".join(errs[:8]) or (lines or [""])[-1])[:600]
 
 
 # --- 기관 앱 정보 -----------------------------------------------------------------------------------
@@ -200,7 +250,11 @@ def ensure(lock, log, dry_run=False, offline=False):
         return {"status": "failed"}
     have, integrity = installed()
     status = "current"
-    if have != want["version"] or integrity != want["integrity"]:
+    other = None if (have == want["version"] and integrity == want["integrity"]) else existing(want["version"])
+    if other:
+        status = "existing"
+        log(f"  웍스: 이미 설치된 nworks {other[1]} 를 씀 ({other[0]}) — jaix 는 따로 깔지 않음")
+    elif have != want["version"] or integrity != want["integrity"]:
         ok, tail = _npm_install(want["version"])
         have, integrity = installed()
         if not ok or have != want["version"] or integrity != want["integrity"]:
@@ -210,8 +264,9 @@ def ensure(lock, log, dry_run=False, offline=False):
             return {"status": "failed"}
         status = "installed"
     _write_private(saved_spec_file(), json.dumps(sp, ensure_ascii=False, indent=2))
-    expose(log)
-    log(f"  웍스: nworks {have} ({'설치함' if status == 'installed' else '최신'})")
+    if status != "existing":
+        expose(log)
+        log(f"  웍스: nworks {have} ({'설치함' if status == 'installed' else '최신'})")
     client = fetch_client(sp["client_source"])
     if client:
         _write_private(client_file(), json.dumps(client))
@@ -230,8 +285,8 @@ def login_command(scope):
 
 def login(log):
     """브라우저 로그인. 비밀은 환경변수로만 넘긴다. 종료 코드를 돌려준다."""
-    cli = exe()
-    if not cli:
+    nw = cli()
+    if not nw:
         log("웍스 도구(nworks)가 설치돼 있지 않습니다 → `jaix setup` 을 다시 실행하세요.")
         return 1
     client = saved_client()
@@ -245,7 +300,7 @@ def login(log):
     env = {**os.environ, "NWORKS_CLIENT_ID": client["client_id"], "NWORKS_CLIENT_SECRET": client["client_secret"]}
     log("브라우저에 웍스 로그인 화면이 열립니다. 로그인한 뒤 '허용'을 누르세요.")
     try:
-        r = subprocess.run(proc.command(cli, login_command(scope)), env=env, timeout=600)
+        r = subprocess.run(proc.command(nw, login_command(scope)), env=env, timeout=600)
     except subprocess.TimeoutExpired:
         log("10분 안에 로그인이 끝나지 않았습니다. `jaix works login` 을 다시 실행하세요.")
         return 1
