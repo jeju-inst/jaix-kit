@@ -147,7 +147,10 @@ def lint_plugin(plugin_entry, files, read_func):
 
     # ② 저장소 루트에 .github/workflows/calver.yml 존재하고 jeju-inst/jaix-kit 의 calver-tag.yml 을 40자 SHA 로 호출
     calver_path = ".github/workflows/calver.yml"
-    if calver_path not in files:
+    # jaix-kit 안에 둔 플러그인(plugins/jaix-help)은 jaix-kit 이 bundle-tag.yml 로 자기 calver-tag.yml 을 불러 태그한다
+    if (src.get("url") or "").lower().removesuffix(".git") == "https://github.com/jeju-inst/jaix-kit":
+        pass
+    elif calver_path not in files:
         issues.append(f"TS-VER-2: {calver_path} 없음")
     else:
         try:

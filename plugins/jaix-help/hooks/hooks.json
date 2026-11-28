@@ -1,0 +1,17 @@
+{
+  "description": "JAIX 새 판이 있으면 세션 시작 때 한 줄 알림(설치는 하지 않음). jaix 가 없는 PC 에서는 아무 일 없음.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jaix notice --for claude 2>/dev/null || true",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

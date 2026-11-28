@@ -25,6 +25,7 @@ from pathlib import Path
 MARKET = Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CALVER_RE = re.compile(r"^v(\d{4})\.(\d{2})\.(\d{2})\.(\d+)$")
+SELF_URL = "https://github.com/jeju-inst/jaix-kit.git"
 
 
 # 한국어 Windows 콘솔(cp949)·CI(cp1252)에서도 한글·기호가 죽지 않게
@@ -85,6 +86,23 @@ def has_plugin(url, sha, path):
                        capture_output=True, check=True)
         out = subprocess.run([*git, "ls-tree", "FETCH_HEAD", "--", path], capture_output=True, text=True, check=True)
         return bool(out.stdout.strip())
+
+
+def subtree(url, sha, path):
+    """그 커밋의 path 트리 해시(내용이 같으면 같다). blob 없이 얕게 받는다."""
+    with tempfile.TemporaryDirectory() as d:
+        git = ["git", "-C", d]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "fetch", "-q", "--depth", "1", "--filter=blob:none", url, sha],
+                       capture_output=True, check=True)
+        out = subprocess.run([*git, "rev-parse", f"FETCH_HEAD:{path}"], capture_output=True, text=True)
+        return out.stdout.strip() if out.returncode == 0 else None
+
+
+def is_self(src):
+    """jaix-kit 안에 둔 플러그인(plugins/jaix-help). jaix-kit 은 잠금이 바뀔 때마다 태그가 붙으므로, 플러그인 폴더가
+    그대로인데 새 태그로 옮기면 '잠금 갱신 → 머지 → 새 태그 → 잠금 갱신' 이 매일 되풀이된다."""
+    return git_url(src).rstrip("/").removesuffix(".git").lower() == SELF_URL.removesuffix(".git").lower()
 
 
 def set_pin(entry, ref, sha, kind):
@@ -189,6 +207,9 @@ def update():
                 break  # 지금 것보다 새 유효 태그가 없음 → 그대로 둔다
             tag_sha, _ = resolve(url, tag, "tag")
             if has_plugin(url, tag_sha, plugin_manifest(src)):
+                if (is_self(src) and ref_kind(p) == "tag" and src.get("path")
+                        and subtree(url, tag_sha, src["path"]) == subtree(url, src.get("sha", ""), src["path"])):
+                    break  # 플러그인 폴더가 그대로면 옮기지 않는다(is_self 참고)
                 new_ref, sha, new_kind = tag, tag_sha, "tag"
                 break
             # stdout 은 PR 본문·커밋 메시지(changes.txt)라 로그로만 남긴다
