@@ -35,8 +35,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/z0nam/hwp-agent.git",
-        "ref": "v2026.11.25.3",
-        "sha": "73752b11c0c4c3e99726ea14486c287b9d17afe7"
+        "ref": "v2026.11.27.1",
+        "sha": "5669074dfc08c2a4ccf8a52fc50d6238c4b52c93"
       },
       "homepage": "https://github.com/z0nam/hwp-agent",
       "metadata": {
@@ -44,7 +44,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.25.3"
+      "version": "2026.11.27.1"
     },
     {
       "name": "ji-report-writing",
@@ -111,8 +111,8 @@
       "source": {
         "source": "url",
         "url": "https://github.com/jeju-inst/jaix-gw.git",
-        "ref": "v2026.11.06.1",
-        "sha": "48467c135da8a3216608fe3a088125799189cff5"
+        "ref": "v2026.11.27.7",
+        "sha": "a80618b0e437c9d6e8ec840c4aa66b3dcbcf617a"
       },
       "homepage": "https://github.com/jeju-inst/jaix-gw",
       "metadata": {
@@ -120,7 +120,7 @@
           "refKind": "tag"
         }
       },
-      "version": "2026.11.06.1"
+      "version": "2026.11.27.7"
     },
     {
       "name": "mail-skill",
